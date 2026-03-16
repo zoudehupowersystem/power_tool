@@ -86,33 +86,33 @@ PY
 
 a) 稳态频差：
 
-\[
+$$
 \Delta f_{ss}=-\frac{\Delta P_{OL0}}{k_D+k_G}
-\]
+$$
 
 代入：
 
-\[
+$$
 \Delta f_{ss}=-\frac{0.08}{1.2+4.0}=-0.01538\,pu
-\]
+$$
 
 换算 Hz：
 
-\[
+$$
 \Delta f_{ss,Hz}=\Delta f_{ss}\cdot f_0=-0.01538\times 50=-0.769\,Hz
-\]
+$$
 
 b) 初始 RoCoF（频率变化率）：
 
-\[
+$$
 \dot{\Delta f}(0)=-\frac{\Delta P_{OL0}}{T_s}=-\frac{0.08}{8}=-0.01\,pu/s
-\]
+$$
 
 换算 Hz/s：
 
-\[
+$$
 -0.01\times 50=-0.5\,Hz/s
-\]
+$$
 
 c) 阻尼判别：代码内判别式给出欠阻尼（会出现频率谷值）。
 
@@ -141,35 +141,35 @@ d) 默认算例结果（程序输出）：
 
 1) 先求初始功角：
 
-\[
+$$
 \delta_0=\arcsin\left(\frac{P_0X_\Sigma}{E'_qU}\right)
 =\arcsin\left(\frac{0.8\times0.55}{1.12\times1.0}\right)
 =\arcsin(0.392857)=23.13^\circ
-\]
+$$
 
 2) 同步转矩系数：
 
-\[
+$$
 K_s=\frac{E'_qU}{X_\Sigma}\cos\delta_0
 =\frac{1.12}{0.55}\cos(23.13^\circ)
 \approx1.873
-\]
+$$
 
 3) 小扰动固有角频率：
 
-\[
+$$
 \omega_n=\sqrt{\frac{\omega_0K_s}{T_j}},\quad \omega_0=2\pi f_0=314.159
-\]
+$$
 
-\[
+$$
 \omega_n\approx\sqrt{\frac{314.159\times1.873}{9}}=8.085\,rad/s
-\]
+$$
 
 4) 频率：
 
-\[
+$$
 f_n=\frac{\omega_n}{2\pi}=1.287\,Hz
-\]
+$$
 
 ---
 
@@ -184,34 +184,34 @@ f_n=\frac{\omega_n}{2\pi}=1.287\,Hz
 
 **推导步骤**
 
-1) 先求 \(\sin\varphi\)：
+1) 先求 $\sin\varphi$：
 
-\[
+$$
 \sin\varphi=\sqrt{1-\cos^2\varphi}=\sqrt{1-0.95^2}=0.31225
-\]
+$$
 
 2) 极限有功（代码公式）：
 
-\[
+$$
 P_{max}=\frac{U_g^2}{2X_\Sigma}\cdot\frac{\cos\varphi}{1+\sin\varphi}
-\]
+$$
 
-\[
+$$
 P_{max}=\frac{1}{0.64}\cdot\frac{0.95}{1.31225}=1.13117\,pu
-\]
+$$
 
 3) 换算 MW：
 
-\[
+$$
 P_{max,MW}=1.13117\times100=113.12\,MW
-\]
+$$
 
 4) 临界受端电压（与送端同基准）：
 
-\[
+$$
 V_{min}=\frac{U_g}{\sqrt{2+2\sin\varphi}}=
 \frac{1.0}{\sqrt{2+2\times0.31225}}=0.61727\,pu
-\]
+$$
 
 ---
 
@@ -229,20 +229,20 @@ V_{min}=\frac{U_g}{\sqrt{2+2\sin\varphi}}=
 
 1) 自然功率：
 
-\[
+$$
 P_n=\frac{U^2}{Z_c}=\frac{500^2}{250}=1000\,MW
-\]
+$$
 
 2) 无功差额：
 
-\[
+$$
 \Delta Q=\left[\left(\frac{P}{P_n}\right)^2-1\right]Q_Nl
-\]
+$$
 
-\[
+$$
 \Delta Q=\left[(0.7)^2-1\right]\times1.2\times200
 =(-0.51)\times240=-122.4\,Mvar
-\]
+$$
 
 3) 解释：`ΔQ<0`，线路总体发无功（净容性）。
 
@@ -266,23 +266,23 @@ P_n=\frac{U^2}{Z_c}=\frac{500^2}{250}=1000\,MW
 
 1) 速度冲量折算：
 
-\[
+$$
 \Delta p=\Delta P_a\Delta t\cdot2\pi f_d
 =0.9\times0.12\times2\pi\times1.106
 =0.75051\,pu
-\]
+$$
 
 2) 暂稳传输能力估计：
 
-\[
+$$
 P_{st}=P_{max,post}-\Delta p=1.65-0.75051=0.89949\,pu
-\]
+$$
 
 3) 与当前功率比较：
 
-\[
+$$
 margin=P_{st}-P_m=0.89949-0.9=-0.00051\,pu
-\]
+$$
 
 结论：裕度略小于 0，显示“第一摆稳定裕度不足”。
 
@@ -302,15 +302,15 @@ margin=P_{st}-P_m=0.89949-0.9=-0.00051\,pu
 
 1) 先求初始平衡角：
 
-\[
+$$
 \delta_0=\arcsin(P_m/P_{max,pre})=\arcsin(0.9/1.65)=33.06^\circ
-\]
+$$
 
 2) 用 RK4 解故障期摆动方程，得到切除角：
 
-\[
+$$
 \delta_c\approx46.02^\circ
-\]
+$$
 
 3) 面积比较（程序数值积分）：
 
@@ -352,39 +352,39 @@ margin=P_{st}-P_m=0.89949-0.9=-0.00051\,pu
 
 1) 总串联参数：
 
-\[
+$$
 R=R_1l=0.028\times200=5.6\,\Omega
-\]
-\[
+$$
+$$
 X=X_1l=0.299\times200=59.8\,\Omega
-\]
+$$
 
 2) 对地半电纳（50 Hz）：
 
-\[
+$$
 B/2=\omega C_1l/2
-\]
+$$
 
-其中 \(\omega=2\pi\times50\)，\(C_1=0.013\times10^{-6}F/km\)，代入得
+其中 $\omega=2\pi\times50$，$C_1=0.013\times10^{-6}F/km$，代入得
 
-\[
+$$
 B/2\approx4.084\times10^{-4}\,S
-\]
+$$
 
 3) 基准阻抗：
 
-\[
+$$
 Z_{base}=\frac{U_{base}^2}{S_{base}}=\frac{500^2}{100}=2500\,\Omega
-\]
+$$
 
 4) 标幺：
 
-\[
+$$
 R_{pu}=5.6/2500=0.00224
-\]
-\[
+$$
+$$
 X_{pu}=59.8/2500=0.02392
-\]
+$$
 
 程序默认算例无告警。
 
@@ -407,28 +407,28 @@ X_{pu}=59.8/2500=0.02392
 
 1) 短路电阻：
 
-\[
+$$
 R_k=\frac{P_kU_N^2}{S_N^2\cdot1000}
 =\frac{290\times35^2}{20^2\times1000}=0.8881\,\Omega
-\]
+$$
 
 2) 短路阻抗：
 
-\[
+$$
 Z_k=\frac{U_k\%}{100}\frac{U_N^2}{S_N}=7.1843\,\Omega
-\]
+$$
 
 3) 短路电抗：
 
-\[
+$$
 X_k=\sqrt{Z_k^2-R_k^2}=7.1295\,\Omega
-\]
+$$
 
 4) 换算到标幺（`Zbase=12.25Ω`）：
 
-\[
+$$
 R_{k,pu}=0.0725,\quad X_{k,pu}=0.5820
-\]
+$$
 
 5) 默认算例 `Uk%` 交叉校核一致（约 11.73%），无告警。
 
