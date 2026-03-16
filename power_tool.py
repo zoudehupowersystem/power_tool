@@ -203,23 +203,20 @@ _TX3_RANGES = {
 
 @dataclass
 class ShortCircuitSummary:
-    Ssc_MVA: float
+    fault_type: str
     U_kV: float
-    Isc_kA: float
-    Zth_ohm: float
+    Rf_ohm: float
+    Z1_ohm: complex
+    Z2_ohm: complex
+    Z0_ohm: complex
+    I0_A: complex
+    I1_A: complex
+    I2_A: complex
+    Ia_A: complex
+    Ib_A: complex
+    Ic_A: complex
+    I_break_kA: float
     breaker_ok: Optional[bool]
-    notes: str
-
-
-@dataclass
-class PFCorrectionSummary:
-    P_kW: float
-    cos_phi1: float
-    cos_phi2: float
-    Qc_kvar: float
-    I1_A: Optional[float]
-    I2_A: Optional[float]
-    C_phase_uF_star_50Hz: Optional[float]
     notes: str
 
 @dataclass
@@ -862,80 +859,94 @@ def natural_power_and_reactive(U_kV_ll: float,
 
 
 
-def short_circuit_capacity(U_kV_ll: float,
-                           Ssc_MVA: float,
-                           breaker_IkA: Optional[float]) -> ShortCircuitSummary:
-    """三相短路容量与短路电流快算。"""
-    _validate_positive("U", U_kV_ll)
-    _validate_positive("S_sc", Ssc_MVA)
+def _phase_currents_from_sequence(I0: complex, I1: complex, I2: complex) -> tuple[complex, complex, complex]:
+    a = complex(-0.5, math.sqrt(3.0) / 2.0)
+    a2 = complex(-0.5, -math.sqrt(3.0) / 2.0)
+    Ia = I0 + I1 + I2
+    Ib = I0 + a2 * I1 + a * I2
+    Ic = I0 + a * I1 + a2 * I2
+    return Ia, Ib, Ic
 
-    i_sc_kA = Ssc_MVA / (math.sqrt(3.0) * U_kV_ll)
-    z_th_ohm = U_kV_ll * U_kV_ll / Ssc_MVA
+
+def short_circuit_capacity(U_kV_ll: float,
+                           fault_type: str,
+                           R1_ohm: float,
+                           X1_ohm: float,
+                           R2_ohm: float,
+                           X2_ohm: float,
+                           R0_ohm: float,
+                           X0_ohm: float,
+                           Rf_ohm: float,
+                           breaker_IkA: Optional[float]) -> ShortCircuitSummary:
+    """复合序网短路电流计算（3φ/1φ接地/两相/两相接地）。"""
+    _validate_positive("U", U_kV_ll)
+    _validate_nonnegative("过渡电阻 Rf", Rf_ohm)
+
+    Z1 = complex(R1_ohm, X1_ohm)
+    Z2 = complex(R2_ohm, X2_ohm)
+    Z0 = complex(R0_ohm, X0_ohm)
+    Zf = complex(Rf_ohm, 0.0)
+
+    # 相电压（RMS）作为正序等值电源
+    E = U_kV_ll * 1e3 / math.sqrt(3.0)
+
+    fault_key = fault_type.strip().lower()
+    if fault_key in {"3ph", "3p", "三相", "三相短路"}:
+        I1 = E / (Z1 + Zf)
+        I2 = 0j
+        I0 = 0j
+        fault_name = "三相短路"
+    elif fault_key in {"slg", "lg", "1ph-g", "单相接地", "a-g"}:
+        denom = Z1 + Z2 + Z0 + 3.0 * Zf
+        I1 = E / denom
+        I2 = I1
+        I0 = I1
+        fault_name = "单相接地短路"
+    elif fault_key in {"ll", "2ph", "两相", "b-c"}:
+        denom = Z1 + Z2 + Zf
+        I1 = E / denom
+        I2 = -I1
+        I0 = 0j
+        fault_name = "两相短路"
+    elif fault_key in {"llg", "2ph-g", "两相接地", "b-c-g"}:
+        # 复合序网：Z1 串联 [ Z2 || (Z0 + 3Zf) ]
+        Zpar = (Z2 * (Z0 + 3.0 * Zf)) / (Z2 + Z0 + 3.0 * Zf)
+        I1 = E / (Z1 + Zpar)
+        Vx = E - I1 * Z1
+        I2 = -Vx / Z2
+        I0 = -Vx / (Z0 + 3.0 * Zf)
+        fault_name = "两相接地短路"
+    else:
+        raise InputError("故障类型不支持。可选：3ph / slg / ll / llg。")
+
+    Ia, Ib, Ic = _phase_currents_from_sequence(I0, I1, I2)
+    i_break_kA = max(abs(Ia), abs(Ib), abs(Ic)) / 1e3
 
     ok = None
     if breaker_IkA is not None:
         _validate_positive("断路器额定开断电流", breaker_IkA)
-        ok = breaker_IkA >= i_sc_kA
+        ok = breaker_IkA >= i_break_kA
 
     notes = (
-        "该结果基于三相对称短路的稳态近似：S_sc=√3·U·I。"
-        " 实际校核还需考虑直流分量、开断瞬态、X/R 比、温度与设备标准。"
+        "采用对称分量法构建复合序网，给出故障点稳态对称分量与相电流。"
+        " 波形默认仅含工频交流分量；未叠加直流偏置与高频暂态分量。"
     )
 
     return ShortCircuitSummary(
-        Ssc_MVA=Ssc_MVA,
+        fault_type=fault_name,
         U_kV=U_kV_ll,
-        Isc_kA=i_sc_kA,
-        Zth_ohm=z_th_ohm,
+        Rf_ohm=Rf_ohm,
+        Z1_ohm=Z1,
+        Z2_ohm=Z2,
+        Z0_ohm=Z0,
+        I0_A=I0,
+        I1_A=I1,
+        I2_A=I2,
+        Ia_A=Ia,
+        Ib_A=Ib,
+        Ic_A=Ic,
+        I_break_kA=i_break_kA,
         breaker_ok=ok,
-        notes=notes,
-    )
-
-
-def power_factor_correction(P_kW: float,
-                            cos_phi1: float,
-                            cos_phi2: float,
-                            U_kV_ll: Optional[float]) -> PFCorrectionSummary:
-    """无功补偿容量快算（把功率因数从 cosφ1 提高到 cosφ2）。"""
-    _validate_positive("有功功率 P", P_kW)
-    if not (0.0 < cos_phi1 <= 1.0):
-        raise InputError("初始功率因数 cosφ1 必须在 (0, 1]。")
-    if not (0.0 < cos_phi2 <= 1.0):
-        raise InputError("目标功率因数 cosφ2 必须在 (0, 1]。")
-    if cos_phi2 < cos_phi1 - 1e-12:
-        raise InputError("目标功率因数 cosφ2 不应低于初始 cosφ1。")
-
-    phi1 = math.acos(cos_phi1)
-    phi2 = math.acos(cos_phi2)
-    qc_kvar = P_kW * (math.tan(phi1) - math.tan(phi2))
-    if qc_kvar < 0:
-        qc_kvar = 0.0
-
-    i1 = i2 = c_uF = None
-    if U_kV_ll is not None and U_kV_ll > 0:
-        U_V = U_kV_ll * 1e3
-        i1 = P_kW * 1e3 / (math.sqrt(3.0) * U_V * cos_phi1)
-        i2 = P_kW * 1e3 / (math.sqrt(3.0) * U_V * cos_phi2)
-
-        # 星形等效每相电容（50Hz）: Q = 3*ω*C*V_phase^2
-        omega = 2.0 * math.pi * 50.0
-        v_phase = U_V / math.sqrt(3.0)
-        c_F = (qc_kvar * 1e3) / (3.0 * omega * v_phase * v_phase)
-        c_uF = c_F * 1e6
-
-    notes = (
-        "该计算用于工频稳态无功补偿的一次估算。"
-        " 实施时需校核谐波、投切涌流、过补偿风险以及分组投切策略。"
-    )
-
-    return PFCorrectionSummary(
-        P_kW=P_kW,
-        cos_phi1=cos_phi1,
-        cos_phi2=cos_phi2,
-        Qc_kvar=qc_kvar,
-        I1_A=i1,
-        I2_A=i2,
-        C_phase_uF_star_50Hz=c_uF,
         notes=notes,
     )
 
@@ -1245,7 +1256,6 @@ class ApproximationToolGUI(tk.Tk):
         self.impact_tab = ttk.Frame(notebook)
         self.param_tab = ttk.Frame(notebook)
         self.sc_tab = ttk.Frame(notebook)
-        self.pf_tab = ttk.Frame(notebook)
 
         notebook.add(self.freq_tab, text="频率动态")
         notebook.add(self.osc_tab, text="机电振荡")
@@ -1253,8 +1263,7 @@ class ApproximationToolGUI(tk.Tk):
         notebook.add(self.line_tab, text="线路自然功率与无功")
         notebook.add(self.impact_tab, text="暂稳评估")
         notebook.add(self.param_tab, text="参数校核与标幺值")
-        notebook.add(self.sc_tab, text="短路容量")
-        notebook.add(self.pf_tab, text="功率因数补偿")
+        notebook.add(self.sc_tab, text="短路电流（复合序网）")
 
         self._build_frequency_tab()
         self._build_oscillation_tab()
@@ -1263,7 +1272,6 @@ class ApproximationToolGUI(tk.Tk):
         self._build_impact_tab()
         self._build_param_tab()
         self._build_short_circuit_tab()
-        self._build_pf_correction_tab()
 
     @staticmethod
     def _add_entry(parent: ttk.Frame,
@@ -1840,105 +1848,144 @@ class ApproximationToolGUI(tk.Tk):
 
 
     def _build_short_circuit_tab(self) -> None:
-        frame = ttk.Frame(self.sc_tab, padding=12)
-        frame.pack(fill="both", expand=True)
-        frame.columnconfigure(0, weight=0)
-        frame.columnconfigure(1, weight=1)
+        self.sc_tab.columnconfigure(1, weight=1)
+        self.sc_tab.rowconfigure(0, weight=1)
 
-        ttk.Label(frame, text="三相短路容量与短路电流快算", font=("TkDefaultFont", 11, "bold")).grid(
+        left = ttk.Frame(self.sc_tab, padding=10)
+        right = ttk.Frame(self.sc_tab, padding=10)
+        left.grid(row=0, column=0, sticky="nsw")
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(1, weight=1)
+
+        ttk.Label(left, text="短路电流计算（复合序网）", font=("TkDefaultFont", 11, "bold")).grid(
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
 
-        self.sc_u = self._add_entry(frame, 1, "系统电压 U / kV（线电压）", "110")
-        self.sc_ssc = self._add_entry(frame, 2, "短路容量 S_sc / MVA", "2000")
-        self.sc_brk = self._add_entry(frame, 3, "断路器额定开断电流 Ik / kA（可留空）", "31.5")
+        self.sc_fault_type = ttk.Combobox(left, state="readonly", width=18,
+                                          values=["3ph", "slg", "ll", "llg"])
+        ttk.Label(left, text="故障类型（3ph/slg/ll/llg）").grid(row=1, column=0, sticky="w", padx=4, pady=4)
+        self.sc_fault_type.grid(row=1, column=1, sticky="ew", padx=4, pady=4)
+        self.sc_fault_type.set("slg")
 
-        ttk.Button(frame, text="计算", command=self.calculate_short_circuit).grid(
-            row=4, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
+        self.sc_u = self._add_entry(left, 2, "系统电压 U / kV（线电压）", "110")
+        self.sc_r1 = self._add_entry(left, 3, "正序电阻 R1 / Ω", "0.4")
+        self.sc_x1 = self._add_entry(left, 4, "正序电抗 X1 / Ω", "5.0")
+        self.sc_r2 = self._add_entry(left, 5, "负序电阻 R2 / Ω", "0.4")
+        self.sc_x2 = self._add_entry(left, 6, "负序电抗 X2 / Ω", "5.0")
+        self.sc_r0 = self._add_entry(left, 7, "零序电阻 R0 / Ω", "1.2")
+        self.sc_x0 = self._add_entry(left, 8, "零序电抗 X0 / Ω", "12.0")
+        self.sc_rf = self._add_entry(left, 9, "过渡电阻 Rf / Ω", "0.0")
+        self.sc_brk = self._add_entry(left, 10, "断路器额定开断电流 Ik / kA（可留空）", "31.5")
+        self.sc_cycles = self._add_entry(left, 11, "仿真周波数（波形）", "3")
+
+        ttk.Button(left, text="计算并绘图", command=self.calculate_short_circuit).grid(
+            row=12, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
         )
 
-        self.sc_result = ScrolledText(frame, width=85, height=24, wrap=tk.WORD)
-        self.sc_result.grid(row=5, column=0, columnspan=2, sticky="nsew", padx=4, pady=8)
+        self.sc_result = ScrolledText(left, width=56, height=22, wrap=tk.WORD)
+        self.sc_result.grid(row=13, column=0, columnspan=2, sticky="nsew", padx=4, pady=4)
         self.sc_result.configure(state="disabled")
+
+        ttk.Label(right, text="短路点电流波形", font=("TkDefaultFont", 11, "bold")).grid(
+            row=0, column=0, sticky="w", pady=(0, 8)
+        )
+
+        self.sc_fig = Figure(figsize=(8.4, 5.4), dpi=100)
+        self.sc_ax_phase = self.sc_fig.add_subplot(211)
+        self.sc_ax_seq = self.sc_fig.add_subplot(212)
+        self.sc_ax_phase.set_ylabel("i_abc / A")
+        self.sc_ax_seq.set_ylabel("i_012 / A")
+        self.sc_ax_seq.set_xlabel("t / s")
+        self.sc_ax_phase.grid(True, alpha=0.4)
+        self.sc_ax_seq.grid(True, alpha=0.4)
+
+        self.sc_canvas = FigureCanvasTkAgg(self.sc_fig, master=right)
+        self.sc_canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
+        self.sc_toolbar = NavigationToolbar2Tk(self.sc_canvas, right, pack_toolbar=False)
+        self.sc_toolbar.update()
+        self.sc_toolbar.grid(row=2, column=0, sticky="ew")
 
         self.calculate_short_circuit()
 
-    def _build_pf_correction_tab(self) -> None:
-        frame = ttk.Frame(self.pf_tab, padding=12)
-        frame.pack(fill="both", expand=True)
-        frame.columnconfigure(0, weight=0)
-        frame.columnconfigure(1, weight=1)
-
-        ttk.Label(frame, text="功率因数校正与电容补偿快算", font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
-        )
-
-        self.pf_p = self._add_entry(frame, 1, "有功功率 P / kW", "10000")
-        self.pf_cos1 = self._add_entry(frame, 2, "初始功率因数 cosφ1", "0.85")
-        self.pf_cos2 = self._add_entry(frame, 3, "目标功率因数 cosφ2", "0.95")
-        self.pf_u = self._add_entry(frame, 4, "系统电压 U / kV（线电压，可留空）", "10")
-
-        ttk.Button(frame, text="计算", command=self.calculate_pf_correction).grid(
-            row=5, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
-        )
-
-        self.pf_result = ScrolledText(frame, width=85, height=24, wrap=tk.WORD)
-        self.pf_result.grid(row=6, column=0, columnspan=2, sticky="nsew", padx=4, pady=8)
-        self.pf_result.configure(state="disabled")
-
-        self.calculate_pf_correction()
-
     def calculate_short_circuit(self) -> None:
         try:
+            fault_type = self.sc_fault_type.get().strip()
             U = _safe_float(self.sc_u.get(), "U")
-            Ssc = _safe_float(self.sc_ssc.get(), "S_sc")
+            R1 = _safe_float(self.sc_r1.get(), "R1")
+            X1 = _safe_float(self.sc_x1.get(), "X1")
+            R2 = _safe_float(self.sc_r2.get(), "R2")
+            X2 = _safe_float(self.sc_x2.get(), "X2")
+            R0 = _safe_float(self.sc_r0.get(), "R0")
+            X0 = _safe_float(self.sc_x0.get(), "X0")
+            Rf = _safe_float(self.sc_rf.get(), "Rf")
+            cycles = max(1.0, _safe_float(self.sc_cycles.get(), "仿真周波数"))
             brk_txt = self.sc_brk.get().strip()
             brk = _safe_float(brk_txt, "Ik") if brk_txt else None
 
-            r = short_circuit_capacity(U, Ssc, brk)
+            r = short_circuit_capacity(U, fault_type, R1, X1, R2, X2, R0, X0, Rf, brk)
+
+            def _pa(z: complex) -> str:
+                return f"{abs(z):.2f}∠{math.degrees(math.atan2(z.imag, z.real)):.1f}°"
+
             if r.breaker_ok is None:
                 check = "未输入断路器开断电流，未做匹配判断。"
             else:
-                check = "匹配：额定开断电流 ≥ 计算短路电流。" if r.breaker_ok else "不匹配：额定开断电流 < 计算短路电流。"
+                check = "匹配：额定开断电流 ≥ 计算开断电流。" if r.breaker_ok else "不匹配：额定开断电流 < 计算开断电流。"
 
             text = (
-                f"══ 短路容量与电流 ═══════════════════════════════\n"
-                f"  U = {r.U_kV:.4g} kV\n"
-                f"  S_sc = {r.Ssc_MVA:.4g} MVA\n"
-                f"  I_sc = {r.Isc_kA:.6f} kA\n"
-                f"  等值阻抗 Z_th = {r.Zth_ohm:.6f} Ω\n"
+                f"══ 复合序网计算结果 ═════════════════════════════\n"
+                f"  故障类型：{r.fault_type}\n"
+                f"  U = {r.U_kV:.4g} kV，Rf = {r.Rf_ohm:.4g} Ω\n"
+                f"  I1 = {_pa(r.I1_A)} A\n"
+                f"  I2 = {_pa(r.I2_A)} A\n"
+                f"  I0 = {_pa(r.I0_A)} A\n"
+                f"  Ia = {_pa(r.Ia_A)} A\n"
+                f"  Ib = {_pa(r.Ib_A)} A\n"
+                f"  Ic = {_pa(r.Ic_A)} A\n"
+                f"  开断校核电流 Ibreak = {r.I_break_kA:.4f} kA\n"
                 f"\n══ 断路器匹配 ═════════════════════════════════════\n"
                 f"  {check}\n"
                 f"\n说明：{r.notes}"
             )
             self._set_text(self.sc_result, text)
-        except Exception as exc:
-            messagebox.showerror("计算错误", str(exc))
 
-    def calculate_pf_correction(self) -> None:
-        try:
-            P = _safe_float(self.pf_p.get(), "P")
-            cos1 = _safe_float(self.pf_cos1.get(), "cosφ1")
-            cos2 = _safe_float(self.pf_cos2.get(), "cosφ2")
-            u_txt = self.pf_u.get().strip()
-            U = _safe_float(u_txt, "U") if u_txt else None
+            # 波形：仅交流分量
+            f = 50.0
+            w = 2.0 * math.pi * f
+            t_end = cycles / f
+            t = np.linspace(0.0, t_end, int(2000 * cycles / 3.0) + 1)
 
-            r = power_factor_correction(P, cos1, cos2, U)
+            def iwave(I: complex) -> np.ndarray:
+                return math.sqrt(2.0) * abs(I) * np.sin(w * t + math.atan2(I.imag, I.real))
 
-            lines = [
-                "══ 功率因数补偿结果 ═════════════════════════════",
-                f"  目标：cosφ {r.cos_phi1:.4f} → {r.cos_phi2:.4f}",
-                f"  需要补偿无功 Qc = {r.Qc_kvar:.6f} kvar",
-            ]
-            if r.I1_A is not None and r.I2_A is not None:
-                lines += [
-                    f"  线电流（补偿前）I1 = {r.I1_A:.3f} A",
-                    f"  线电流（补偿后）I2 = {r.I2_A:.3f} A",
-                ]
-            if r.C_phase_uF_star_50Hz is not None:
-                lines.append(f"  星形等效每相电容（50Hz）Cφ = {r.C_phase_uF_star_50Hz:.3f} μF")
-            lines += ["", f"说明：{r.notes}"]
-            self._set_text(self.pf_result, "\n".join(lines))
+            ia = iwave(r.Ia_A)
+            ib = iwave(r.Ib_A)
+            ic = iwave(r.Ic_A)
+            i1 = iwave(r.I1_A)
+            i2 = iwave(r.I2_A)
+            i0 = iwave(r.I0_A)
+
+            self.sc_ax_phase.clear()
+            self.sc_ax_seq.clear()
+            self.sc_ax_phase.plot(t, ia, label="iA", lw=1.2)
+            self.sc_ax_phase.plot(t, ib, label="iB", lw=1.2)
+            self.sc_ax_phase.plot(t, ic, label="iC", lw=1.2)
+            self.sc_ax_phase.set_ylabel("i_abc / A")
+            self.sc_ax_phase.grid(True, alpha=0.35)
+            self.sc_ax_phase.legend(loc="upper right", ncol=3, fontsize=8)
+
+            self.sc_ax_seq.plot(t, i1, label="i1(正序)", lw=1.2)
+            self.sc_ax_seq.plot(t, i2, label="i2(负序)", lw=1.2)
+            self.sc_ax_seq.plot(t, i0, label="i0(零序)", lw=1.2)
+            self.sc_ax_seq.set_ylabel("i_012 / A")
+            self.sc_ax_seq.set_xlabel("t / s")
+            self.sc_ax_seq.grid(True, alpha=0.35)
+            self.sc_ax_seq.legend(loc="upper right", ncol=3, fontsize=8)
+
+            self.sc_fig.tight_layout()
+            self.sc_canvas.draw()
+
         except Exception as exc:
             messagebox.showerror("计算错误", str(exc))
 
