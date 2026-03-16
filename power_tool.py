@@ -199,6 +199,29 @@ _TX3_RANGES = {
 }
 
 
+
+
+@dataclass
+class ShortCircuitSummary:
+    Ssc_MVA: float
+    U_kV: float
+    Isc_kA: float
+    Zth_ohm: float
+    breaker_ok: Optional[bool]
+    notes: str
+
+
+@dataclass
+class PFCorrectionSummary:
+    P_kW: float
+    cos_phi1: float
+    cos_phi2: float
+    Qc_kvar: float
+    I1_A: Optional[float]
+    I2_A: Optional[float]
+    C_phase_uF_star_50Hz: Optional[float]
+    notes: str
+
 @dataclass
 class ParamWarning:
     param: str
@@ -837,6 +860,86 @@ def natural_power_and_reactive(U_kV_ll: float,
     )
 
 
+
+
+def short_circuit_capacity(U_kV_ll: float,
+                           Ssc_MVA: float,
+                           breaker_IkA: Optional[float]) -> ShortCircuitSummary:
+    """三相短路容量与短路电流快算。"""
+    _validate_positive("U", U_kV_ll)
+    _validate_positive("S_sc", Ssc_MVA)
+
+    i_sc_kA = Ssc_MVA / (math.sqrt(3.0) * U_kV_ll)
+    z_th_ohm = U_kV_ll * U_kV_ll / Ssc_MVA
+
+    ok = None
+    if breaker_IkA is not None:
+        _validate_positive("断路器额定开断电流", breaker_IkA)
+        ok = breaker_IkA >= i_sc_kA
+
+    notes = (
+        "该结果基于三相对称短路的稳态近似：S_sc=√3·U·I。"
+        " 实际校核还需考虑直流分量、开断瞬态、X/R 比、温度与设备标准。"
+    )
+
+    return ShortCircuitSummary(
+        Ssc_MVA=Ssc_MVA,
+        U_kV=U_kV_ll,
+        Isc_kA=i_sc_kA,
+        Zth_ohm=z_th_ohm,
+        breaker_ok=ok,
+        notes=notes,
+    )
+
+
+def power_factor_correction(P_kW: float,
+                            cos_phi1: float,
+                            cos_phi2: float,
+                            U_kV_ll: Optional[float]) -> PFCorrectionSummary:
+    """无功补偿容量快算（把功率因数从 cosφ1 提高到 cosφ2）。"""
+    _validate_positive("有功功率 P", P_kW)
+    if not (0.0 < cos_phi1 <= 1.0):
+        raise InputError("初始功率因数 cosφ1 必须在 (0, 1]。")
+    if not (0.0 < cos_phi2 <= 1.0):
+        raise InputError("目标功率因数 cosφ2 必须在 (0, 1]。")
+    if cos_phi2 < cos_phi1 - 1e-12:
+        raise InputError("目标功率因数 cosφ2 不应低于初始 cosφ1。")
+
+    phi1 = math.acos(cos_phi1)
+    phi2 = math.acos(cos_phi2)
+    qc_kvar = P_kW * (math.tan(phi1) - math.tan(phi2))
+    if qc_kvar < 0:
+        qc_kvar = 0.0
+
+    i1 = i2 = c_uF = None
+    if U_kV_ll is not None and U_kV_ll > 0:
+        U_V = U_kV_ll * 1e3
+        i1 = P_kW * 1e3 / (math.sqrt(3.0) * U_V * cos_phi1)
+        i2 = P_kW * 1e3 / (math.sqrt(3.0) * U_V * cos_phi2)
+
+        # 星形等效每相电容（50Hz）: Q = 3*ω*C*V_phase^2
+        omega = 2.0 * math.pi * 50.0
+        v_phase = U_V / math.sqrt(3.0)
+        c_F = (qc_kvar * 1e3) / (3.0 * omega * v_phase * v_phase)
+        c_uF = c_F * 1e6
+
+    notes = (
+        "该计算用于工频稳态无功补偿的一次估算。"
+        " 实施时需校核谐波、投切涌流、过补偿风险以及分组投切策略。"
+    )
+
+    return PFCorrectionSummary(
+        P_kW=P_kW,
+        cos_phi1=cos_phi1,
+        cos_phi2=cos_phi2,
+        Qc_kvar=qc_kvar,
+        I1_A=i1,
+        I2_A=i2,
+        C_phase_uF_star_50Hz=c_uF,
+        notes=notes,
+    )
+
+
 def impact_method(delta_p: float,
                   delta_t_s: float,
                   f_d_hz: float,
@@ -1141,6 +1244,8 @@ class ApproximationToolGUI(tk.Tk):
         self.line_tab = ttk.Frame(notebook)
         self.impact_tab = ttk.Frame(notebook)
         self.param_tab = ttk.Frame(notebook)
+        self.sc_tab = ttk.Frame(notebook)
+        self.pf_tab = ttk.Frame(notebook)
 
         notebook.add(self.freq_tab, text="频率动态")
         notebook.add(self.osc_tab, text="机电振荡")
@@ -1148,6 +1253,8 @@ class ApproximationToolGUI(tk.Tk):
         notebook.add(self.line_tab, text="线路自然功率与无功")
         notebook.add(self.impact_tab, text="暂稳评估")
         notebook.add(self.param_tab, text="参数校核与标幺值")
+        notebook.add(self.sc_tab, text="短路容量")
+        notebook.add(self.pf_tab, text="功率因数补偿")
 
         self._build_frequency_tab()
         self._build_oscillation_tab()
@@ -1155,6 +1262,8 @@ class ApproximationToolGUI(tk.Tk):
         self._build_line_tab()
         self._build_impact_tab()
         self._build_param_tab()
+        self._build_short_circuit_tab()
+        self._build_pf_correction_tab()
 
     @staticmethod
     def _add_entry(parent: ttk.Frame,
@@ -1728,6 +1837,110 @@ class ApproximationToolGUI(tk.Tk):
         except Exception as exc:
             messagebox.showerror("计算错误", str(exc))
 
+
+
+    def _build_short_circuit_tab(self) -> None:
+        frame = ttk.Frame(self.sc_tab, padding=12)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(0, weight=0)
+        frame.columnconfigure(1, weight=1)
+
+        ttk.Label(frame, text="三相短路容量与短路电流快算", font=("TkDefaultFont", 11, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        )
+
+        self.sc_u = self._add_entry(frame, 1, "系统电压 U / kV（线电压）", "110")
+        self.sc_ssc = self._add_entry(frame, 2, "短路容量 S_sc / MVA", "2000")
+        self.sc_brk = self._add_entry(frame, 3, "断路器额定开断电流 Ik / kA（可留空）", "31.5")
+
+        ttk.Button(frame, text="计算", command=self.calculate_short_circuit).grid(
+            row=4, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
+        )
+
+        self.sc_result = ScrolledText(frame, width=85, height=24, wrap=tk.WORD)
+        self.sc_result.grid(row=5, column=0, columnspan=2, sticky="nsew", padx=4, pady=8)
+        self.sc_result.configure(state="disabled")
+
+        self.calculate_short_circuit()
+
+    def _build_pf_correction_tab(self) -> None:
+        frame = ttk.Frame(self.pf_tab, padding=12)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(0, weight=0)
+        frame.columnconfigure(1, weight=1)
+
+        ttk.Label(frame, text="功率因数校正与电容补偿快算", font=("TkDefaultFont", 11, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        )
+
+        self.pf_p = self._add_entry(frame, 1, "有功功率 P / kW", "10000")
+        self.pf_cos1 = self._add_entry(frame, 2, "初始功率因数 cosφ1", "0.85")
+        self.pf_cos2 = self._add_entry(frame, 3, "目标功率因数 cosφ2", "0.95")
+        self.pf_u = self._add_entry(frame, 4, "系统电压 U / kV（线电压，可留空）", "10")
+
+        ttk.Button(frame, text="计算", command=self.calculate_pf_correction).grid(
+            row=5, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
+        )
+
+        self.pf_result = ScrolledText(frame, width=85, height=24, wrap=tk.WORD)
+        self.pf_result.grid(row=6, column=0, columnspan=2, sticky="nsew", padx=4, pady=8)
+        self.pf_result.configure(state="disabled")
+
+        self.calculate_pf_correction()
+
+    def calculate_short_circuit(self) -> None:
+        try:
+            U = _safe_float(self.sc_u.get(), "U")
+            Ssc = _safe_float(self.sc_ssc.get(), "S_sc")
+            brk_txt = self.sc_brk.get().strip()
+            brk = _safe_float(brk_txt, "Ik") if brk_txt else None
+
+            r = short_circuit_capacity(U, Ssc, brk)
+            if r.breaker_ok is None:
+                check = "未输入断路器开断电流，未做匹配判断。"
+            else:
+                check = "匹配：额定开断电流 ≥ 计算短路电流。" if r.breaker_ok else "不匹配：额定开断电流 < 计算短路电流。"
+
+            text = (
+                f"══ 短路容量与电流 ═══════════════════════════════\n"
+                f"  U = {r.U_kV:.4g} kV\n"
+                f"  S_sc = {r.Ssc_MVA:.4g} MVA\n"
+                f"  I_sc = {r.Isc_kA:.6f} kA\n"
+                f"  等值阻抗 Z_th = {r.Zth_ohm:.6f} Ω\n"
+                f"\n══ 断路器匹配 ═════════════════════════════════════\n"
+                f"  {check}\n"
+                f"\n说明：{r.notes}"
+            )
+            self._set_text(self.sc_result, text)
+        except Exception as exc:
+            messagebox.showerror("计算错误", str(exc))
+
+    def calculate_pf_correction(self) -> None:
+        try:
+            P = _safe_float(self.pf_p.get(), "P")
+            cos1 = _safe_float(self.pf_cos1.get(), "cosφ1")
+            cos2 = _safe_float(self.pf_cos2.get(), "cosφ2")
+            u_txt = self.pf_u.get().strip()
+            U = _safe_float(u_txt, "U") if u_txt else None
+
+            r = power_factor_correction(P, cos1, cos2, U)
+
+            lines = [
+                "══ 功率因数补偿结果 ═════════════════════════════",
+                f"  目标：cosφ {r.cos_phi1:.4f} → {r.cos_phi2:.4f}",
+                f"  需要补偿无功 Qc = {r.Qc_kvar:.6f} kvar",
+            ]
+            if r.I1_A is not None and r.I2_A is not None:
+                lines += [
+                    f"  线电流（补偿前）I1 = {r.I1_A:.3f} A",
+                    f"  线电流（补偿后）I2 = {r.I2_A:.3f} A",
+                ]
+            if r.C_phase_uF_star_50Hz is not None:
+                lines.append(f"  星形等效每相电容（50Hz）Cφ = {r.C_phase_uF_star_50Hz:.3f} μF")
+            lines += ["", f"说明：{r.notes}"]
+            self._set_text(self.pf_result, "\n".join(lines))
+        except Exception as exc:
+            messagebox.showerror("计算错误", str(exc))
 
     # ════════════════════════════════════════════════════════════════════
     # 参数校核与标幺值转换标签页
