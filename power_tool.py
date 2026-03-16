@@ -887,10 +887,7 @@ def _neutral_impedance(mode: str, rn: float, xn: float) -> tuple[complex, str]:
     if key == "经电阻接地":
         _validate_nonnegative("接地电阻 Rn", rn)
         return complex(rn, 0.0), key
-    if key == "经电阻电抗接地":
-        _validate_nonnegative("接地电阻 Rn", rn)
-        return complex(rn, xn), key
-    raise InputError("中性点方式不支持。")
+    raise InputError("中性点方式不支持。可选：直接接地/中性点不接地/经消弧线圈接地/经电阻接地。")
 
 
 def short_circuit_capacity(U_kV_ll: float,
@@ -966,7 +963,7 @@ def short_circuit_capacity(U_kV_ll: float,
         I0 = -Vx / z0g
         fault_name = ft; Z_eq = Z1 + zpar
     else:
-        raise InputError("故障类型不支持。请使用中文故障类型（如A相接地、AB两相接地、BC两相短路、三相接地）。")
+        raise InputError("故障类型不支持。请使用中文故障类型（如A/B/C相接地、AB/BC/CA两相接地、AB/BC/CA两相短路、三相接地）。")
 
     if ft not in {"A相接地", "B相接地", "C相接地", "单相接地", "A-G", "B-G", "C-G"}:
         Ia, Ib, Ic = _phase_currents_from_sequence(I0, I1, I2)
@@ -1907,7 +1904,7 @@ class ApproximationToolGUI(tk.Tk):
         )
 
         self.sc_fault_type = ttk.Combobox(left, state="readonly", width=18,
-                                          values=["A相接地", "B相接地", "C相接地", "AB两相接地", "BC两相短路", "三相接地"])
+                                          values=["A相接地", "B相接地", "C相接地", "AB两相接地", "BC两相接地", "CA两相接地", "AB两相短路", "BC两相短路", "CA两相短路", "三相接地"])
         ttk.Label(left, text="故障类型").grid(row=1, column=0, sticky="w", padx=4, pady=4)
         self.sc_fault_type.grid(row=1, column=1, sticky="ew", padx=4, pady=4)
         self.sc_fault_type.set("A相接地")
@@ -1923,13 +1920,19 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_rf = self._add_entry(left, 10, "过渡电阻 Rf / Ω", "0.0")
 
         self.sc_neutral_mode = ttk.Combobox(left, state="readonly", width=18,
-                                            values=["直接接地", "中性点不接地", "经消弧线圈接地", "经电阻接地", "经电阻电抗接地"])
+                                            values=["直接接地", "中性点不接地", "经消弧线圈接地", "经电阻接地"])
         ttk.Label(left, text="系统中性点方式").grid(row=11, column=0, sticky="w", padx=4, pady=4)
         self.sc_neutral_mode.grid(row=11, column=1, sticky="ew", padx=4, pady=4)
         self.sc_neutral_mode.set("直接接地")
 
-        self.sc_rn = self._add_entry(left, 12, "中性点电阻 Rn / Ω", "0")
-        self.sc_xn = self._add_entry(left, 13, "中性点电抗 Xn / Ω（消弧线圈）", "0")
+        self.sc_rn = self._add_entry(left, 12, "中性点电阻 Rn / Ω", "1.5")
+        self.sc_xn = self._add_entry(left, 13, "中性点电抗 Xn / Ω（消弧线圈）", "12.0")
+
+        self.sc_neutral_mode.bind("<<ComboboxSelected>>", self._on_sc_neutral_mode_change)
+        self.sc_len.bind("<FocusOut>", self._on_sc_neutral_mode_change)
+        self.sc_r0.bind("<FocusOut>", self._on_sc_neutral_mode_change)
+        self.sc_x0.bind("<FocusOut>", self._on_sc_neutral_mode_change)
+        self._on_sc_neutral_mode_change()
         self.sc_brk = self._add_entry(left, 14, "断路器额定开断电流 Ik / kA（可留空）", "31.5")
         self.sc_cycles = self._add_entry(left, 15, "仿真周波数（波形）", "3")
 
@@ -1961,6 +1964,34 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_toolbar.grid(row=2, column=0, sticky="ew")
 
         self.calculate_short_circuit()
+
+    def _on_sc_neutral_mode_change(self, _event: object | None = None) -> None:
+        """根据线路零序参数给出与量级匹配的中性点参数默认值。"""
+        try:
+            length = _safe_float(self.sc_len.get(), "线路长度")
+            r0 = _safe_float(self.sc_r0.get(), "R0")
+            x0 = _safe_float(self.sc_x0.get(), "X0")
+            r0_total = max(0.0, r0 * length)
+            x0_total = max(0.0, x0 * length)
+        except Exception:
+            r0_total, x0_total = 4.5, 36.0
+
+        mode = self.sc_neutral_mode.get().strip()
+        if mode == "直接接地":
+            rn, xn = 0.0, 0.0
+        elif mode == "中性点不接地":
+            rn, xn = 1e9, 0.0
+        elif mode == "经消弧线圈接地":
+            rn, xn = 0.0, x0_total / 3.0
+        elif mode == "经电阻接地":
+            rn, xn = r0_total / 3.0, 0.0
+        else:
+            rn, xn = 0.0, 0.0
+
+        self.sc_rn.delete(0, tk.END)
+        self.sc_rn.insert(0, f"{rn:.6g}")
+        self.sc_xn.delete(0, tk.END)
+        self.sc_xn.insert(0, f"{xn:.6g}")
 
     def calculate_short_circuit(self) -> None:
         try:
