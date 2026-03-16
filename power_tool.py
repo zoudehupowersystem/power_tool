@@ -199,8 +199,6 @@ _TX3_RANGES = {
 }
 
 
-
-
 @dataclass
 class ShortCircuitSummary:
     fault_type: str
@@ -861,8 +859,6 @@ def natural_power_and_reactive(U_kV_ll: float,
     )
 
 
-
-
 def _phase_currents_from_sequence(I0: complex, I1: complex, I2: complex) -> tuple[complex, complex, complex]:
     a = complex(-0.5, math.sqrt(3.0) / 2.0)
     a2 = complex(-0.5, -math.sqrt(3.0) / 2.0)
@@ -884,7 +880,6 @@ def _neutral_impedance(mode: str, rn: float, xn: float) -> tuple[complex, str]:
     if key == "直接接地":
         return 0j, key
     if key == "中性点不接地":
-        # 数值上用极大阻抗近似开路
         return complex(1e9, 0.0), key
     if key == "经消弧线圈接地":
         _validate_nonnegative("消弧线圈电抗 Xn", xn)
@@ -912,55 +907,40 @@ def short_circuit_capacity(U_kV_ll: float,
                            neutral_xn_ohm: float,
                            Rf_ohm: float,
                            breaker_IkA: Optional[float]) -> ShortCircuitSummary:
-    """系统+线路串联、故障在线路末端的短路电流计算（含复合序网）。"""
     _validate_positive("U", U_kV_ll)
     _validate_positive("系统短路容量 S_sc", s_sc_mva)
     _validate_positive("系统 X/R", xr_sys)
     _validate_nonnegative("线路长度", line_len_km)
     _validate_nonnegative("过渡电阻 Rf", Rf_ohm)
 
-    # 系统等值正/负序阻抗（由短路容量与X/R给定）
     zsys_mag = U_kV_ll * U_kV_ll / s_sc_mva
     r_sys, x_sys = _zr_from_xr(zsys_mag, xr_sys)
     Zsys1 = complex(r_sys, x_sys)
     Zsys2 = complex(r_sys, x_sys)
 
-    # 线路阻抗（末端故障）
     Zl1 = complex(line_r1_ohm_km * line_len_km, line_x1_ohm_km * line_len_km)
     Zl2 = Zl1
     Zl0 = complex(line_r0_ohm_km * line_len_km, line_x0_ohm_km * line_len_km)
 
     Z1 = Zsys1 + Zl1
     Z2 = Zsys2 + Zl2
-
     Zn, neutral_name = _neutral_impedance(neutral_mode, neutral_rn_ohm, neutral_xn_ohm)
     Z0 = Zsys1 + Zl0
     Zf = complex(Rf_ohm, 0.0)
 
-    # 相电压（RMS）
     E = U_kV_ll * 1e3 / math.sqrt(3.0)
-
     ft = fault_type.strip()
     if ft in {"三相短路", "三相接地", "ABC三相短路"}:
-        I1 = E / (Z1 + Zf)
-        I2 = 0j
-        I0 = 0j
-        fault_name = "三相短路"
-        Z_eq = Z1 + Zf
+        I1 = E / (Z1 + Zf); I2 = 0j; I0 = 0j
+        fault_name = "三相短路"; Z_eq = Z1 + Zf
     elif ft in {"A相接地", "单相接地", "A-G"}:
         denom = Z1 + Z2 + Z0 + 3.0 * (Zn + Zf)
-        I1 = E / denom
-        I2 = I1
-        I0 = I1
-        fault_name = "A相接地"
-        Z_eq = denom / 3.0
+        I1 = E / denom; I2 = I1; I0 = I1
+        fault_name = "A相接地"; Z_eq = denom / 3.0
     elif ft in {"AB两相短路", "BC两相短路", "CA两相短路", "两相短路"}:
         denom = Z1 + Z2 + Zf
-        I1 = E / denom
-        I2 = -I1
-        I0 = 0j
-        fault_name = ft
-        Z_eq = denom / 2.0
+        I1 = E / denom; I2 = -I1; I0 = 0j
+        fault_name = ft; Z_eq = denom / 2.0
     elif ft in {"AB两相接地", "BC两相接地", "CA两相接地", "两相接地"}:
         z0g = Z0 + 3.0 * (Zn + Zf)
         zpar = (Z2 * z0g) / (Z2 + z0g)
@@ -968,15 +948,13 @@ def short_circuit_capacity(U_kV_ll: float,
         Vx = E - I1 * Z1
         I2 = -Vx / Z2
         I0 = -Vx / z0g
-        fault_name = ft
-        Z_eq = Z1 + zpar
+        fault_name = ft; Z_eq = Z1 + zpar
     else:
         raise InputError("故障类型不支持。请使用中文故障类型（如A相接地、AB两相接地、BC两相短路、三相接地）。")
 
     Ia, Ib, Ic = _phase_currents_from_sequence(I0, I1, I2)
     i_break_kA = max(abs(Ia), abs(Ib), abs(Ic)) / 1e3
 
-    # 直流偏置时间常数 tau = L/R = X/(ωR)
     R_eq = max(Z_eq.real, 1e-6)
     X_eq = abs(Z_eq.imag)
     tau_dc = X_eq / (2.0 * math.pi * 50.0 * R_eq)
@@ -992,25 +970,11 @@ def short_circuit_capacity(U_kV_ll: float,
     )
 
     return ShortCircuitSummary(
-        fault_type=fault_name,
-        neutral_mode=neutral_name,
-        U_kV=U_kV_ll,
-        line_len_km=line_len_km,
-        Z1_ohm=Z1,
-        Z2_ohm=Z2,
-        Z0_ohm=Z0,
-        Zn_ohm=Zn,
-        Rf_ohm=Rf_ohm,
-        I0_A=I0,
-        I1_A=I1,
-        I2_A=I2,
-        Ia_A=Ia,
-        Ib_A=Ib,
-        Ic_A=Ic,
-        I_break_kA=i_break_kA,
-        tau_dc_s=tau_dc,
-        breaker_ok=ok,
-        notes=notes,
+        fault_type=fault_name, neutral_mode=neutral_name,
+        U_kV=U_kV_ll, line_len_km=line_len_km,
+        Z1_ohm=Z1, Z2_ohm=Z2, Z0_ohm=Z0, Zn_ohm=Zn, Rf_ohm=Rf_ohm,
+        I0_A=I0, I1_A=I1, I2_A=I2, Ia_A=Ia, Ib_A=Ib, Ic_A=Ic,
+        I_break_kA=i_break_kA, tau_dc_s=tau_dc, breaker_ok=ok, notes=notes,
     )
 
 
@@ -1625,6 +1589,393 @@ class ApproximationToolGUI(tk.Tk):
             self.freq_canvas.draw()
 
             text = (
+                f"阻尼类型：{summary.regime}\n"
+                f"α = {summary.alpha:.6f} 1/s\n"
+                f"Ω = {summary.omega_d:.6f} rad/s\n" if summary.omega_d is not None else
+                f"阻尼类型：{summary.regime}\n"
+                f"α = {summary.alpha:.6f} 1/s\n"
+            )
+
+            text += (
+                f"初始频率变化率 RoCoF = {summary.rocof_pu_s:.6f} pu/s = {summary.rocof_hz_s:.6f} Hz/s\n"
+                f"稳态频差 Δf∞ = {summary.steady_pu:.6f} pu = {summary.steady_hz:.6f} Hz\n"
+            )
+
+            if summary.nadir_time_s is not None:
+                text += (
+                    f"频率最低点时刻 t_m = {summary.nadir_time_s:.6f} s\n"
+                    f"最低频差 Δf_min = {summary.nadir_pu:.6f} pu = {summary.nadir_hz:.6f} Hz\n"
+                    f"最低频率 f_min = {summary.f_min_hz:.6f} Hz\n"
+                )
+            else:
+                text += (
+                    "该参数组合不产生典型欠阻尼最低点。\n"
+                    f"单调极限（稳态）Δf∞ = {summary.steady_pu:.6f} pu，"
+                    f"对应频率 {f0 * (1.0 + summary.steady_pu):.6f} Hz\n"
+                )
+
+            text += "\n说明：\n" + summary.notes
+            self._set_text(self.freq_result, text)
+
+        except Exception as exc:
+            messagebox.showerror("计算错误", str(exc))
+
+    def calculate_oscillation(self) -> None:
+        try:
+            Eq = _safe_float(self.osc_eq.get(), "E'_q")
+            U = _safe_float(self.osc_u.get(), "U")
+            X = _safe_float(self.osc_x.get(), "X_Σ")
+            P0 = _safe_float(self.osc_p0.get(), "P0")
+            Tj = _safe_float(self.osc_tj.get(), "T_j")
+            f0 = _safe_float(self.osc_f0.get(), "f0")
+
+            summary = electromechanical_frequency(Eq, U, X, P0, Tj, f0)
+
+            text = (
+                f"初始功角 δ0 = {summary.delta0_deg:.6f} °\n"
+                f"同步转矩系数 K_s = {summary.Ks:.6f} pu/rad（按本文近似定义）\n"
+                f"固有角频率 ω_n = {summary.omega_n:.6f} rad/s\n"
+                f"机电振荡频率 f_n = {summary.f_n:.6f} Hz\n\n"
+                f"说明：\n{summary.notes}"
+            )
+            self._set_text(self.osc_result, text)
+
+        except Exception as exc:
+            messagebox.showerror("计算错误", str(exc))
+
+    def calculate_voltage(self) -> None:
+        try:
+            Ug = _safe_float(self.volt_ug.get(), "U_g")
+            X = _safe_float(self.volt_x.get(), "X_Σ")
+            cos_phi = _safe_float(self.volt_pf.get(), "cosφ")
+            s_base_text = self.volt_sbase.get().strip()
+            s_base = _safe_float(s_base_text, "S_base") if s_base_text else None
+
+            summary = static_voltage_stability(Ug, X, cos_phi, s_base)
+
+            text = (
+                f"sinφ = {summary.sin_phi:.6f}\n"
+                f"最大可送有功 P_L,max = {summary.Pmax_pu:.6f} pu\n"
+            )
+            if summary.Pmax_MW is not None:
+                text += f"折算有名值 = {summary.Pmax_MW:.6f} MW\n"
+            text += (
+                f"受端最低电压（相对送端电压归一化）V_min/U_g = {summary.Vmin_norm_to_sending:.6f} pu\n"
+                f"受端最低电压（与 U_g 同一基准）V_min = {summary.Vmin_same_base_as_Ug:.6f} pu\n\n"
+                f"说明：\n{summary.notes}"
+            )
+            self._set_text(self.volt_result, text)
+
+        except Exception as exc:
+            messagebox.showerror("计算错误", str(exc))
+
+    def calculate_line(self) -> None:
+        try:
+            U = _safe_float(self.line_u.get(), "U")
+            zc_text = self.line_zc.get().strip()
+            zc = _safe_float(zc_text, "Z_c") if zc_text else None
+
+            l_text = self.line_l.get().strip()
+            c_text = self.line_c.get().strip()
+            L = _safe_float(l_text, "L") if l_text else None
+            C = _safe_float(c_text, "C") if c_text else None
+
+            P = _safe_float(self.line_p.get(), "P")
+            QN = _safe_float(self.line_qn.get(), "Q_N")
+            length = _safe_float(self.line_len.get(), "l")
+
+            summary = natural_power_and_reactive(U, zc, L, C, P, QN, length)
+
+            text = (
+                f"波阻抗 Z_c = {summary.Zc_ohm:.6f} Ω\n"
+                f"自然功率 P_N = {summary.Pn_MW:.6f} MW\n"
+                f"线路无功估算 ΔQ_L = {summary.delta_Q_Mvar:.6f} Mvar\n"
+                f"运行区间判断：{summary.line_state}\n\n"
+                f"说明：\n{summary.notes}"
+            )
+            self._set_text(self.line_result, text)
+
+        except Exception as exc:
+            messagebox.showerror("计算错误", str(exc))
+
+    def calculate_impact(self) -> None:
+        try:
+            delta_p = _safe_float(self.imp_dp.get(), "ΔPa")
+            delta_t = _safe_float(self.imp_dt.get(), "Δt")
+            f_d     = _safe_float(self.imp_fd.get(), "f_d")
+            pmax_post = _safe_float(self.imp_pmax.get(), "Pmax_post")
+            pcur_text = self.imp_pcur.get().strip()
+            pcur = _safe_float(pcur_text, "Pm") if pcur_text else None
+            tj_text = self.imp_tj.get().strip()
+            f0_text = self.imp_f0.get().strip()
+
+            summary = impact_method(delta_p, delta_t, f_d, pmax_post, pcur)
+
+            text = (
+                f"══ 冲击法快估 ══════════════════════\n"
+                f"冲击量 Dp = {summary.Dp_pu:.6f} pu\n"
+                f"暂稳极限 Pst = {summary.Pst_pu:.6f} pu\n"
+            )
+            if summary.margin_pu is not None:
+                text += f"相对当前传输功率的裕度 = {summary.margin_pu:.6f} pu\n"
+            text += f"结论：{summary.status}\n"
+
+            # ── 临界切除角快速估算 ────────────────────────────────────────
+            if pcur_text and tj_text and f0_text:
+                try:
+                    Pm_val  = _safe_float(pcur_text, "Pm")
+                    Tj_val  = _safe_float(tj_text,   "T_j")
+                    f0_val  = _safe_float(f0_text,   "f0")
+                    ccs = critical_cut_angle_approx(Pm_val, pmax_post, Tj_val, f0_val, delta_t)
+                    text += (
+                        f"\n══ 临界切除角快速估算（§7.6） ══════\n"
+                        f"初始平衡角   δ0  = {ccs.delta0_deg:.3f}°\n"
+                        f"临界切除角   δcr = {ccs.delta_cr_deg:.3f}°\n"
+                        f"临界切除时间 tcr = {ccs.t_cr_s:.4f} s\n"
+                        f"当前切除时间 Δt  = {delta_t:.4f} s  "
+                        f"({'< tcr OK' if delta_t < ccs.t_cr_s else '>= tcr NG'})\n"
+                    )
+                    if ccs.margin_pct is not None:
+                        text += f"时间裕量 = {ccs.margin_pct:+.1f} %\n"
+                    text += f"结论：{ccs.status}\n"
+                    text += f"\n说明（冲击法）：\n{summary.notes}\n"
+                    text += f"\n说明（临界切除）：\n{ccs.notes}"
+                except InputError as ie:
+                    text += f"\n临界切除角估算：{ie}\n"
+                    text += f"\n说明：\n{summary.notes}"
+            else:
+                text += (
+                    "\n（如需临界切除角快速估算，请同时填写 Pm、T_j 和 f0）\n"
+                    f"\n说明：\n{summary.notes}"
+                )
+
+            self._set_text(self.imp_result, text)
+
+        except Exception as exc:
+            messagebox.showerror("计算错误", str(exc))
+
+    def calculate_eac(self) -> None:
+        try:
+            Pm        = _safe_float(self.eac_pm.get(),    "Pm")
+            Pmax_pre  = _safe_float(self.eac_ppre.get(),  "Pmax_pre")
+            Pmax_f    = _safe_float(self.eac_pf.get(),    "Pmax_fault")
+            Pmax_post = _safe_float(self.eac_ppost.get(), "Pmax_post")
+            dt        = _safe_float(self.eac_dt.get(),    "Δt")
+            Tj        = _safe_float(self.eac_tj.get(),    "Tj")
+            f0        = _safe_float(self.eac_f0.get(),    "f0")
+
+            r = equal_area_criterion(Pm, Pmax_pre, Pmax_f, Pmax_post, dt, Tj, f0)
+
+            # ── 结果文字 ────────────────────────────────────────────────
+            stab_str = "[稳定]" if r.stable else "[失稳]（加速面积 > 可用减速面积）"
+            text = (
+                f"稳定性判断：{stab_str}\n"
+                f"裕度 = {r.margin_pct:+.2f} %\n"
+                f"\n── 关键角度 ──────────────────────\n"
+                f"故障前平衡角 δ0  = {r.delta0_deg:.3f}°\n"
+                f"故障切除角   δc  = {r.deltac_deg:.3f}°\n"
+                f"不稳定平衡角 δu  = {r.deltau_deg:.3f}°\n"
+            )
+            if r.deltamax_deg is not None:
+                text += f"实际最大摆角 δmax= {r.deltamax_deg:.3f}°\n"
+            text += (
+                f"\n── 等面积 ────────────────────────\n"
+                f"加速面积  Aacc       = {r.A_acc:.6f} pu·rad\n"
+                f"可用减速面积 Adec    = {r.A_dec_avail:.6f} pu·rad\n"
+            )
+            if r.A_dec_actual is not None:
+                text += f"实际减速面积 Adec_act= {r.A_dec_actual:.6f} pu·rad\n"
+            text += (
+                f"\n── 极限切除 ──────────────────────\n"
+                f"极限切除角 δcr = {r.delta_cr_deg:.3f}°\n"
+                f"极限切除时间 tcr = {r.t_cr_s:.4f} s\n"
+                f"当前切除时间 Δt  = {dt:.4f} s  "
+                f"({'< tcr OK' if dt < r.t_cr_s else '>= tcr NG'})\n"
+                f"\n说明：\n{r.notes}"
+            )
+            self._set_text(self.eac_result, text)
+
+            # ── P-δ 图 ──────────────────────────────────────────────────
+            ax = self.eac_ax
+            ax.clear()
+
+            delta_deg = np.linspace(0, 200, 1000)
+            delta_rad = np.radians(delta_deg)
+
+            Pe_pre   = Pmax_pre  * np.sin(delta_rad)
+            Pe_fault = Pmax_f    * np.sin(delta_rad)
+            Pe_post  = Pmax_post * np.sin(delta_rad)
+
+            ax.plot(delta_deg, Pe_pre,   "b-",  linewidth=1.8,
+                    label=f"故障前  Pmax={Pmax_pre:.3f} pu")
+            fault_lbl = (f"故障中  Pmax={Pmax_f:.3f} pu"
+                         + ("（三相短路≈0）" if Pmax_f < 1e-9 else ""))
+            ax.plot(delta_deg, Pe_fault, "r--", linewidth=1.5, label=fault_lbl)
+            ax.plot(delta_deg, Pe_post,  "g-",  linewidth=1.8,
+                    label=f"故障后  Pmax={Pmax_post:.3f} pu")
+            ax.axhline(Pm, color="k", linewidth=1.4, linestyle=":",
+                       label=f"Pm = {Pm:.3f} pu")
+
+            # 加速面积（红色填充）δ0 → δc，曲线为故障中正弦
+            d_acc = np.linspace(r.delta0_rad, r.deltac_rad, 500)
+            Pe_f_acc = Pmax_f * np.sin(d_acc)
+            # 正加速（Pm > Pe_fault）→ 红色；负加速（Pe_fault > Pm）→ 蓝紫色
+            ax.fill_between(np.degrees(d_acc), Pm, Pe_f_acc,
+                            where=(Pm >= Pe_f_acc),
+                            color="tomato", alpha=0.45,
+                            label=f"加速面积（+）{r.A_acc:.4f} pu·rad")
+            if np.any(Pe_f_acc > Pm):
+                neg_area = float(
+                    np.trapz(np.maximum(0, Pe_f_acc - Pm), d_acc))
+                ax.fill_between(np.degrees(d_acc), Pe_f_acc, Pm,
+                                where=(Pe_f_acc > Pm),
+                                color="mediumpurple", alpha=0.40,
+                                label=f"减速（故障中）{neg_area:.4f} pu·rad")
+
+            # 减速面积（绿色填充）δc → δmax（或 δu）
+            d_end = r.deltamax_rad if r.deltamax_rad is not None else r.deltau_rad
+            d_dec = np.linspace(r.deltac_rad, d_end, 500)
+            Pe_post_dec = Pmax_post * np.sin(d_dec)
+            ax.fill_between(np.degrees(d_dec),
+                            Pe_post_dec, Pm,
+                            where=(Pe_post_dec >= Pm),
+                            color="limegreen", alpha=0.45,
+                            label=f"减速面积 {r.A_dec_avail:.4f} pu·rad")
+
+            # 关键角度标注
+            def _vline(deg: float, color: str, ls: str, label: str) -> None:
+                ax.axvline(deg, color=color, linestyle=ls, linewidth=1.2, label=label)
+
+            _vline(r.delta0_deg,  "blue",  "-.",  f"δ₀={r.delta0_deg:.1f}°")
+            _vline(r.deltac_deg,  "red",   "--",  f"δc={r.deltac_deg:.1f}°")
+            _vline(r.deltau_deg,  "green", "-.",  f"δu={r.deltau_deg:.1f}°")
+            _vline(r.delta_cr_deg,"purple",":",   f"δcr={r.delta_cr_deg:.1f}°")
+            if r.deltamax_deg is not None:
+                _vline(r.deltamax_deg, "darkorange", "--",
+                       f"δmax={r.deltamax_deg:.1f}°")
+
+            ax.set_xlabel("δ / °")
+            ax.set_ylabel("P / pu")
+            title_flag = "[稳定]" if r.stable else "[失稳]"
+            ax.set_title(
+                f"功角曲线  {title_flag}  裕度 {r.margin_pct:+.1f}%  "
+                f"tcr={r.t_cr_s:.3f} s"
+            )
+            ax.set_xlim(0, 200)
+            ymax = max(Pmax_pre, Pmax_post, Pm) * 1.18
+            ax.set_ylim(-0.08, ymax)
+            ax.legend(loc="upper right", fontsize=7.5, ncol=2)
+            ax.grid(True, alpha=0.4)
+            self.eac_fig.tight_layout()
+            self.eac_canvas.draw()
+
+        except Exception as exc:
+            messagebox.showerror("计算错误", str(exc))
+
+
+
+    def _build_short_circuit_tab(self) -> None:
+        self.sc_tab.columnconfigure(1, weight=1)
+        self.sc_tab.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(self.sc_tab, padding=10)
+        right = ttk.Frame(self.sc_tab, padding=10)
+        left.grid(row=0, column=0, sticky="nsw")
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(1, weight=1)
+
+        ttk.Label(left, text="短路电流计算（系统+线路串联，故障在线路末端）", font=("TkDefaultFont", 11, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        )
+
+        self.sc_fault_type = ttk.Combobox(left, state="readonly", width=18,
+                                          values=["A相接地", "AB两相接地", "BC两相短路", "三相接地"])
+        ttk.Label(left, text="故障类型").grid(row=1, column=0, sticky="w", padx=4, pady=4)
+        self.sc_fault_type.grid(row=1, column=1, sticky="ew", padx=4, pady=4)
+        self.sc_fault_type.set("A相接地")
+
+        self.sc_u = self._add_entry(left, 2, "系统电压 U / kV（线电压）", "110")
+        self.sc_ssc = self._add_entry(left, 3, "系统短路容量 S_sc / MVA", "2000")
+        self.sc_xr = self._add_entry(left, 4, "系统 X/R 比", "10")
+        self.sc_len = self._add_entry(left, 5, "线路长度 / km", "30")
+        self.sc_r1 = self._add_entry(left, 6, "线路正序电阻 R1 / (Ω/km)", "0.05")
+        self.sc_x1 = self._add_entry(left, 7, "线路正序电抗 X1 / (Ω/km)", "0.40")
+        self.sc_r0 = self._add_entry(left, 8, "线路零序电阻 R0 / (Ω/km)", "0.15")
+        self.sc_x0 = self._add_entry(left, 9, "线路零序电抗 X0 / (Ω/km)", "1.20")
+        self.sc_rf = self._add_entry(left, 10, "过渡电阻 Rf / Ω", "0.0")
+
+        self.sc_neutral_mode = ttk.Combobox(left, state="readonly", width=18,
+                                            values=["直接接地", "中性点不接地", "经消弧线圈接地", "经电阻接地", "经电阻电抗接地"])
+        ttk.Label(left, text="系统中性点方式").grid(row=11, column=0, sticky="w", padx=4, pady=4)
+        self.sc_neutral_mode.grid(row=11, column=1, sticky="ew", padx=4, pady=4)
+        self.sc_neutral_mode.set("直接接地")
+
+        self.sc_rn = self._add_entry(left, 12, "中性点电阻 Rn / Ω", "0")
+        self.sc_xn = self._add_entry(left, 13, "中性点电抗 Xn / Ω（消弧线圈）", "0")
+        self.sc_brk = self._add_entry(left, 14, "断路器额定开断电流 Ik / kA（可留空）", "31.5")
+        self.sc_cycles = self._add_entry(left, 15, "仿真周波数（波形）", "3")
+
+        ttk.Button(left, text="计算并绘图", command=self.calculate_short_circuit).grid(
+            row=16, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
+        )
+
+        self.sc_result = ScrolledText(left, width=58, height=20, wrap=tk.WORD)
+        self.sc_result.grid(row=17, column=0, columnspan=2, sticky="nsew", padx=4, pady=4)
+        self.sc_result.configure(state="disabled")
+
+        ttk.Label(right, text="短路点电流波形（含直流偏置）", font=("TkDefaultFont", 11, "bold")).grid(
+            row=0, column=0, sticky="w", pady=(0, 8)
+        )
+
+        self.sc_fig = Figure(figsize=(8.4, 5.4), dpi=100)
+        self.sc_ax_phase = self.sc_fig.add_subplot(211)
+        self.sc_ax_seq = self.sc_fig.add_subplot(212)
+        self.sc_ax_phase.set_ylabel("i_abc / A")
+        self.sc_ax_seq.set_ylabel("i_012 / A")
+        self.sc_ax_seq.set_xlabel("t / s")
+        self.sc_ax_phase.grid(True, alpha=0.4)
+        self.sc_ax_seq.grid(True, alpha=0.4)
+
+        self.sc_canvas = FigureCanvasTkAgg(self.sc_fig, master=right)
+        self.sc_canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
+        self.sc_toolbar = NavigationToolbar2Tk(self.sc_canvas, right, pack_toolbar=False)
+        self.sc_toolbar.update()
+        self.sc_toolbar.grid(row=2, column=0, sticky="ew")
+
+        self.calculate_short_circuit()
+
+    def calculate_short_circuit(self) -> None:
+        try:
+            fault_type = self.sc_fault_type.get().strip()
+            neutral_mode = self.sc_neutral_mode.get().strip()
+            U = _safe_float(self.sc_u.get(), "U")
+            Ssc = _safe_float(self.sc_ssc.get(), "S_sc")
+            xr = _safe_float(self.sc_xr.get(), "X/R")
+            length = _safe_float(self.sc_len.get(), "线路长度")
+            R1 = _safe_float(self.sc_r1.get(), "R1")
+            X1 = _safe_float(self.sc_x1.get(), "X1")
+            R0 = _safe_float(self.sc_r0.get(), "R0")
+            X0 = _safe_float(self.sc_x0.get(), "X0")
+            Rf = _safe_float(self.sc_rf.get(), "Rf")
+            Rn = _safe_float(self.sc_rn.get(), "Rn")
+            Xn = _safe_float(self.sc_xn.get(), "Xn")
+            cycles = max(1.0, _safe_float(self.sc_cycles.get(), "仿真周波数"))
+            brk_txt = self.sc_brk.get().strip()
+            brk = _safe_float(brk_txt, "Ik") if brk_txt else None
+
+            r = short_circuit_capacity(U, fault_type, Ssc, xr, length, R1, X1, R0, X0,
+                                       neutral_mode, Rn, Xn, Rf, brk)
+
+            def _pa(z: complex) -> str:
+                return f"{abs(z):.2f}∠{math.degrees(math.atan2(z.imag, z.real)):.1f}°"
+
+            if r.breaker_ok is None:
+                check = "未输入断路器开断电流，未做匹配判断。"
+            else:
+                check = "匹配：额定开断电流 ≥ 计算开断电流。" if r.breaker_ok else "不匹配：额定开断电流 < 计算开断电流。"
+
+            text = (
                 f"══ 复合序网计算结果 ═════════════════════════════\n"
                 f"  故障类型：{r.fault_type}，中性点：{r.neutral_mode}\n"
                 f"  U = {r.U_kV:.4g} kV，线路长度 = {r.line_len_km:.4g} km，Rf = {r.Rf_ohm:.4g} Ω\n"
@@ -1646,7 +1997,6 @@ class ApproximationToolGUI(tk.Tk):
             )
             self._set_text(self.sc_result, text)
 
-            # 波形：交流分量 + 指数衰减直流偏置
             f = 50.0
             w = 2.0 * math.pi * f
             t_end = cycles / f
