@@ -933,10 +933,26 @@ def short_circuit_capacity(U_kV_ll: float,
     if ft in {"三相短路", "三相接地", "ABC三相短路"}:
         I1 = E / (Z1 + Zf); I2 = 0j; I0 = 0j
         fault_name = "三相短路"; Z_eq = Z1 + Zf
-    elif ft in {"A相接地", "单相接地", "A-G"}:
+    elif ft in {"A相接地", "B相接地", "C相接地", "单相接地", "A-G", "B-G", "C-G"}:
         denom = Z1 + Z2 + Z0 + 3.0 * (Zn + Zf)
-        I1 = E / denom; I2 = I1; I0 = I1
-        fault_name = "A相接地"; Z_eq = denom / 3.0
+        Ieq = E / denom
+
+        if ft in {"A相接地", "单相接地", "A-G"}:
+            Ia, Ib, Ic = 3.0 * Ieq, 0j, 0j
+            fault_name = "A相接地"
+        elif ft in {"B相接地", "B-G"}:
+            Ia, Ib, Ic = 0j, 3.0 * Ieq, 0j
+            fault_name = "B相接地"
+        else:
+            Ia, Ib, Ic = 0j, 0j, 3.0 * Ieq
+            fault_name = "C相接地"
+
+        I0 = (Ia + Ib + Ic) / 3.0
+        a = complex(-0.5, math.sqrt(3.0) / 2.0)
+        a2 = complex(-0.5, -math.sqrt(3.0) / 2.0)
+        I1 = (Ia + a * Ib + a2 * Ic) / 3.0
+        I2 = (Ia + a2 * Ib + a * Ic) / 3.0
+        Z_eq = denom / 3.0
     elif ft in {"AB两相短路", "BC两相短路", "CA两相短路", "两相短路"}:
         denom = Z1 + Z2 + Zf
         I1 = E / denom; I2 = -I1; I0 = 0j
@@ -952,7 +968,8 @@ def short_circuit_capacity(U_kV_ll: float,
     else:
         raise InputError("故障类型不支持。请使用中文故障类型（如A相接地、AB两相接地、BC两相短路、三相接地）。")
 
-    Ia, Ib, Ic = _phase_currents_from_sequence(I0, I1, I2)
+    if ft not in {"A相接地", "B相接地", "C相接地", "单相接地", "A-G", "B-G", "C-G"}:
+        Ia, Ib, Ic = _phase_currents_from_sequence(I0, I1, I2)
     i_break_kA = max(abs(Ia), abs(Ib), abs(Ic)) / 1e3
 
     R_eq = max(Z_eq.real, 1e-6)
@@ -1890,7 +1907,7 @@ class ApproximationToolGUI(tk.Tk):
         )
 
         self.sc_fault_type = ttk.Combobox(left, state="readonly", width=18,
-                                          values=["A相接地", "AB两相接地", "BC两相短路", "三相接地"])
+                                          values=["A相接地", "B相接地", "C相接地", "AB两相接地", "BC两相短路", "三相接地"])
         ttk.Label(left, text="故障类型").grid(row=1, column=0, sticky="w", padx=4, pady=4)
         self.sc_fault_type.grid(row=1, column=1, sticky="ew", padx=4, pady=4)
         self.sc_fault_type.set("A相接地")
