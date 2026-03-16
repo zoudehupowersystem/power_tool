@@ -444,7 +444,7 @@ def convert_3wt_to_pu(
     - Pk_HM 为 H-M 两绕组短路损耗（kW，L 开路，在 SN_H 额定电流下）
     - Pk_HL 为 H-L 两绕组短路损耗（kW，M 开路，在 SN_H 额定电流下）
     - Pk_ML 为 M-L 两绕组短路损耗（kW，H 开路，在 SN_M 额定电流下 → 需折算）
-    - Uk%   同理，均参考高压侧额定容量
+    - Uk%   按设备报参值直接参与三绕组分解（不做 M-L 容量折算）
     """
     for nm, v in [("Pk_HM", Pk_HM_kW), ("Pk_HL", Pk_HL_kW), ("Pk_ML", Pk_ML_kW),
                   ("Uk_HM%", Uk_HM_pct), ("Uk_HL%", Uk_HL_pct), ("Uk_ML%", Uk_ML_pct),
@@ -453,19 +453,28 @@ def convert_3wt_to_pu(
                   ("UN_H", UN_H_kV), ("Sbase", Sbase_MVA), ("Ubase", Ubase_kV)]:
         _validate_positive(nm, v)
 
-    SN_base = max(SN_H_MVA, SN_M_MVA, SN_L_MVA)  # 折算公共容量基准
+    # 统一以高压绕组容量作为三绕组短路参数公共基准（工程上最常见报参方式）。
+    # 注意：若 M-L 试验在较小侧额定电流下完成（常见为 min(SN_M, SN_L)），
+    # 需先折算到 SN_H，再做 T 型分解。
+    SN_base = SN_H_MVA
 
     # ── 折算 Pk 和 Uk% 到公共容量基准 SN_base ────────────────────────
-    # M-L 测试在 SN_M 额定电流下做的 → 折算到 SN_base
-    scale_ML = (SN_base / SN_M_MVA) ** 2
-    Pk_ML_norm = Pk_ML_kW * scale_ML
-    Uk_ML_norm = Uk_ML_pct * (SN_base / SN_M_MVA)
-
-    # H-M 和 H-L 通常已经在 SN_H 额定电流下测定
-    scale_HM = (SN_base / SN_H_MVA) ** 2
-    scale_HL = (SN_base / SN_H_MVA) ** 2
+    # 两两短路损耗试验的电流常按该对绕组中较小容量一侧取值，
+    # 因此按各对 min(SN_i, SN_j) 折算到统一基准 SN_H。
+    SN_HM_test = min(SN_H_MVA, SN_M_MVA)
+    SN_HL_test = min(SN_H_MVA, SN_L_MVA)
+    SN_ML_test = min(SN_M_MVA, SN_L_MVA)
+    scale_HM = (SN_base / SN_HM_test) ** 2
+    scale_HL = (SN_base / SN_HL_test) ** 2
+    scale_ML = (SN_base / SN_ML_test) ** 2
     Pk_HM_norm = Pk_HM_kW * scale_HM
     Pk_HL_norm = Pk_HL_kW * scale_HL
+    Pk_ML_norm = Pk_ML_kW * scale_ML
+
+    # Uk% 按设备给定的同一容量基准直接使用，不再按容量二次换算，
+    # 否则会显著放大三绕组分解结果并偏离出厂试验常用计算。
+    Uk_ML_norm = Uk_ML_pct
+
     Uk_HM_norm = Uk_HM_pct * (SN_base / SN_H_MVA)
     Uk_HL_norm = Uk_HL_pct * (SN_base / SN_H_MVA)
 
@@ -522,12 +531,14 @@ def convert_3wt_to_pu(
     # 检查 Uk_M_pct 是否可能为负（不合理）
     if Uk_M_pct < 0:
         warns.append(ParamWarning("Uk_M%（分解后）", Uk_M_pct, 0, float("inf"),
-                                  "中压绕组分解后 Uk% 为负，可能是三路 Uk% 输入不自洽，请核查。",
-                                  "ERROR"))
+                                  "中压绕组分解后 Uk% 为负。三绕组 T 型分解中可出现负值，"
+                                  "请结合出厂试验/厂家参数复核。",
+                                  "WARNING"))
     if Uk_L_pct < 0:
         warns.append(ParamWarning("Uk_L%（分解后）", Uk_L_pct, 0, float("inf"),
-                                  "低压绕组分解后 Uk% 为负，可能是三路 Uk% 输入不自洽，请核查。",
-                                  "ERROR"))
+                                  "低压绕组分解后 Uk% 为负。三绕组 T 型分解中可出现负值，"
+                                  "请结合出厂试验/厂家参数复核。",
+                                  "WARNING"))
 
     return ThreeWindingResult(
         RH_pu=RH_pu, XH_pu=XH_pu,
