@@ -25,8 +25,10 @@
 from __future__ import annotations
 
 import math
+import json
 import tkinter as tk
 from dataclasses import dataclass
+from pathlib import Path
 from tkinter import messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Optional
@@ -63,6 +65,19 @@ matplotlib.rcParams["axes.unicode_minus"] = False   # 修复负号显示为方�
 
 
 EPS = 1e-10
+
+
+def load_line_params_reference() -> dict:
+    """读取架空线路典型参数 JSON 数据。"""
+    data_path = Path(__file__).resolve().with_name("line_params_reference.json")
+    if not data_path.exists():
+        raise FileNotFoundError(f"未找到典型参数文件：{data_path.name}")
+    with data_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    sections = data.get("sections")
+    if not isinstance(sections, list):
+        raise ValueError("典型参数 JSON 格式错误：缺少 sections 列表。")
+    return data
 
 
 class InputError(ValueError):
@@ -2133,8 +2148,15 @@ class ApproximationToolGUI(tk.Tk):
         self.lp_sbase = self._add_entry(f,  6, "基准容量 Sbase / MVA", "100")
         self.lp_ubase = self._add_entry(f,  7, "基准电压 Ubase / kV（线电压）", "500")
 
-        ttk.Button(f, text="计算并校核", command=self.calculate_line_param).grid(
-            row=8, column=0, columnspan=2, sticky="ew", padx=8, pady=(8, 4))
+        button_row = ttk.Frame(f)
+        button_row.grid(row=8, column=0, columnspan=2, sticky="ew", padx=8, pady=(8, 4))
+        button_row.columnconfigure(0, weight=1)
+        button_row.columnconfigure(1, weight=1)
+
+        ttk.Button(button_row, text="计算并校核", command=self.calculate_line_param).grid(
+            row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(button_row, text="典型参数", command=self.show_line_param_reference).grid(
+            row=0, column=1, sticky="ew", padx=(4, 0))
 
         self.lp_result = ScrolledText(f, width=85, height=20, wrap=tk.WORD)
         self.lp_result.grid(row=9, column=0, columnspan=2, sticky="nsew", padx=8, pady=4)
@@ -2226,6 +2248,64 @@ class ApproximationToolGUI(tk.Tk):
         self.calculate_3wt()
 
     # ── 参数校核计算处理函数 ─────────────────────────────────────────────────
+
+    def show_line_param_reference(self) -> None:
+        """弹出架空线路典型参数窗口（按电压等级展示）。"""
+        try:
+            data = load_line_params_reference()
+        except Exception as exc:
+            messagebox.showerror("读取失败", str(exc))
+            return
+
+        win = tk.Toplevel(self)
+        win.title("架空线路典型参数")
+        win.geometry("980x700")
+        win.minsize(860, 560)
+
+        container = ttk.Frame(win, padding=8)
+        container.pack(fill="both", expand=True)
+
+        title = data.get("description") or "架空线路典型参数"
+        ttk.Label(container, text=title, font=("TkDefaultFont", 11, "bold")).pack(anchor="w")
+        ttk.Label(container, text=f"数据来源：{data.get('source_file', '-')}", foreground="#666666").pack(anchor="w", pady=(2, 6))
+
+        text = ScrolledText(container, wrap=tk.WORD)
+        text.pack(fill="both", expand=True)
+
+        lines = []
+        for sec in data.get("sections", []):
+            voltage = sec.get("voltage_level_kv")
+            line_type = sec.get("line_type") or "-"
+            sec_title = sec.get("section_title", "未命名分组")
+            lines.append(f"\n【{sec_title}】")
+            if voltage:
+                lines.append(f"电压等级：{voltage} kV    线路类型：{line_type}")
+
+            entries = sec.get("entries", [])
+            if not entries:
+                lines.append("  （无数据）")
+                continue
+
+            lines.append("型号                            R1(Ω/km)   X1(Ω/km)   C1(μF/km)   R0(Ω/km)   X0(Ω/km)   C0(μF/km)")
+            lines.append("-" * 104)
+            for item in entries:
+                model = str(item.get("conductor_model") or "-")
+
+                def _fmt(v: object) -> str:
+                    return "-" if v is None else f"{float(v):.6g}"
+
+                lines.append(
+                    f"{model:<30}"
+                    f"{_fmt(item.get('R1_ohm_per_km')):>10}"
+                    f"{_fmt(item.get('X1_ohm_per_km')):>12}"
+                    f"{_fmt(item.get('C1_uF_per_km')):>13}"
+                    f"{_fmt(item.get('R0_ohm_per_km')):>12}"
+                    f"{_fmt(item.get('X0_ohm_per_km')):>12}"
+                    f"{_fmt(item.get('C0_uF_per_km')):>13}"
+                )
+
+        text.insert("1.0", "\n".join(lines).lstrip())
+        text.configure(state="disabled")
 
     def calculate_line_param(self) -> None:
         try:
