@@ -10,7 +10,7 @@ import math
 import tkinter as tk
 
 
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 
 from tkinter.scrolledtext import ScrolledText
@@ -66,6 +66,15 @@ from power_tool_smib import (
 
 from power_tool_line_geometry import calculate_overhead_line_sequence
 from power_tool_loop_closure import loop_closure_analysis
+from power_tool_comtrade import (
+    estimate_sampling_rate,
+    fourier_summary,
+    parse_comtrade,
+    prony_like_summary,
+    sequence_components,
+    sequence_phasors,
+    single_frequency_phasor,
+)
 
 
 # ── 中文字体配置 ──────────────────────────────────────────────────────────────
@@ -223,6 +232,7 @@ class ApproximationToolGUI(tk.Tk):
         self.loop_tab = ttk.Frame(notebook)
         self.param_tab = ttk.Frame(notebook)
         self.sc_tab = ttk.Frame(notebook)
+        self.comtrade_tab = ttk.Frame(notebook)
 
         notebook.add(self.freq_tab, text="频率动态")
         notebook.add(self.osc_tab, text="机电振荡")
@@ -233,6 +243,7 @@ class ApproximationToolGUI(tk.Tk):
         notebook.add(self.loop_tab, text="配电网合环分析")
         notebook.add(self.param_tab, text="参数校核与标幺值")
         notebook.add(self.sc_tab, text="短路电流计算")
+        notebook.add(self.comtrade_tab, text="录波曲线")
 
         self._line_geometry_window: tk.Toplevel | None = None
         self._line_geometry_entries: dict[str, ttk.Entry] = {}
@@ -251,6 +262,7 @@ class ApproximationToolGUI(tk.Tk):
         self._build_loop_closure_tab()
         self._build_param_tab()
         self._build_short_circuit_tab()
+        self._build_comtrade_tab()
 
     @staticmethod
     def _add_entry(parent: ttk.Frame,
@@ -309,6 +321,22 @@ class ApproximationToolGUI(tk.Tk):
                 widget.configure(state=state)
             except Exception:
                 pass
+
+    @staticmethod
+    def _slice_time_window(time_s: np.ndarray, start_s: float, end_s: float) -> np.ndarray:
+        if time_s.size == 0:
+            return np.array([], dtype=int)
+        start_s = max(float(time_s[0]), float(start_s))
+        end_s = min(float(time_s[-1]), float(end_s))
+        if end_s <= start_s:
+            end_s = min(float(time_s[-1]), start_s + max(float(time_s[-1] - time_s[0]) * 0.02, 1e-4))
+        mask = (time_s >= start_s) & (time_s <= end_s)
+        idx = np.flatnonzero(mask)
+        if idx.size < 2:
+            lo = int(np.searchsorted(time_s, start_s, side="left"))
+            hi = int(np.searchsorted(time_s, end_s, side="right"))
+            idx = np.arange(max(0, lo - 1), min(time_s.size, hi + 1))
+        return idx
 
     def _build_frequency_tab(self) -> None:
         self.freq_tab.columnconfigure(1, weight=1)
@@ -2329,6 +2357,781 @@ class ApproximationToolGUI(tk.Tk):
 
         except Exception as exc:
             messagebox.showerror("计算错误", str(exc))
+
+    def _build_comtrade_tab(self) -> None:
+        self._comtrade_record = None
+        self._comtrade_popup = None
+        self._comtrade_popup_canvas = None
+        self._comtrade_popup_fig = None
+        self._sequence_channel_vars: dict[str, tk.StringVar] = {}
+        self._sequence_result_text = None
+        self._sequence_fig = None
+        self._sequence_canvas = None
+        self._sequence_axes = ()
+        self._sequence_cache: dict[tuple[str, tuple[int, int, int], float], dict[str, np.ndarray]] = {}
+        self._comtrade_overlay_mode = tk.StringVar(value="stacked")
+        self._comtrade_default_window_s = 0.12
+        self._comtrade_vertical_zoom = 1.0
+        self._comtrade_visible_count = 6
+        self._comtrade_channel_scroll = 0
+        self._comtrade_cursor_positions: dict[str, float | None] = {"T1": None, "T2": None}
+        self._comtrade_is_syncing_view = False
+        self._comtrade_xlimit_callback_registered = False
+
+        self.comtrade_tab.columnconfigure(1, weight=1)
+        self.comtrade_tab.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(self.comtrade_tab, padding=10)
+        right = ttk.Frame(self.comtrade_tab, padding=10)
+        left.grid(row=0, column=0, sticky="nsw")
+        right.grid(row=0, column=1, sticky="nsew")
+        left.columnconfigure(0, weight=1)
+        left.columnconfigure(1, weight=1)
+        left.columnconfigure(2, weight=1)
+        left.columnconfigure(3, weight=1)
+        left.rowconfigure(9, weight=1)
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(3, weight=1)
+
+        ttk.Label(left, text="录波曲线（COMTRADE 文本/二进制）", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 6))
+
+        self.comtrade_path_var = tk.StringVar(value="")
+        ttk.Entry(left, textvariable=self.comtrade_path_var, width=42).grid(row=2, column=0, columnspan=3, sticky="ew", padx=(0, 4), pady=2)
+        ttk.Button(left, text="选择 CFG", command=self._browse_comtrade_cfg).grid(row=2, column=3, sticky="ew", pady=2)
+        ttk.Button(left, text="加载录波", command=self._load_comtrade_file).grid(row=3, column=0, sticky="ew", pady=(4, 4), padx=(0, 4))
+        ttk.Button(left, text="序量分析", command=self._open_sequence_analysis_window).grid(row=3, column=1, sticky="ew", pady=(4, 4), padx=(0, 4))
+        ttk.Button(left, text="多通道同图", command=self._open_comtrade_overlay_window).grid(row=3, column=2, columnspan=2, sticky="ew", pady=(4, 4))
+
+        ttk.Label(left, text="通道选择（Ctrl/Shift 多选）").grid(row=4, column=0, columnspan=4, sticky="w", pady=(4, 2))
+        self.comtrade_channel_list = tk.Listbox(left, selectmode=tk.EXTENDED, width=42, height=12, exportselection=False)
+        self.comtrade_channel_list.grid(row=5, column=0, columnspan=4, sticky="ew")
+        self.comtrade_channel_list.bind("<<ListboxSelect>>", lambda _e: self._refresh_comtrade_plot())
+
+        ttk.Label(left, text="起始时间 / s").grid(row=6, column=0, sticky="w", pady=(8, 2))
+        self.comtrade_start_entry = ttk.Entry(left, width=12)
+        self.comtrade_start_entry.grid(row=6, column=1, sticky="ew", pady=(8, 2), padx=(0, 4))
+        ttk.Label(left, text="结束时间 / s").grid(row=6, column=2, sticky="w", pady=(8, 2))
+        self.comtrade_end_entry = ttk.Entry(left, width=12)
+        self.comtrade_end_entry.grid(row=6, column=3, sticky="ew", pady=(8, 2))
+
+        ttk.Label(left, text="窗口宽度 / s").grid(row=7, column=0, sticky="w", pady=(6, 2))
+        self.comtrade_window_entry = ttk.Entry(left, width=12)
+        self.comtrade_window_entry.grid(row=7, column=1, sticky="ew", pady=(6, 2), padx=(0, 4))
+        self.comtrade_window_entry.insert(0, "0.12")
+        ttk.Button(left, text="应用时间窗", command=self._apply_comtrade_window).grid(row=7, column=2, sticky="ew", pady=(6, 2), padx=(0, 4))
+        ttk.Button(left, text="恢复初始状态", command=self._reset_comtrade_view).grid(row=7, column=3, sticky="ew", pady=(6, 2))
+
+        ttk.Label(left, text="基波频率 / Hz").grid(row=8, column=0, sticky="w", pady=(6, 2))
+        self.comtrade_fund_entry = ttk.Entry(left, width=12)
+        self.comtrade_fund_entry.grid(row=8, column=1, sticky="ew", pady=(6, 2), padx=(0, 4))
+        self.comtrade_fund_entry.insert(0, "50")
+        ttk.Button(left, text="分析选中通道", command=self._analyze_comtrade_selection).grid(row=8, column=2, sticky="ew", pady=(6, 2), padx=(0, 4))
+        ttk.Button(left, text="全选通道", command=self._select_all_comtrade_channels).grid(row=8, column=3, sticky="ew", pady=(6, 2))
+
+        self.comtrade_analysis_host = ttk.Frame(left)
+        self.comtrade_analysis_host.grid(row=9, column=0, columnspan=4, sticky="nsew", pady=(8, 0))
+        self.comtrade_analysis_host.columnconfigure(0, weight=1)
+        self.comtrade_analysis_host.rowconfigure(0, weight=1)
+
+        self.comtrade_overview_frame = ttk.Frame(self.comtrade_analysis_host)
+        self.comtrade_overview_frame.grid(row=0, column=0, sticky="nsew")
+        self.comtrade_overview_frame.columnconfigure(0, weight=1)
+        self.comtrade_overview_frame.rowconfigure(0, weight=1)
+        self.comtrade_info = ScrolledText(self.comtrade_overview_frame, width=54, height=24, wrap=tk.WORD, font="TkFixedFont")
+        self.comtrade_info.grid(row=0, column=0, sticky="nsew")
+        self.comtrade_info.configure(state="disabled")
+
+        self.comtrade_sequence_frame = ttk.Frame(self.comtrade_analysis_host)
+        self.comtrade_sequence_frame.columnconfigure(0, weight=1)
+        self.comtrade_sequence_frame.rowconfigure(2, weight=1)
+        self.comtrade_sequence_frame.rowconfigure(3, weight=1)
+        self.comtrade_sequence_frame.grid(row=0, column=0, sticky="nsew")
+        self.comtrade_sequence_frame.grid_remove()
+        self._build_embedded_sequence_panel()
+
+        ttk.Label(right, text="录波浏览区", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
+        self.comtrade_time_label = ttk.Label(right, text="未加载文件")
+        self.comtrade_time_label.grid(row=1, column=0, sticky="w", pady=(0, 2))
+        self.comtrade_cursor_label = tk.Text(right, height=4, wrap=tk.WORD)
+        self.comtrade_cursor_label.grid(row=5, column=0, sticky="ew", pady=(6, 0))
+        self.comtrade_cursor_label.insert("1.0", "光标：左键放置 T1，右键放置 T2。")
+        self.comtrade_cursor_label.configure(state="disabled")
+
+        self.comtrade_fig = Figure(figsize=(9.0, 6.2), dpi=100, facecolor="#101010")
+        self.comtrade_ax = self.comtrade_fig.add_subplot(111)
+        self._style_comtrade_axis(self.comtrade_ax)
+        plot_host = ttk.Frame(right)
+        plot_host.grid(row=3, column=0, sticky="nsew")
+        plot_host.columnconfigure(0, weight=1)
+        plot_host.rowconfigure(0, weight=1)
+        self.comtrade_canvas = FigureCanvasTkAgg(self.comtrade_fig, master=plot_host)
+        self.comtrade_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self.comtrade_channel_scrollbar = tk.Scale(plot_host, from_=0, to=0, orient=tk.VERTICAL, showvalue=0, command=lambda _v: self._on_comtrade_vertical_scroll(), highlightthickness=0, length=480)
+        self.comtrade_channel_scrollbar.grid(row=0, column=1, sticky="ns", padx=(4, 0))
+        self.comtrade_toolbar = NavigationToolbar2Tk(self.comtrade_canvas, right, pack_toolbar=False)
+        self.comtrade_toolbar.update()
+        self.comtrade_toolbar.grid(row=4, column=0, sticky="ew")
+
+        slider_frame = ttk.Frame(right)
+        slider_frame.grid(row=2, column=0, sticky="ew", pady=(0, 4))
+        slider_frame.columnconfigure(0, weight=1)
+        ttk.Label(slider_frame, text="时间拖动").grid(row=0, column=0, sticky="w")
+        zoom_bar = ttk.Frame(slider_frame)
+        zoom_bar.grid(row=0, column=1, sticky="e")
+        ttk.Button(zoom_bar, text="纵向放大", command=lambda: self._zoom_comtrade_vertical(1.2)).pack(side="left", padx=(0, 4))
+        ttk.Button(zoom_bar, text="纵向缩小", command=lambda: self._zoom_comtrade_vertical(1 / 1.2)).pack(side="left", padx=(0, 8))
+        ttk.Button(zoom_bar, text="横向放大", command=lambda: self._zoom_comtrade_horizontal(1 / 1.25)).pack(side="left", padx=(0, 4))
+        ttk.Button(zoom_bar, text="横向缩小", command=lambda: self._zoom_comtrade_horizontal(1.25)).pack(side="left")
+        self.comtrade_scroll = tk.Scale(slider_frame, from_=0, to=1000, orient=tk.HORIZONTAL, showvalue=0, command=lambda _v: self._refresh_comtrade_plot(from_scroll=True), highlightthickness=0)
+        self.comtrade_scroll.grid(row=1, column=0, columnspan=2, sticky="ew")
+
+        self._set_text(self.comtrade_info, "未加载录波文件。")
+        self.comtrade_ax.callbacks.connect("xlim_changed", self._on_comtrade_axis_xlim_changed)
+        self.comtrade_canvas.mpl_connect("button_press_event", self._on_comtrade_mouse_click)
+        self._comtrade_xlimit_callback_registered = True
+        self.comtrade_canvas.draw()
+
+    def _style_comtrade_axis(self, ax) -> None:
+        ax.set_facecolor("#050505")
+        ax.grid(True, color="#005f00", alpha=0.9, linewidth=0.7)
+        ax.tick_params(colors="#d8d8d8")
+        for spine in ax.spines.values():
+            spine.set_color("#9a9a9a")
+        ax.xaxis.label.set_color("#d8d8d8")
+        ax.yaxis.label.set_color("#d8d8d8")
+        ax.title.set_color("#f0f0f0")
+
+    def _browse_comtrade_cfg(self) -> None:
+        filename = filedialog.askopenfilename(title="选择 COMTRADE CFG 文件", filetypes=[("COMTRADE CFG", "*.cfg"), ("All files", "*.*")])
+        if filename:
+            self.comtrade_path_var.set(filename)
+
+    def _default_comtrade_window(self, duration: float) -> float:
+        if duration <= 0.0:
+            return self._comtrade_default_window_s
+        return min(max(duration * 0.1, 0.02), min(max(duration, 0.02), 0.20))
+
+    def _set_comtrade_time_entries(self, start_s: float, end_s: float) -> None:
+        self.comtrade_start_entry.delete(0, tk.END)
+        self.comtrade_start_entry.insert(0, f"{start_s:.6g}")
+        self.comtrade_end_entry.delete(0, tk.END)
+        self.comtrade_end_entry.insert(0, f"{end_s:.6g}")
+        self.comtrade_window_entry.delete(0, tk.END)
+        self.comtrade_window_entry.insert(0, f"{max(0.0, end_s - start_s):.6g}")
+
+    def _load_comtrade_file(self) -> None:
+        try:
+            cfg_path = self.comtrade_path_var.get().strip()
+            if not cfg_path:
+                raise InputError("请先选择 COMTRADE 的 CFG 文件。")
+            self._comtrade_record = parse_comtrade(cfg_path)
+            self._populate_comtrade_channels()
+            self._reset_comtrade_view()
+            self._set_text(self.comtrade_info, self._format_comtrade_overview())
+            self._refresh_sequence_analysis_window()
+        except Exception as exc:
+            messagebox.showerror("录波加载失败", str(exc))
+
+    def _populate_comtrade_channels(self) -> None:
+        record = self._comtrade_record
+        self.comtrade_channel_list.delete(0, tk.END)
+        if record is None:
+            return
+        for idx, ch in enumerate(record.analog_channels):
+            self.comtrade_channel_list.insert(tk.END, f"{idx+1:02d} | {ch.name} | {ch.phase or '-'} | {ch.unit or '-'}")
+
+    def _select_all_comtrade_channels(self) -> None:
+        if self._comtrade_record is None:
+            return
+        self.comtrade_channel_list.selection_clear(0, tk.END)
+        if self._comtrade_record.analog_channels:
+            self.comtrade_channel_list.selection_set(0, tk.END)
+        self._comtrade_channel_scroll = 0
+        self._show_comtrade_overview_panel()
+        self._refresh_comtrade_plot()
+
+    def _reset_comtrade_view(self) -> None:
+        record = self._comtrade_record
+        if record is None:
+            return
+        self._select_all_comtrade_channels()
+        self._comtrade_vertical_zoom = 1.0
+        self._comtrade_channel_scroll = 0
+        self._comtrade_cursor_positions = {"T1": None, "T2": None}
+        default_window = self._default_comtrade_window(record.duration_s)
+        self._set_comtrade_time_entries(float(record.time_s[0]), float(record.time_s[0]) + default_window)
+        self._comtrade_is_syncing_view = True
+        self.comtrade_scroll.set(0)
+        self._comtrade_is_syncing_view = False
+        self._refresh_comtrade_plot()
+
+    def _format_comtrade_overview(self) -> str:
+        record = self._comtrade_record
+        if record is None:
+            return "未加载录波文件。"
+        sample_rate = estimate_sampling_rate(record)
+        text = (
+            f"══ COMTRADE 概览 ═══════════════════════\n"
+            f"站名：{record.station_name or '-'}\n设备：{record.device_id or '-'}\n版本：{record.revision}\n"
+            f"DAT 类型：{record.file_type}\n模拟量通道：{len(record.analog_channels)}\n数字量通道：{len(record.digital_channel_names)}\n"
+            f"采样率：{sample_rate:.3f} Hz\n工频：{record.frequency_hz:.3f} Hz\n时长：{record.duration_s:.6f} s\n"
+            f"文件：{record.cfg_path.name} / {record.dat_path.name}"
+        )
+        return text
+
+    def _current_comtrade_window(self) -> tuple[float, float]:
+        record = self._comtrade_record
+        if record is None or record.time_s.size == 0:
+            return 0.0, 0.0
+        total = max(record.duration_s, 0.0)
+        try:
+            width = max(1e-4, _safe_float(self.comtrade_window_entry.get(), "窗口宽度"))
+        except Exception:
+            width = self._default_comtrade_window(total)
+        width = min(width, max(total, width))
+        if total <= width + 1e-12:
+            return float(record.time_s[0]), float(record.time_s[-1])
+        start = float(record.time_s[0]) + (float(self.comtrade_scroll.get()) / 1000.0) * (total - width)
+        end = min(float(record.time_s[-1]), start + width)
+        return start, end
+
+    def _sample_for_plot(self, time_s: np.ndarray, values: np.ndarray, max_points: int = 12000) -> tuple[np.ndarray, np.ndarray]:
+        if time_s.size <= max_points:
+            return time_s, values
+        step = max(1, int(np.ceil(time_s.size / max_points)))
+        return time_s[::step], values[::step]
+
+    def _current_visible_comtrade_indices(self, selection: list[int]) -> list[int]:
+        if len(selection) <= self._comtrade_visible_count:
+            return selection
+        max_start = max(0, len(selection) - self._comtrade_visible_count)
+        start = min(max(0, self._comtrade_channel_scroll), max_start)
+        return selection[start:start + self._comtrade_visible_count]
+
+    def _sync_comtrade_vertical_scrollbar(self, total_selected: int) -> None:
+        max_start = max(0, total_selected - self._comtrade_visible_count)
+        self.comtrade_channel_scrollbar.configure(from_=max_start, to=0 if max_start > 0 else 0)
+        self.comtrade_channel_scroll = min(max(0, self._comtrade_channel_scroll), max_start)
+        self.comtrade_channel_scrollbar.set(self.comtrade_channel_scroll)
+
+    def _on_comtrade_vertical_scroll(self) -> None:
+        try:
+            self._comtrade_channel_scroll = int(round(float(self.comtrade_channel_scrollbar.get())))
+        except Exception:
+            self._comtrade_channel_scroll = 0
+        self._refresh_comtrade_plot()
+
+    def _nearest_comtrade_index(self, x_value: float) -> int | None:
+        record = self._comtrade_record
+        if record is None or record.time_s.size == 0:
+            return None
+        idx = int(np.clip(np.searchsorted(record.time_s, x_value), 0, record.time_s.size - 1))
+        if idx > 0 and abs(record.time_s[idx - 1] - x_value) <= abs(record.time_s[idx] - x_value):
+            idx -= 1
+        return idx
+
+    def _current_comtrade_cursor_index(self, key: str) -> int | None:
+        record = self._comtrade_record
+        frac = self._comtrade_cursor_positions.get(key)
+        if record is None or frac is None:
+            return None
+        start_s, end_s = self._current_comtrade_window()
+        x = start_s + frac * max(end_s - start_s, 0.0)
+        return self._nearest_comtrade_index(x)
+
+    def _current_comtrade_cursor_x(self, key: str) -> float | None:
+        frac = self._comtrade_cursor_positions.get(key)
+        if frac is None:
+            return None
+        start_s, end_s = self._current_comtrade_window()
+        return start_s + frac * max(end_s - start_s, 0.0)
+
+    def _update_comtrade_cursor_label(self) -> None:
+        record = self._comtrade_record
+        if record is None:
+            self.comtrade_cursor_label.configure(state="normal")
+            self.comtrade_cursor_label.delete("1.0", tk.END)
+            self.comtrade_cursor_label.insert("1.0", "光标：左键放置 T1，右键放置 T2。")
+            self.comtrade_cursor_label.configure(state="disabled")
+            return
+        selection = self._selected_comtrade_indices() if self._comtrade_record is not None else []
+        lines = []
+        for key in ("T1", "T2"):
+            idx = self._current_comtrade_cursor_index(key)
+            if idx is None:
+                lines.append(f"{key}: 未设置")
+                continue
+            time_s = float(record.time_s[idx])
+            value_parts = []
+            for ch_idx in selection:
+                ch = record.analog_channels[ch_idx]
+                value_parts.append(f"{ch.name}={record.analog_values[idx, ch_idx]:.5g}{ch.unit or ''}")
+            lines.append(f"{key}: t={time_s:.6f}s, 点号={idx + 1}")
+            if value_parts:
+                chunk = 4
+                for pos in range(0, len(value_parts), chunk):
+                    prefix = "    " if pos == 0 else "    ↳ "
+                    lines.append(prefix + "；".join(value_parts[pos:pos + chunk]))
+        idx1 = self._current_comtrade_cursor_index("T1")
+        idx2 = self._current_comtrade_cursor_index("T2")
+        if idx1 is not None and idx2 is not None:
+            dt = float(record.time_s[idx2] - record.time_s[idx1])
+            ds = idx2 - idx1
+            lines.append(f"Δt = {dt:.6f} s，ΔN = {ds} 点")
+        else:
+            lines.append("提示：左键定位 T1，右键定位 T2；可用于故障前后对比和时间差测量。")
+        self.comtrade_cursor_label.configure(state="normal")
+        self.comtrade_cursor_label.delete("1.0", tk.END)
+        self.comtrade_cursor_label.insert("1.0", "\n".join(lines))
+        self.comtrade_cursor_label.configure(state="disabled")
+
+    def _on_comtrade_mouse_click(self, event) -> None:
+        if event.inaxes is not self.comtrade_ax or event.xdata is None:
+            return
+        x0, x1 = self.comtrade_ax.get_xlim()
+        span = max(x1 - x0, 1e-12)
+        frac = min(1.0, max(0.0, (float(event.xdata) - x0) / span))
+        if event.button == 1:
+            self._comtrade_cursor_positions["T1"] = frac
+        elif event.button == 3:
+            self._comtrade_cursor_positions["T2"] = frac
+        else:
+            return
+        self._update_comtrade_cursor_label()
+        self._refresh_comtrade_plot()
+        self._refresh_sequence_analysis_window()
+
+    def _zoom_comtrade_vertical(self, factor: float) -> None:
+        self._comtrade_vertical_zoom = min(6.0, max(0.25, self._comtrade_vertical_zoom * factor))
+        self._refresh_comtrade_plot()
+
+    def _zoom_comtrade_horizontal(self, factor: float) -> None:
+        record = self._comtrade_record
+        if record is None:
+            return
+        start_s, end_s = self._current_comtrade_window()
+        center = 0.5 * (start_s + end_s)
+        total = max(record.duration_s, 1e-4)
+        current_width = max(1e-4, end_s - start_s)
+        new_width = min(total, max(1e-4, current_width * factor))
+        data_min = float(record.time_s[0])
+        data_max = float(record.time_s[-1])
+        new_start = max(data_min, min(center - new_width / 2.0, data_max - new_width))
+        if total <= new_width + 1e-12:
+            slider = 0.0
+        else:
+            slider = (new_start - data_min) / max(total - new_width, 1e-12) * 1000.0
+        self._comtrade_is_syncing_view = True
+        self.comtrade_window_entry.delete(0, tk.END)
+        self.comtrade_window_entry.insert(0, f"{new_width:.6g}")
+        self.comtrade_scroll.set(max(0.0, min(1000.0, slider)))
+        self._comtrade_is_syncing_view = False
+        self._refresh_comtrade_plot()
+
+    def _apply_comtrade_window(self) -> None:
+        record = self._comtrade_record
+        if record is None:
+            return
+        start_txt = self.comtrade_start_entry.get().strip()
+        end_txt = self.comtrade_end_entry.get().strip()
+        if start_txt and end_txt:
+            start_s = max(float(record.time_s[0]), _safe_float(start_txt, "起始时间"))
+            end_s = min(float(record.time_s[-1]), _safe_float(end_txt, "结束时间"))
+            if end_s <= start_s:
+                raise InputError("结束时间必须大于起始时间。")
+            total = max(record.duration_s, 1e-12)
+            width = end_s - start_s
+            slider = 0.0 if total <= width + 1e-12 else (start_s - float(record.time_s[0])) / max(total - width, 1e-12) * 1000.0
+            self._comtrade_is_syncing_view = True
+            self.comtrade_window_entry.delete(0, tk.END)
+            self.comtrade_window_entry.insert(0, f"{width:.6g}")
+            self.comtrade_scroll.set(max(0.0, min(1000.0, slider)))
+            self._comtrade_is_syncing_view = False
+        self._refresh_comtrade_plot()
+
+    def _on_comtrade_axis_xlim_changed(self, ax) -> None:
+        record = self._comtrade_record
+        if record is None or self._comtrade_is_syncing_view:
+            return
+        xmin, xmax = ax.get_xlim()
+        data_min = float(record.time_s[0])
+        data_max = float(record.time_s[-1])
+        total = max(record.duration_s, 0.0)
+        if not np.isfinite([xmin, xmax]).all() or total <= 0.0:
+            return
+        width = max(1e-4, min(abs(xmax - xmin), total))
+        center = 0.5 * (xmin + xmax)
+        start = max(data_min, min(center - width / 2.0, data_max - width))
+        if abs(width - total) < 1e-12:
+            slider = 0.0
+        else:
+            slider = (start - data_min) / max(total - width, 1e-12) * 1000.0
+        slider = max(0.0, min(1000.0, slider))
+        self._comtrade_is_syncing_view = True
+        self.comtrade_window_entry.delete(0, tk.END)
+        self.comtrade_window_entry.insert(0, f"{width:.6g}")
+        self.comtrade_scroll.set(slider)
+        self._comtrade_is_syncing_view = False
+        self._set_comtrade_time_entries(start, start + width)
+        self.comtrade_time_label.configure(text=f"当前时间窗：{start:.6f} s ~ {start + width:.6f} s")
+
+    def _refresh_comtrade_plot(self, from_scroll: bool = False) -> None:
+        record = self._comtrade_record
+        ax = self.comtrade_ax
+        ax.clear()
+        self._style_comtrade_axis(ax)
+        if record is None or record.analog_values.size == 0:
+            ax.set_title("请先加载 COMTRADE 录波")
+            ax.set_xlabel("t / s")
+            self.comtrade_canvas.draw()
+            return
+        selection = list(self.comtrade_channel_list.curselection())
+        if not selection:
+            selection = list(range(record.analog_values.shape[1]))
+        self._sync_comtrade_vertical_scrollbar(len(selection))
+        visible_selection = self._current_visible_comtrade_indices(selection)
+        start_s, end_s = self._current_comtrade_window()
+        colors = ["#f5e663", "#00ff00", "#ff4040", "#e0e0e0", "#00ffff", "#ff7f00", "#adff2f", "#ff66cc", "#4db6ff", "#ffb3e6"]
+        band_gap = 1.55
+        base_offset = (len(visible_selection) - 1) * band_gap
+
+        for pos, ch_idx in enumerate(visible_selection):
+            raw_time, raw_values = self._sample_for_plot(record.time_s, record.analog_values[:, ch_idx])
+            scale = float(np.max(np.abs(raw_values))) or 1.0
+            offset = base_offset - pos * band_gap
+            y_norm = raw_values / scale * (0.92 * self._comtrade_vertical_zoom) + offset
+            color = colors[pos % len(colors)]
+            ax.plot(raw_time, y_norm, color=color, linewidth=1.0)
+            ax.axhline(offset + 0.98, color="#0c8f0c", linewidth=0.6, alpha=0.8)
+            ax.axhline(offset - 0.98, color="#0c8f0c", linewidth=0.6, alpha=0.8)
+            ax.text(0.01, offset + 1.05, record.analog_channels[ch_idx].name, transform=ax.get_yaxis_transform(), color=color, fontsize=9, ha="left", va="bottom")
+
+        for key, color in (("T1", "#00ffff"), ("T2", "#ff7f00")):
+            frac = self._comtrade_cursor_positions.get(key)
+            if frac is None:
+                continue
+            draw_x = start_s + frac * max(end_s - start_s, 0.0)
+            ax.axvline(draw_x, color=color, linewidth=1.1, linestyle="--")
+            ax.text(draw_x, base_offset + 1.18, key, color=color, fontsize=9, ha="center", va="bottom", bbox=dict(facecolor="#101010", edgecolor=color, boxstyle="round,pad=0.2"))
+
+        lower = -1.2
+        upper = base_offset + 1.35
+        ax.set_xlim(start_s, end_s)
+        ax.set_ylim(lower, upper)
+        ax.set_xlabel("t / s")
+        ax.set_yticks([])
+        ax.set_title("录波曲线浏览")
+        shown_text = f"显示通道：{visible_selection[0] + 1}-{visible_selection[-1] + 1}" if visible_selection else "显示通道：无"
+        self._set_comtrade_time_entries(start_s, end_s)
+        self.comtrade_time_label.configure(text=f"当前时间窗：{start_s:.6f} s ~ {end_s:.6f} s，共 {len(record.time_s)} 点，{shown_text}")
+        self._update_comtrade_cursor_label()
+        self._comtrade_is_syncing_view = True
+        self.comtrade_fig.subplots_adjust(left=0.06, right=0.98, top=0.93, bottom=0.10)
+        self.comtrade_canvas.draw()
+        self._comtrade_is_syncing_view = False
+        self._refresh_sequence_analysis_window()
+        if self._comtrade_popup is not None and self._comtrade_popup.winfo_exists() and not from_scroll:
+            self._draw_comtrade_overlay()
+
+    def _selected_comtrade_indices(self) -> list[int]:
+        if self._comtrade_record is None:
+            raise InputError("请先加载录波文件。")
+        selection = list(self.comtrade_channel_list.curselection())
+        if not selection:
+            return list(range(len(self._comtrade_record.analog_channels)))
+        return selection
+
+    def _analyze_comtrade_selection(self) -> None:
+        try:
+            record = self._comtrade_record
+            if record is None:
+                raise InputError("请先加载录波文件。")
+            selection = self._selected_comtrade_indices()
+            start_s, end_s = self._current_comtrade_window()
+            idx = self._slice_time_window(record.time_s, start_s, end_s)
+            sample_rate = estimate_sampling_rate(record)
+            fundamental = _safe_float(self.comtrade_fund_entry.get(), "基波频率")
+            lines = [self._format_comtrade_overview(), "", f"══ 当前窗口分析（{start_s:.6f}s ~ {end_s:.6f}s）══"]
+            primary = selection[0]
+            ch = record.analog_channels[primary]
+            summary = fourier_summary(record.analog_values[idx, primary], sample_rate, fundamental_hz=fundamental, max_order=10)
+            lines.append(f"傅里叶分析通道：{ch.name} ({ch.unit or '-'})")
+            lines.append(f"DC = {summary.dc:.6g}，THD = {summary.thd_percent:.3f}%")
+            lines.append("阶次   频率/Hz   幅值(pk)    RMS       相角/°")
+            lines.append("-" * 48)
+            for item in summary.harmonics[:8]:
+                lines.append(f"{item.order:>2d}   {item.frequency_hz:>8.3f}   {item.amplitude:>9.5g}   {item.rms:>8.5g}   {item.phase_deg:>8.2f}")
+            try:
+                prony = prony_like_summary(record.analog_values[idx, primary], sample_rate)
+                lines.append("")
+                lines.append(f"Prony 类估计：主振荡频率 {prony.dominant_frequency_hz:.4f} Hz，阻尼比 {prony.damping_ratio_percent:.3f}%，时间常数 {prony.decay_time_constant_s:.5g} s")
+            except Exception as exc:
+                lines.append(f"Prony 类估计：{exc}")
+            if len(selection) >= 3:
+                a, b, c = selection[:3]
+                seq = sequence_components(record.analog_values[idx, a], record.analog_values[idx, b], record.analog_values[idx, c])
+                lines.append("")
+                lines.append(f"序分量（按前三个选中通道 RMS 估计）：正序={seq.positive:.5g}，负序={seq.negative:.5g}，零序={seq.zero:.5g}，不平衡度={seq.unbalance_percent:.3f}%")
+            else:
+                lines.append("")
+                lines.append("序分量提取：请选择至少 3 个相量/电流同类通道。")
+            self._set_text(self.comtrade_info, "\n".join(lines))
+        except Exception as exc:
+            messagebox.showerror("录波分析失败", str(exc))
+
+    def _build_embedded_sequence_panel(self) -> None:
+        top = ttk.Frame(self.comtrade_sequence_frame)
+        top.grid(row=0, column=0, sticky="ew")
+        top.columnconfigure(0, weight=1)
+        top.columnconfigure(1, weight=1)
+        self._sequence_channel_vars = {key: tk.StringVar(value="未设置") for key in ["Ua", "Ub", "Uc", "Ia", "Ib", "Ic"]}
+        self._sequence_comboboxes: list[ttk.Combobox] = []
+
+        for box_idx, (title, prefix) in enumerate((("三相电压通道", "U"), ("三相电流通道", "I"))):
+            lf = ttk.LabelFrame(top, text=title, padding=4)
+            lf.grid(row=0, column=box_idx, sticky="nsew", padx=(0, 6) if box_idx == 0 else 0)
+            for ridx, phase in enumerate(("a", "b", "c")):
+                show_key = f"{prefix}{phase}"
+                ttk.Label(lf, text=show_key).grid(row=ridx, column=0, sticky="w", padx=2, pady=2)
+                cmb = ttk.Combobox(lf, textvariable=self._sequence_channel_vars[show_key], values=["未设置"], state="readonly", width=24)
+                cmb.grid(row=ridx, column=1, sticky="ew", padx=2, pady=2)
+                cmb.bind("<<ComboboxSelected>>", lambda _e: self._refresh_sequence_analysis_window())
+                self._sequence_comboboxes.append(cmb)
+            lf.columnconfigure(1, weight=1)
+
+        btn_row = ttk.Frame(self.comtrade_sequence_frame)
+        btn_row.grid(row=1, column=0, sticky="ew", pady=(6, 4))
+        ttk.Button(btn_row, text="应用配置", command=self._refresh_sequence_analysis_window).pack(side="left")
+        ttk.Button(btn_row, text="返回概览", command=self._show_comtrade_overview_panel).pack(side="left", padx=(6, 0))
+
+        self._sequence_result_text = ScrolledText(self.comtrade_sequence_frame, width=54, height=12, wrap=tk.WORD, font="TkFixedFont")
+        self._sequence_result_text.grid(row=2, column=0, sticky="nsew")
+        self._sequence_result_text.configure(state="disabled")
+
+        self._sequence_fig = Figure(figsize=(4.8, 4.6), dpi=100)
+        ax_seq = self._sequence_fig.add_subplot(111)
+        self._sequence_axes = (ax_seq,)
+        self._sequence_canvas = FigureCanvasTkAgg(self._sequence_fig, master=self.comtrade_sequence_frame)
+        self._sequence_canvas.get_tk_widget().grid(row=3, column=0, sticky="nsew", pady=(6, 0))
+
+    def _show_comtrade_overview_panel(self) -> None:
+        self.comtrade_sequence_frame.grid_remove()
+        self.comtrade_overview_frame.grid()
+
+    def _show_comtrade_sequence_panel(self) -> None:
+        options = self._sequence_channel_options()
+        for cmb in self._sequence_comboboxes:
+            cmb.configure(values=options)
+        self.comtrade_overview_frame.grid_remove()
+        self.comtrade_sequence_frame.grid()
+        self._refresh_sequence_analysis_window()
+
+    def _sequence_channel_options(self) -> list[str]:
+        record = self._comtrade_record
+        options = ["未设置"]
+        if record is None:
+            return options
+        for idx, ch in enumerate(record.analog_channels):
+            options.append(f"{idx}:{ch.name} [{ch.phase or '-'}] {ch.unit or ''}".strip())
+        return options
+
+    def _parse_sequence_channel_selection(self, value: str) -> int | None:
+        value = value.strip()
+        if not value or value == "未设置":
+            return None
+        return int(value.split(":", 1)[0])
+
+    def _open_sequence_analysis_window(self) -> None:
+        self._show_comtrade_sequence_panel()
+
+    def _read_sequence_group(self, labels: tuple[str, str, str]) -> tuple[int, int, int] | None:
+        indices = [self._parse_sequence_channel_selection(self._sequence_channel_vars[key].get()) for key in labels]
+        return tuple(indices) if all(idx is not None for idx in indices) else None
+
+    def _format_sequence_complex(self, value: complex, unit: str) -> str:
+        mag = abs(value)
+        ang = math.degrees(math.atan2(value.imag, value.real))
+        return f"{mag:.5g} ∠ {ang:+.2f}° {unit}"
+
+    def _build_sequence_cache(self, group_key: str, indices: tuple[int, int, int], sample_rate: float, fundamental: float) -> dict[str, np.ndarray]:
+        cache_key = (group_key, indices, round(fundamental, 6))
+        if cache_key in self._sequence_cache:
+            return self._sequence_cache[cache_key]
+        record = self._comtrade_record
+        if record is None:
+            raise InputError("未加载录波文件。")
+        n = max(8, int(round(sample_rate / max(fundamental, 1e-9))))
+        basis = np.exp(-1j * 2.0 * np.pi * fundamental * np.arange(n, dtype=float) / sample_rate)[::-1]
+        scale = 2.0 / n / math.sqrt(2.0)
+
+        def _phasor_track(signal: np.ndarray) -> np.ndarray:
+            return np.convolve(np.asarray(signal, dtype=float), basis, mode="same") * scale
+
+        pa = _phasor_track(record.analog_values[:, indices[0]])
+        pb = _phasor_track(record.analog_values[:, indices[1]])
+        pc = _phasor_track(record.analog_values[:, indices[2]])
+        alpha = complex(-0.5, math.sqrt(3.0) / 2.0)
+        zero = (pa + pb + pc) / 3.0
+        positive = (pa + alpha * pb + (alpha ** 2) * pc) / 3.0
+        negative = (pa + (alpha ** 2) * pb + alpha * pc) / 3.0
+        result = {"zero": zero, "positive": positive, "negative": negative}
+        self._sequence_cache[cache_key] = result
+        return result
+
+    def _draw_sequence_phasor_axis(self, ax, vectors: dict[str, complex]) -> None:
+        ax.clear()
+        ax.axhline(0.0, color="#cccccc", linewidth=0.8)
+        ax.axvline(0.0, color="#cccccc", linewidth=0.8)
+        colors = {"V0": "#d62728", "V1": "#2ca02c", "V2": "#1f77b4", "I0": "#ff00aa", "I1": "#00aaaa", "I2": "#ff7f0e"}
+        max_mag = max(1.0, max(abs(v) for v in vectors.values())) if vectors else 1.0
+        for name, val in vectors.items():
+            ax.arrow(0.0, 0.0, val.real, val.imag, color=colors.get(name, "black"), width=0.0, head_width=max_mag * 0.05, length_includes_head=True)
+            ax.text(val.real, val.imag, f" {name}", color=colors.get(name, "black"), fontsize=9, ha="left", va="bottom")
+        lim = max_mag * 1.25
+        ax.set_xlim(-lim, lim)
+        ax.set_ylim(-lim, lim)
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(True, linestyle="--", alpha=0.35)
+        ax.set_title("")
+        ax.set_xlabel("")
+        ax.set_ylabel("")
+
+    def _refresh_sequence_analysis_window(self) -> None:
+        if self._sequence_result_text is None or self._sequence_fig is None or self._sequence_canvas is None:
+            return
+        record = self._comtrade_record
+        if record is None:
+            self._set_text(self._sequence_result_text, "未加载录波文件。")
+            for ax in self._sequence_axes:
+                ax.clear()
+            self._sequence_canvas.draw()
+            return
+        t1 = self._current_comtrade_cursor_index("T1")
+        if t1 is None:
+            self._set_text(self._sequence_result_text, "请先在主窗口左键设置 T1 光标，再进行序量分析。")
+            for ax in self._sequence_axes:
+                ax.clear()
+                ax.set_title("等待 T1 光标")
+            self._sequence_canvas.draw()
+            return
+        sample_rate = estimate_sampling_rate(record)
+        fundamental = _safe_float(self.comtrade_fund_entry.get(), "基波频率")
+        lines = [f"T1 点号 = {t1 + 1}", f"T1 时间 = {record.time_s[t1]:.6f} s", ""]
+        voltage_group = self._read_sequence_group(("Ua", "Ub", "Uc"))
+        current_group = self._read_sequence_group(("Ia", "Ib", "Ic"))
+        vectors: dict[str, complex] = {}
+        if voltage_group is not None:
+            vcache = self._build_sequence_cache("V", voltage_group, sample_rate, fundamental)
+            vectors["V0"] = complex(vcache["zero"][t1])
+            vectors["V1"] = complex(vcache["positive"][t1])
+            vectors["V2"] = complex(vcache["negative"][t1])
+            unit = record.analog_channels[voltage_group[0]].unit or "pu"
+            lines.append(f"V0: {self._format_sequence_complex(vectors['V0'], unit)}")
+            lines.append(f"V1: {self._format_sequence_complex(vectors['V1'], unit)}")
+            lines.append(f"V2: {self._format_sequence_complex(vectors['V2'], unit)}")
+            lines.append("")
+        if current_group is not None:
+            icache = self._build_sequence_cache("I", current_group, sample_rate, fundamental)
+            vectors["I0"] = complex(icache["zero"][t1])
+            vectors["I1"] = complex(icache["positive"][t1])
+            vectors["I2"] = complex(icache["negative"][t1])
+            unit = record.analog_channels[current_group[0]].unit or "A"
+            lines.append(f"I0: {self._format_sequence_complex(vectors['I0'], unit)}")
+            lines.append(f"I1: {self._format_sequence_complex(vectors['I1'], unit)}")
+            lines.append(f"I2: {self._format_sequence_complex(vectors['I2'], unit)}")
+        if not vectors:
+            self._set_text(self._sequence_result_text, "请在序量分析窗口中至少完整设置一组三相电压或三相电流通道。")
+            ax = self._sequence_axes[0]
+            ax.clear()
+            ax.set_title("")
+            self._sequence_canvas.draw()
+            return
+        self._draw_sequence_phasor_axis(self._sequence_axes[0], vectors)
+        self._set_text(self._sequence_result_text, "\n".join(lines).strip())
+        self._sequence_fig.tight_layout()
+        self._sequence_canvas.draw()
+
+    def _toggle_comtrade_overlay_mode(self) -> None:
+        self._comtrade_overlay_mode.set("overlay" if self._comtrade_overlay_mode.get() == "stacked" else "stacked")
+        self._draw_comtrade_overlay()
+
+    def _open_comtrade_overlay_window(self) -> None:
+        try:
+            self._selected_comtrade_indices()
+        except Exception as exc:
+            messagebox.showwarning("无法绘图", str(exc))
+            return
+        if self._comtrade_popup is not None and self._comtrade_popup.winfo_exists():
+            self._comtrade_popup.deiconify()
+            self._comtrade_popup.lift()
+            self._draw_comtrade_overlay()
+            return
+        win = tk.Toplevel(self)
+        self._comtrade_popup = win
+        win.geometry("1220x840")
+        win.rowconfigure(1, weight=1)
+        win.columnconfigure(0, weight=1)
+
+        tool = ttk.Frame(win, padding=6)
+        tool.grid(row=0, column=0, sticky="ew")
+        ttk.Label(tool, text="显示风格").pack(side="left")
+        ttk.Label(tool, textvariable=self._comtrade_overlay_mode).pack(side="left", padx=(6, 12))
+        ttk.Button(tool, text="一键切换风格", command=self._toggle_comtrade_overlay_mode).pack(side="left")
+
+        frame = ttk.Frame(win, padding=6)
+        frame.grid(row=1, column=0, sticky="nsew")
+        frame.rowconfigure(0, weight=1)
+        frame.columnconfigure(0, weight=1)
+        self._comtrade_popup_fig = Figure(figsize=(10.8, 7.4), dpi=100)
+        self._comtrade_popup_canvas = FigureCanvasTkAgg(self._comtrade_popup_fig, master=frame)
+        self._comtrade_popup_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        toolbar = NavigationToolbar2Tk(self._comtrade_popup_canvas, frame, pack_toolbar=False)
+        toolbar.update()
+        toolbar.grid(row=1, column=0, sticky="ew")
+        self._draw_comtrade_overlay()
+
+    def _draw_comtrade_overlay(self) -> None:
+        record = self._comtrade_record
+        if record is None or self._comtrade_popup_fig is None or self._comtrade_popup_canvas is None:
+            return
+        selection = self._selected_comtrade_indices()
+        start_s, end_s = self._current_comtrade_window()
+        idx = self._slice_time_window(record.time_s, start_s, end_s)
+        t = record.time_s[idx]
+        mode = self._comtrade_overlay_mode.get()
+        self._comtrade_popup_fig.clear()
+        colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf", "#8c564b", "#e377c2"]
+
+        if mode == "overlay":
+            ax = self._comtrade_popup_fig.add_subplot(111)
+            legend_labels = []
+            for pos, ch_idx in enumerate(selection):
+                ch = record.analog_channels[ch_idx]
+                y = record.analog_values[idx, ch_idx]
+                ax.plot(t, y, linewidth=1.2, color=colors[pos % len(colors)], label=ch.name)
+                legend_labels.append(ch.name)
+            ax.grid(True, linestyle="--", alpha=0.35)
+            ax.set_title("多通道同图 / MATLAB 单轴叠加风格")
+            ax.set_xlabel("t / s")
+            ax.set_ylabel("幅值")
+            ax.legend(loc="upper right", fontsize=8, frameon=True, title="通道 / 线形")
+            self._comtrade_popup.title("录波曲线 - 多通道同图（MATLAB 单轴叠加风格）")
+        else:
+            axes = []
+            for pos, ch_idx in enumerate(selection, start=1):
+                axes.append(self._comtrade_popup_fig.add_subplot(len(selection), 1, pos, sharex=axes[0] if axes else None))
+            for ax, ch_idx, color in zip(axes, selection, colors * 10):
+                ch = record.analog_channels[ch_idx]
+                ax.plot(t, record.analog_values[idx, ch_idx], linewidth=1.1, color=color, label=ch.name)
+                ax.grid(True, linestyle='--', alpha=0.35)
+                ax.legend(loc='upper right', fontsize=8)
+                ax.set_ylabel(ch.unit or '值')
+            axes[0].set_title('多通道同图 / MATLAB 学术论文风格（分轴堆叠）')
+            axes[-1].set_xlabel('t / s')
+            self._comtrade_popup.title("录波曲线 - 多通道同图（MATLAB 学术风格）")
+
+        self._comtrade_popup_fig.tight_layout()
+        self._comtrade_popup_canvas.draw()
 
 
 def main() -> None:
