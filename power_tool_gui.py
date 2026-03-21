@@ -2372,6 +2372,8 @@ class ApproximationToolGUI(tk.Tk):
         self._comtrade_overlay_mode = tk.StringVar(value="stacked")
         self._comtrade_default_window_s = 0.12
         self._comtrade_vertical_zoom = 1.0
+        self._comtrade_visible_count = 6
+        self._comtrade_channel_scroll = 0
         self._comtrade_cursor_indices: dict[str, int | None] = {"T1": None, "T2": None}
         self._comtrade_is_syncing_view = False
         self._comtrade_xlimit_callback_registered = False
@@ -2433,8 +2435,14 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_fig = Figure(figsize=(9.0, 6.2), dpi=100, facecolor="#101010")
         self.comtrade_ax = self.comtrade_fig.add_subplot(111)
         self._style_comtrade_axis(self.comtrade_ax)
-        self.comtrade_canvas = FigureCanvasTkAgg(self.comtrade_fig, master=right)
-        self.comtrade_canvas.get_tk_widget().grid(row=3, column=0, sticky="nsew")
+        plot_host = ttk.Frame(right)
+        plot_host.grid(row=3, column=0, sticky="nsew")
+        plot_host.columnconfigure(0, weight=1)
+        plot_host.rowconfigure(0, weight=1)
+        self.comtrade_canvas = FigureCanvasTkAgg(self.comtrade_fig, master=plot_host)
+        self.comtrade_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self.comtrade_channel_scrollbar = tk.Scale(plot_host, from_=0, to=0, orient=tk.VERTICAL, showvalue=0, command=lambda _v: self._on_comtrade_vertical_scroll(), highlightthickness=0, length=480)
+        self.comtrade_channel_scrollbar.grid(row=0, column=1, sticky="ns", padx=(4, 0))
         self.comtrade_toolbar = NavigationToolbar2Tk(self.comtrade_canvas, right, pack_toolbar=False)
         self.comtrade_toolbar.update()
         self.comtrade_toolbar.grid(row=4, column=0, sticky="ew")
@@ -2510,6 +2518,7 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_channel_list.selection_clear(0, tk.END)
         if self._comtrade_record.analog_channels:
             self.comtrade_channel_list.selection_set(0, tk.END)
+        self._comtrade_channel_scroll = 0
         self._refresh_comtrade_plot()
 
     def _reset_comtrade_view(self) -> None:
@@ -2518,6 +2527,7 @@ class ApproximationToolGUI(tk.Tk):
             return
         self._select_all_comtrade_channels()
         self._comtrade_vertical_zoom = 1.0
+        self._comtrade_channel_scroll = 0
         self._comtrade_cursor_indices = {"T1": None, "T2": None}
         default_window = self._default_comtrade_window(record.duration_s)
         self.comtrade_window_entry.delete(0, tk.END)
@@ -2568,6 +2578,26 @@ class ApproximationToolGUI(tk.Tk):
             return time_s, values
         step = max(1, int(np.ceil(time_s.size / max_points)))
         return time_s[::step], values[::step]
+
+    def _current_visible_comtrade_indices(self, selection: list[int]) -> list[int]:
+        if len(selection) <= self._comtrade_visible_count:
+            return selection
+        max_start = max(0, len(selection) - self._comtrade_visible_count)
+        start = min(max(0, self._comtrade_channel_scroll), max_start)
+        return selection[start:start + self._comtrade_visible_count]
+
+    def _sync_comtrade_vertical_scrollbar(self, total_selected: int) -> None:
+        max_start = max(0, total_selected - self._comtrade_visible_count)
+        self.comtrade_channel_scrollbar.configure(from_=max_start, to=0 if max_start > 0 else 0)
+        self.comtrade_channel_scroll = min(max(0, self._comtrade_channel_scroll), max_start)
+        self.comtrade_channel_scrollbar.set(self.comtrade_channel_scroll)
+
+    def _on_comtrade_vertical_scroll(self) -> None:
+        try:
+            self._comtrade_channel_scroll = int(round(float(self.comtrade_channel_scrollbar.get())))
+        except Exception:
+            self._comtrade_channel_scroll = 0
+        self._refresh_comtrade_plot()
 
     def _nearest_comtrade_index(self, x_value: float) -> int | None:
         record = self._comtrade_record
@@ -2693,13 +2723,15 @@ class ApproximationToolGUI(tk.Tk):
         selection = list(self.comtrade_channel_list.curselection())
         if not selection:
             selection = list(range(record.analog_values.shape[1]))
+        self._sync_comtrade_vertical_scrollbar(len(selection))
+        visible_selection = self._current_visible_comtrade_indices(selection)
         start_s, end_s = self._current_comtrade_window()
         all_time, _ = self._sample_for_plot(record.time_s, record.analog_values[:, 0])
         colors = ["#f5e663", "#00ff00", "#ff4040", "#e0e0e0", "#00ffff", "#ff7f00", "#adff2f", "#ff66cc", "#4db6ff", "#ffb3e6"]
         band_gap = 1.55
-        base_offset = (len(selection) - 1) * band_gap
+        base_offset = (len(visible_selection) - 1) * band_gap
 
-        for pos, ch_idx in enumerate(selection):
+        for pos, ch_idx in enumerate(visible_selection):
             raw_time, raw_values = self._sample_for_plot(record.time_s, record.analog_values[:, ch_idx])
             scale = float(np.max(np.abs(raw_values))) or 1.0
             offset = base_offset - pos * band_gap
@@ -2725,7 +2757,8 @@ class ApproximationToolGUI(tk.Tk):
         ax.set_xlabel("t / s")
         ax.set_yticks([])
         ax.set_title("录波曲线浏览（整体可平移/缩放；滑条用于长录波滚动；每条通道带独立边界）")
-        self.comtrade_time_label.configure(text=f"当前时间窗：{start_s:.6f} s ~ {end_s:.6f} s，共 {len(record.time_s)} 点，全通道视图")
+        shown_text = f"显示通道：{visible_selection[0] + 1}-{visible_selection[-1] + 1}" if visible_selection else "显示通道：无"
+        self.comtrade_time_label.configure(text=f"当前时间窗：{start_s:.6f} s ~ {end_s:.6f} s，共 {len(record.time_s)} 点，{shown_text}")
         self._update_comtrade_cursor_label()
         self._comtrade_is_syncing_view = True
         self.comtrade_fig.tight_layout()
