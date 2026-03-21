@@ -2368,6 +2368,7 @@ class ApproximationToolGUI(tk.Tk):
         self._sequence_fig = None
         self._sequence_canvas = None
         self._sequence_axes = ()
+        self._sequence_cache: dict[tuple[str, tuple[int, int, int], float], dict[str, np.ndarray]] = {}
         self._comtrade_overlay_mode = tk.StringVar(value="stacked")
         self._comtrade_default_window_s = 0.12
         self._comtrade_vertical_zoom = 1.0
@@ -2906,10 +2907,9 @@ class ApproximationToolGUI(tk.Tk):
         self._sequence_result_text.grid(row=2, column=0, sticky="nsew")
         self._sequence_result_text.configure(state="disabled")
 
-        self._sequence_fig = Figure(figsize=(4.8, 3.6), dpi=100)
-        ax_u = self._sequence_fig.add_subplot(211)
-        ax_i = self._sequence_fig.add_subplot(212)
-        self._sequence_axes = (ax_u, ax_i)
+        self._sequence_fig = Figure(figsize=(4.8, 4.6), dpi=100)
+        ax_seq = self._sequence_fig.add_subplot(111)
+        self._sequence_axes = (ax_seq,)
         self._sequence_canvas = FigureCanvasTkAgg(self._sequence_fig, master=self.comtrade_sequence_frame)
         self._sequence_canvas.get_tk_widget().grid(row=3, column=0, sticky="nsew", pady=(6, 0))
 
@@ -2952,24 +2952,48 @@ class ApproximationToolGUI(tk.Tk):
         ang = math.degrees(math.atan2(value.imag, value.real))
         return f"{mag:.5g} ∠ {ang:+.2f}° {unit}"
 
-    def _draw_sequence_phasor_axis(self, ax, title: str, seq_set, unit: str) -> None:
+    def _build_sequence_cache(self, group_key: str, indices: tuple[int, int, int], sample_rate: float, fundamental: float) -> dict[str, np.ndarray]:
+        cache_key = (group_key, indices, round(fundamental, 6))
+        if cache_key in self._sequence_cache:
+            return self._sequence_cache[cache_key]
+        record = self._comtrade_record
+        if record is None:
+            raise InputError("未加载录波文件。")
+        n = max(8, int(round(sample_rate / max(fundamental, 1e-9))))
+        basis = np.exp(-1j * 2.0 * np.pi * fundamental * np.arange(n, dtype=float) / sample_rate)[::-1]
+        scale = 2.0 / n / math.sqrt(2.0)
+
+        def _phasor_track(signal: np.ndarray) -> np.ndarray:
+            return np.convolve(np.asarray(signal, dtype=float), basis, mode="same") * scale
+
+        pa = _phasor_track(record.analog_values[:, indices[0]])
+        pb = _phasor_track(record.analog_values[:, indices[1]])
+        pc = _phasor_track(record.analog_values[:, indices[2]])
+        alpha = complex(-0.5, math.sqrt(3.0) / 2.0)
+        zero = (pa + pb + pc) / 3.0
+        positive = (pa + alpha * pb + (alpha ** 2) * pc) / 3.0
+        negative = (pa + (alpha ** 2) * pb + alpha * pc) / 3.0
+        result = {"zero": zero, "positive": positive, "negative": negative}
+        self._sequence_cache[cache_key] = result
+        return result
+
+    def _draw_sequence_phasor_axis(self, ax, vectors: dict[str, complex]) -> None:
         ax.clear()
         ax.axhline(0.0, color="#cccccc", linewidth=0.8)
         ax.axvline(0.0, color="#cccccc", linewidth=0.8)
-        colors = {"零序": "#d62728", "正序": "#2ca02c", "负序": "#1f77b4"}
-        vectors = {"零序": seq_set.zero, "正序": seq_set.positive, "负序": seq_set.negative}
-        max_mag = max(1.0, max(abs(v) for v in vectors.values()))
+        colors = {"V0": "#d62728", "V1": "#2ca02c", "V2": "#1f77b4", "I0": "#ff00aa", "I1": "#00aaaa", "I2": "#ff7f0e"}
+        max_mag = max(1.0, max(abs(v) for v in vectors.values())) if vectors else 1.0
         for name, val in vectors.items():
-            ax.arrow(0.0, 0.0, val.real, val.imag, color=colors[name], width=0.0, head_width=max_mag * 0.05, length_includes_head=True)
-            ax.text(val.real, val.imag, f" {name}", color=colors[name], fontsize=9, ha="left", va="bottom")
+            ax.arrow(0.0, 0.0, val.real, val.imag, color=colors.get(name, "black"), width=0.0, head_width=max_mag * 0.05, length_includes_head=True)
+            ax.text(val.real, val.imag, f" {name}", color=colors.get(name, "black"), fontsize=9, ha="left", va="bottom")
         lim = max_mag * 1.25
         ax.set_xlim(-lim, lim)
         ax.set_ylim(-lim, lim)
         ax.set_aspect("equal", adjustable="box")
         ax.grid(True, linestyle="--", alpha=0.35)
-        ax.set_title(f"{title}序分量相量图 ({unit})")
-        ax.set_xlabel("实部")
-        ax.set_ylabel("虚部")
+        ax.set_title("")
+        ax.set_xlabel("")
+        ax.set_ylabel("")
 
     def _refresh_sequence_analysis_window(self) -> None:
         if self._sequence_result_text is None or self._sequence_fig is None or self._sequence_canvas is None:
@@ -2994,38 +3018,34 @@ class ApproximationToolGUI(tk.Tk):
         lines = [f"T1 点号 = {t1 + 1}", f"T1 时间 = {record.time_s[t1]:.6f} s", ""]
         voltage_group = self._read_sequence_group(("Ua", "Ub", "Uc"))
         current_group = self._read_sequence_group(("Ia", "Ib", "Ic"))
-        results = []
+        vectors: dict[str, complex] = {}
         if voltage_group is not None:
-            va = single_frequency_phasor(record.analog_values[:, voltage_group[0]], sample_rate, fundamental, t1)
-            vb = single_frequency_phasor(record.analog_values[:, voltage_group[1]], sample_rate, fundamental, t1)
-            vc = single_frequency_phasor(record.analog_values[:, voltage_group[2]], sample_rate, fundamental, t1)
-            results.append(("电压", sequence_phasors(va, vb, vc), record.analog_channels[voltage_group[0]].unit or "pu"))
+            vcache = self._build_sequence_cache("V", voltage_group, sample_rate, fundamental)
+            vectors["V0"] = complex(vcache["zero"][t1])
+            vectors["V1"] = complex(vcache["positive"][t1])
+            vectors["V2"] = complex(vcache["negative"][t1])
+            unit = record.analog_channels[voltage_group[0]].unit or "pu"
+            lines.append(f"V0: {self._format_sequence_complex(vectors['V0'], unit)}")
+            lines.append(f"V1: {self._format_sequence_complex(vectors['V1'], unit)}")
+            lines.append(f"V2: {self._format_sequence_complex(vectors['V2'], unit)}")
+            lines.append("")
         if current_group is not None:
-            ia = single_frequency_phasor(record.analog_values[:, current_group[0]], sample_rate, fundamental, t1)
-            ib = single_frequency_phasor(record.analog_values[:, current_group[1]], sample_rate, fundamental, t1)
-            ic = single_frequency_phasor(record.analog_values[:, current_group[2]], sample_rate, fundamental, t1)
-            results.append(("电流", sequence_phasors(ia, ib, ic), record.analog_channels[current_group[0]].unit or "A"))
-        if not results:
+            icache = self._build_sequence_cache("I", current_group, sample_rate, fundamental)
+            vectors["I0"] = complex(icache["zero"][t1])
+            vectors["I1"] = complex(icache["positive"][t1])
+            vectors["I2"] = complex(icache["negative"][t1])
+            unit = record.analog_channels[current_group[0]].unit or "A"
+            lines.append(f"I0: {self._format_sequence_complex(vectors['I0'], unit)}")
+            lines.append(f"I1: {self._format_sequence_complex(vectors['I1'], unit)}")
+            lines.append(f"I2: {self._format_sequence_complex(vectors['I2'], unit)}")
+        if not vectors:
             self._set_text(self._sequence_result_text, "请在序量分析窗口中至少完整设置一组三相电压或三相电流通道。")
-            for ax in self._sequence_axes:
-                ax.clear()
-                ax.set_title("等待完整 ABC 通道配置")
+            ax = self._sequence_axes[0]
+            ax.clear()
+            ax.set_title("")
             self._sequence_canvas.draw()
             return
-        axes = self._sequence_axes
-        for ax in axes:
-            ax.clear()
-        for idx, (title, seq_set, unit) in enumerate(results):
-            lines.append(f"══ {title}序分量 ══")
-            lines.append(f"{title}零序: {self._format_sequence_complex(seq_set.zero, unit)}")
-            lines.append(f"{title}正序: {self._format_sequence_complex(seq_set.positive, unit)}")
-            lines.append(f"{title}负序: {self._format_sequence_complex(seq_set.negative, unit)}")
-            lines.append("")
-            self._draw_sequence_phasor_axis(axes[idx], title, seq_set, unit)
-        if len(results) == 1:
-            axes[1].clear()
-            axes[1].set_title("未配置另一组三相通道")
-            axes[1].axis("off")
+        self._draw_sequence_phasor_axis(self._sequence_axes[0], vectors)
         self._set_text(self._sequence_result_text, "\n".join(lines).strip())
         self._sequence_fig.tight_layout()
         self._sequence_canvas.draw()
