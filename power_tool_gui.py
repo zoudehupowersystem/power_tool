@@ -2388,12 +2388,11 @@ class ApproximationToolGUI(tk.Tk):
         left.columnconfigure(1, weight=1)
         left.columnconfigure(2, weight=1)
         left.columnconfigure(3, weight=1)
-        left.rowconfigure(8, weight=1)
+        left.rowconfigure(9, weight=1)
         right.columnconfigure(0, weight=1)
         right.rowconfigure(3, weight=1)
 
         ttk.Label(left, text="录波曲线（COMTRADE 文本/二进制）", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 6))
-        ttk.Label(left, text="风格参考保护录波器界面：暗色背景、多行通道波形、时间拖拽/滚动；弹窗支持分轴堆叠与 MATLAB 单轴叠加两种风格。", wraplength=430, justify="left").grid(row=1, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
         self.comtrade_path_var = tk.StringVar(value="")
         ttk.Entry(left, textvariable=self.comtrade_path_var, width=42).grid(row=2, column=0, columnspan=3, sticky="ew", padx=(0, 4), pady=2)
@@ -2407,22 +2406,29 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_channel_list.grid(row=5, column=0, columnspan=4, sticky="ew")
         self.comtrade_channel_list.bind("<<ListboxSelect>>", lambda _e: self._refresh_comtrade_plot())
 
-        ttk.Label(left, text="窗口宽度 / s").grid(row=6, column=0, sticky="w", pady=(8, 2))
-        self.comtrade_window_entry = ttk.Entry(left, width=12)
-        self.comtrade_window_entry.grid(row=6, column=1, sticky="w", pady=(8, 2))
-        self.comtrade_window_entry.insert(0, "0.12")
-        ttk.Button(left, text="应用时间窗", command=self._apply_comtrade_window).grid(row=6, column=2, sticky="ew", pady=(8, 2), padx=(0, 4))
-        ttk.Button(left, text="恢复初始状态", command=self._reset_comtrade_view).grid(row=6, column=3, sticky="ew", pady=(8, 2))
+        ttk.Label(left, text="起始时间 / s").grid(row=6, column=0, sticky="w", pady=(8, 2))
+        self.comtrade_start_entry = ttk.Entry(left, width=12)
+        self.comtrade_start_entry.grid(row=6, column=1, sticky="ew", pady=(8, 2), padx=(0, 4))
+        ttk.Label(left, text="结束时间 / s").grid(row=6, column=2, sticky="w", pady=(8, 2))
+        self.comtrade_end_entry = ttk.Entry(left, width=12)
+        self.comtrade_end_entry.grid(row=6, column=3, sticky="ew", pady=(8, 2))
 
-        ttk.Label(left, text="基波频率 / Hz").grid(row=7, column=0, sticky="w", pady=(6, 2))
+        ttk.Label(left, text="窗口宽度 / s").grid(row=7, column=0, sticky="w", pady=(6, 2))
+        self.comtrade_window_entry = ttk.Entry(left, width=12)
+        self.comtrade_window_entry.grid(row=7, column=1, sticky="ew", pady=(6, 2), padx=(0, 4))
+        self.comtrade_window_entry.insert(0, "0.12")
+        ttk.Button(left, text="应用时间窗", command=self._apply_comtrade_window).grid(row=7, column=2, sticky="ew", pady=(6, 2), padx=(0, 4))
+        ttk.Button(left, text="恢复初始状态", command=self._reset_comtrade_view).grid(row=7, column=3, sticky="ew", pady=(6, 2))
+
+        ttk.Label(left, text="基波频率 / Hz").grid(row=8, column=0, sticky="w", pady=(6, 2))
         self.comtrade_fund_entry = ttk.Entry(left, width=12)
-        self.comtrade_fund_entry.grid(row=7, column=1, sticky="w", pady=(6, 2))
+        self.comtrade_fund_entry.grid(row=8, column=1, sticky="ew", pady=(6, 2), padx=(0, 4))
         self.comtrade_fund_entry.insert(0, "50")
-        ttk.Button(left, text="分析选中通道", command=self._analyze_comtrade_selection).grid(row=7, column=2, sticky="ew", pady=(6, 2), padx=(0, 4))
-        ttk.Button(left, text="全选通道", command=self._select_all_comtrade_channels).grid(row=7, column=3, sticky="ew", pady=(6, 2))
+        ttk.Button(left, text="分析选中通道", command=self._analyze_comtrade_selection).grid(row=8, column=2, sticky="ew", pady=(6, 2), padx=(0, 4))
+        ttk.Button(left, text="全选通道", command=self._select_all_comtrade_channels).grid(row=8, column=3, sticky="ew", pady=(6, 2))
 
         self.comtrade_analysis_host = ttk.Frame(left)
-        self.comtrade_analysis_host.grid(row=8, column=0, columnspan=4, sticky="nsew", pady=(8, 0))
+        self.comtrade_analysis_host.grid(row=9, column=0, columnspan=4, sticky="nsew", pady=(8, 0))
         self.comtrade_analysis_host.columnconfigure(0, weight=1)
         self.comtrade_analysis_host.rowconfigure(0, weight=1)
 
@@ -2476,12 +2482,7 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_scroll = tk.Scale(slider_frame, from_=0, to=1000, orient=tk.HORIZONTAL, showvalue=0, command=lambda _v: self._refresh_comtrade_plot(from_scroll=True), highlightthickness=0)
         self.comtrade_scroll.grid(row=1, column=0, columnspan=2, sticky="ew")
 
-        intro = (
-            "功能建议：\n"
-            "1) 保护动作前后游标对比；2) 基波/谐波及 THD 提取；3) 三相序分量与不平衡度；\n"
-            "4) Prony 类振荡频率与阻尼估计；5) 多通道分轴/单轴两种同图风格；6) 长录波滚动浏览。"
-        )
-        self._set_text(self.comtrade_info, intro)
+        self._set_text(self.comtrade_info, "未加载录波文件。")
         self.comtrade_ax.callbacks.connect("xlim_changed", self._on_comtrade_axis_xlim_changed)
         self.comtrade_canvas.mpl_connect("button_press_event", self._on_comtrade_mouse_click)
         self._comtrade_xlimit_callback_registered = True
@@ -2506,6 +2507,14 @@ class ApproximationToolGUI(tk.Tk):
         if duration <= 0.0:
             return self._comtrade_default_window_s
         return min(max(duration * 0.1, 0.02), min(max(duration, 0.02), 0.20))
+
+    def _set_comtrade_time_entries(self, start_s: float, end_s: float) -> None:
+        self.comtrade_start_entry.delete(0, tk.END)
+        self.comtrade_start_entry.insert(0, f"{start_s:.6g}")
+        self.comtrade_end_entry.delete(0, tk.END)
+        self.comtrade_end_entry.insert(0, f"{end_s:.6g}")
+        self.comtrade_window_entry.delete(0, tk.END)
+        self.comtrade_window_entry.insert(0, f"{max(0.0, end_s - start_s):.6g}")
 
     def _load_comtrade_file(self) -> None:
         try:
@@ -2547,8 +2556,7 @@ class ApproximationToolGUI(tk.Tk):
         self._comtrade_channel_scroll = 0
         self._comtrade_cursor_positions = {"T1": None, "T2": None}
         default_window = self._default_comtrade_window(record.duration_s)
-        self.comtrade_window_entry.delete(0, tk.END)
-        self.comtrade_window_entry.insert(0, f"{default_window:.4g}")
+        self._set_comtrade_time_entries(float(record.time_s[0]), float(record.time_s[0]) + default_window)
         self._comtrade_is_syncing_view = True
         self.comtrade_scroll.set(0)
         self._comtrade_is_syncing_view = False
@@ -2564,13 +2572,7 @@ class ApproximationToolGUI(tk.Tk):
             f"站名：{record.station_name or '-'}\n设备：{record.device_id or '-'}\n版本：{record.revision}\n"
             f"DAT 类型：{record.file_type}\n模拟量通道：{len(record.analog_channels)}\n数字量通道：{len(record.digital_channel_names)}\n"
             f"采样率：{sample_rate:.3f} Hz\n工频：{record.frequency_hz:.3f} Hz\n时长：{record.duration_s:.6f} s\n"
-            f"文件：{record.cfg_path.name} / {record.dat_path.name}\n\n"
-            "高级应用设想：\n"
-            "- 保护启动段自动切片与故障前/后对比。\n"
-            "- 相量窗、基波/谐波、THD 和频偏跟踪。\n"
-            "- 三相序分量、负序越限告警。\n"
-            "- Prony 振荡模态估计与低频振荡筛查。\n"
-            "- 批量导出论文风格多通道图。"
+            f"文件：{record.cfg_path.name} / {record.dat_path.name}"
         )
         return text
 
@@ -2716,6 +2718,24 @@ class ApproximationToolGUI(tk.Tk):
         self._refresh_comtrade_plot()
 
     def _apply_comtrade_window(self) -> None:
+        record = self._comtrade_record
+        if record is None:
+            return
+        start_txt = self.comtrade_start_entry.get().strip()
+        end_txt = self.comtrade_end_entry.get().strip()
+        if start_txt and end_txt:
+            start_s = max(float(record.time_s[0]), _safe_float(start_txt, "起始时间"))
+            end_s = min(float(record.time_s[-1]), _safe_float(end_txt, "结束时间"))
+            if end_s <= start_s:
+                raise InputError("结束时间必须大于起始时间。")
+            total = max(record.duration_s, 1e-12)
+            width = end_s - start_s
+            slider = 0.0 if total <= width + 1e-12 else (start_s - float(record.time_s[0])) / max(total - width, 1e-12) * 1000.0
+            self._comtrade_is_syncing_view = True
+            self.comtrade_window_entry.delete(0, tk.END)
+            self.comtrade_window_entry.insert(0, f"{width:.6g}")
+            self.comtrade_scroll.set(max(0.0, min(1000.0, slider)))
+            self._comtrade_is_syncing_view = False
         self._refresh_comtrade_plot()
 
     def _on_comtrade_axis_xlim_changed(self, ax) -> None:
@@ -2741,6 +2761,7 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_window_entry.insert(0, f"{width:.6g}")
         self.comtrade_scroll.set(slider)
         self._comtrade_is_syncing_view = False
+        self._set_comtrade_time_entries(start, start + width)
         self.comtrade_time_label.configure(text=f"当前时间窗：{start:.6f} s ~ {start + width:.6f} s")
 
     def _refresh_comtrade_plot(self, from_scroll: bool = False) -> None:
@@ -2788,8 +2809,9 @@ class ApproximationToolGUI(tk.Tk):
         ax.set_ylim(lower, upper)
         ax.set_xlabel("t / s")
         ax.set_yticks([])
-        ax.set_title("录波曲线浏览（整体可平移/缩放；滑条用于长录波滚动；每条通道带独立边界）")
+        ax.set_title("录波曲线浏览")
         shown_text = f"显示通道：{visible_selection[0] + 1}-{visible_selection[-1] + 1}" if visible_selection else "显示通道：无"
+        self._set_comtrade_time_entries(start_s, end_s)
         self.comtrade_time_label.configure(text=f"当前时间窗：{start_s:.6f} s ~ {end_s:.6f} s，共 {len(record.time_s)} 点，{shown_text}")
         self._update_comtrade_cursor_label()
         self._comtrade_is_syncing_view = True
