@@ -2374,7 +2374,7 @@ class ApproximationToolGUI(tk.Tk):
         self._comtrade_vertical_zoom = 1.0
         self._comtrade_visible_count = 6
         self._comtrade_channel_scroll = 0
-        self._comtrade_cursor_indices: dict[str, int | None] = {"T1": None, "T2": None}
+        self._comtrade_cursor_positions: dict[str, float | None] = {"T1": None, "T2": None}
         self._comtrade_is_syncing_view = False
         self._comtrade_xlimit_callback_registered = False
 
@@ -2528,7 +2528,7 @@ class ApproximationToolGUI(tk.Tk):
         self._select_all_comtrade_channels()
         self._comtrade_vertical_zoom = 1.0
         self._comtrade_channel_scroll = 0
-        self._comtrade_cursor_indices = {"T1": None, "T2": None}
+        self._comtrade_cursor_positions = {"T1": None, "T2": None}
         default_window = self._default_comtrade_window(record.duration_s)
         self.comtrade_window_entry.delete(0, tk.END)
         self.comtrade_window_entry.insert(0, f"{default_window:.4g}")
@@ -2608,6 +2608,22 @@ class ApproximationToolGUI(tk.Tk):
             idx -= 1
         return idx
 
+    def _current_comtrade_cursor_index(self, key: str) -> int | None:
+        record = self._comtrade_record
+        frac = self._comtrade_cursor_positions.get(key)
+        if record is None or frac is None:
+            return None
+        start_s, end_s = self._current_comtrade_window()
+        x = start_s + frac * max(end_s - start_s, 0.0)
+        return self._nearest_comtrade_index(x)
+
+    def _current_comtrade_cursor_x(self, key: str) -> float | None:
+        frac = self._comtrade_cursor_positions.get(key)
+        if frac is None:
+            return None
+        start_s, end_s = self._current_comtrade_window()
+        return start_s + frac * max(end_s - start_s, 0.0)
+
     def _update_comtrade_cursor_label(self) -> None:
         record = self._comtrade_record
         if record is None:
@@ -2615,8 +2631,8 @@ class ApproximationToolGUI(tk.Tk):
             return
         selection = self._selected_comtrade_indices() if self._comtrade_record is not None else []
         lines = []
-        for key, color in (("T1", "#00ffff"), ("T2", "#ff7f00")):
-            idx = self._comtrade_cursor_indices.get(key)
+        for key in ("T1", "T2"):
+            idx = self._current_comtrade_cursor_index(key)
             if idx is None:
                 lines.append(f"{key}: 未设置")
                 continue
@@ -2629,8 +2645,8 @@ class ApproximationToolGUI(tk.Tk):
             if value_parts:
                 prefix += " | " + "；".join(value_parts)
             lines.append(prefix)
-        idx1 = self._comtrade_cursor_indices.get("T1")
-        idx2 = self._comtrade_cursor_indices.get("T2")
+        idx1 = self._current_comtrade_cursor_index("T1")
+        idx2 = self._current_comtrade_cursor_index("T2")
         if idx1 is not None and idx2 is not None:
             dt = float(record.time_s[idx2] - record.time_s[idx1])
             ds = idx2 - idx1
@@ -2642,13 +2658,13 @@ class ApproximationToolGUI(tk.Tk):
     def _on_comtrade_mouse_click(self, event) -> None:
         if event.inaxes is not self.comtrade_ax or event.xdata is None:
             return
-        idx = self._nearest_comtrade_index(float(event.xdata))
-        if idx is None:
-            return
+        x0, x1 = self.comtrade_ax.get_xlim()
+        span = max(x1 - x0, 1e-12)
+        frac = min(1.0, max(0.0, (float(event.xdata) - x0) / span))
         if event.button == 1:
-            self._comtrade_cursor_indices["T1"] = idx
+            self._comtrade_cursor_positions["T1"] = frac
         elif event.button == 3:
-            self._comtrade_cursor_indices["T2"] = idx
+            self._comtrade_cursor_positions["T2"] = frac
         else:
             return
         self._update_comtrade_cursor_label()
@@ -2742,20 +2758,12 @@ class ApproximationToolGUI(tk.Tk):
             ax.text(0.01, offset + 1.05, record.analog_channels[ch_idx].name, transform=ax.get_yaxis_transform(), color=color, fontsize=9, ha="left", va="bottom")
 
         for key, color in (("T1", "#00ffff"), ("T2", "#ff7f00")):
-            idx = self._comtrade_cursor_indices.get(key)
-            if idx is None:
+            frac = self._comtrade_cursor_positions.get(key)
+            if frac is None:
                 continue
-            x = float(record.time_s[idx])
-            label = key
-            draw_x = x
-            if x < start_s:
-                draw_x = start_s
-                label = f"<{key}"
-            elif x > end_s:
-                draw_x = end_s
-                label = f"{key}>"
+            draw_x = start_s + frac * max(end_s - start_s, 0.0)
             ax.axvline(draw_x, color=color, linewidth=1.1, linestyle="--")
-            ax.text(draw_x, base_offset + 1.18, label, color=color, fontsize=9, ha="center", va="bottom", bbox=dict(facecolor="#101010", edgecolor=color, boxstyle="round,pad=0.2"))
+            ax.text(draw_x, base_offset + 1.18, key, color=color, fontsize=9, ha="center", va="bottom", bbox=dict(facecolor="#101010", edgecolor=color, boxstyle="round,pad=0.2"))
 
         lower = -1.2
         upper = base_offset + 1.35
@@ -2933,7 +2941,7 @@ class ApproximationToolGUI(tk.Tk):
                 ax.clear()
             self._sequence_canvas.draw()
             return
-        t1 = self._comtrade_cursor_indices.get("T1")
+        t1 = self._current_comtrade_cursor_index("T1")
         if t1 is None:
             self._set_text(self._sequence_result_text, "请先在主窗口左键设置 T1 光标，再进行序量分析。")
             for ax in self._sequence_axes:
