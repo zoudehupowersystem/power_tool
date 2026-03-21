@@ -2357,6 +2357,7 @@ class ApproximationToolGUI(tk.Tk):
         self._comtrade_popup_fig = None
         self._comtrade_overlay_mode = tk.StringVar(value="stacked")
         self._comtrade_default_window_s = 0.12
+        self._comtrade_vertical_zoom = 1.0
         self._comtrade_is_syncing_view = False
         self._comtrade_xlimit_callback_registered = False
 
@@ -2424,8 +2425,14 @@ class ApproximationToolGUI(tk.Tk):
         slider_frame.grid(row=2, column=0, sticky="ew", pady=(0, 4))
         slider_frame.columnconfigure(0, weight=1)
         ttk.Label(slider_frame, text="时间拖动").grid(row=0, column=0, sticky="w")
+        zoom_bar = ttk.Frame(slider_frame)
+        zoom_bar.grid(row=0, column=1, sticky="e")
+        ttk.Button(zoom_bar, text="纵向放大", command=lambda: self._zoom_comtrade_vertical(1.2)).pack(side="left", padx=(0, 4))
+        ttk.Button(zoom_bar, text="纵向缩小", command=lambda: self._zoom_comtrade_vertical(1 / 1.2)).pack(side="left", padx=(0, 8))
+        ttk.Button(zoom_bar, text="横向放大", command=lambda: self._zoom_comtrade_horizontal(1 / 1.25)).pack(side="left", padx=(0, 4))
+        ttk.Button(zoom_bar, text="横向缩小", command=lambda: self._zoom_comtrade_horizontal(1.25)).pack(side="left")
         self.comtrade_scroll = tk.Scale(slider_frame, from_=0, to=1000, orient=tk.HORIZONTAL, showvalue=0, command=lambda _v: self._refresh_comtrade_plot(from_scroll=True), highlightthickness=0)
-        self.comtrade_scroll.grid(row=1, column=0, sticky="ew")
+        self.comtrade_scroll.grid(row=1, column=0, columnspan=2, sticky="ew")
 
         intro = (
             "功能建议：\n"
@@ -2490,6 +2497,7 @@ class ApproximationToolGUI(tk.Tk):
         if record is None:
             return
         self._select_all_comtrade_channels()
+        self._comtrade_vertical_zoom = 1.0
         default_window = self._default_comtrade_window(record.duration_s)
         self.comtrade_window_entry.delete(0, tk.END)
         self.comtrade_window_entry.insert(0, f"{default_window:.4g}")
@@ -2539,6 +2547,33 @@ class ApproximationToolGUI(tk.Tk):
             return time_s, values
         step = max(1, int(np.ceil(time_s.size / max_points)))
         return time_s[::step], values[::step]
+
+    def _zoom_comtrade_vertical(self, factor: float) -> None:
+        self._comtrade_vertical_zoom = min(6.0, max(0.25, self._comtrade_vertical_zoom * factor))
+        self._refresh_comtrade_plot()
+
+    def _zoom_comtrade_horizontal(self, factor: float) -> None:
+        record = self._comtrade_record
+        if record is None:
+            return
+        start_s, end_s = self._current_comtrade_window()
+        center = 0.5 * (start_s + end_s)
+        total = max(record.duration_s, 1e-4)
+        current_width = max(1e-4, end_s - start_s)
+        new_width = min(total, max(1e-4, current_width * factor))
+        data_min = float(record.time_s[0])
+        data_max = float(record.time_s[-1])
+        new_start = max(data_min, min(center - new_width / 2.0, data_max - new_width))
+        if total <= new_width + 1e-12:
+            slider = 0.0
+        else:
+            slider = (new_start - data_min) / max(total - new_width, 1e-12) * 1000.0
+        self._comtrade_is_syncing_view = True
+        self.comtrade_window_entry.delete(0, tk.END)
+        self.comtrade_window_entry.insert(0, f"{new_width:.6g}")
+        self.comtrade_scroll.set(max(0.0, min(1000.0, slider)))
+        self._comtrade_is_syncing_view = False
+        self._refresh_comtrade_plot()
 
     def _apply_comtrade_window(self) -> None:
         self._refresh_comtrade_plot()
@@ -2591,7 +2626,7 @@ class ApproximationToolGUI(tk.Tk):
             raw_time, raw_values = self._sample_for_plot(record.time_s, record.analog_values[:, ch_idx])
             scale = float(np.max(np.abs(raw_values))) or 1.0
             offset = base_offset - pos * band_gap
-            y_norm = raw_values / scale * 0.92 + offset
+            y_norm = raw_values / scale * (0.92 * self._comtrade_vertical_zoom) + offset
             color = colors[pos % len(colors)]
             ax.plot(raw_time, y_norm, color=color, linewidth=1.0)
             ax.axhline(offset + 0.98, color="#0c8f0c", linewidth=0.6, alpha=0.8)
