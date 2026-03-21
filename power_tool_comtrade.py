@@ -71,6 +71,39 @@ class PronySummary:
     amplitude: float
 
 
+@dataclass
+class SequencePhasorSet:
+    zero: complex
+    positive: complex
+    negative: complex
+
+
+def single_frequency_phasor(signal: np.ndarray, sample_rate_hz: float, fundamental_hz: float, center_index: int, cycles: float = 1.0) -> complex:
+    x = np.asarray(signal, dtype=float)
+    if x.size < 4:
+        raise ValueError('采样点不足，无法提取工频相量。')
+    window_samples = max(8, int(round(sample_rate_hz / max(fundamental_hz, 1e-9) * cycles)))
+    half = window_samples // 2
+    start = max(0, center_index - half)
+    end = min(x.size, start + window_samples)
+    start = max(0, end - window_samples)
+    seg = x[start:end]
+    if seg.size < 4:
+        raise ValueError('相量窗长度不足。')
+    t = np.arange(seg.size, dtype=float) / sample_rate_hz
+    basis = np.exp(-1j * 2.0 * np.pi * fundamental_hz * t)
+    coef = 2.0 / seg.size * np.dot(seg, basis)
+    return coef / math.sqrt(2.0)
+
+
+def sequence_phasors(a: complex, b: complex, c: complex) -> SequencePhasorSet:
+    alpha = complex(-0.5, math.sqrt(3.0) / 2.0)
+    zero = (a + b + c) / 3.0
+    positive = (a + alpha * b + (alpha ** 2) * c) / 3.0
+    negative = (a + (alpha ** 2) * b + alpha * c) / 3.0
+    return SequencePhasorSet(zero=zero, positive=positive, negative=negative)
+
+
 def _parse_float(text: str, default: float = 0.0) -> float:
     text = text.strip()
     if not text:

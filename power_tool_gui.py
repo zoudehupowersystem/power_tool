@@ -66,7 +66,15 @@ from power_tool_smib import (
 
 from power_tool_line_geometry import calculate_overhead_line_sequence
 from power_tool_loop_closure import loop_closure_analysis
-from power_tool_comtrade import estimate_sampling_rate, fourier_summary, parse_comtrade, prony_like_summary, sequence_components
+from power_tool_comtrade import (
+    estimate_sampling_rate,
+    fourier_summary,
+    parse_comtrade,
+    prony_like_summary,
+    sequence_components,
+    sequence_phasors,
+    single_frequency_phasor,
+)
 
 
 # ── 中文字体配置 ──────────────────────────────────────────────────────────────
@@ -2355,6 +2363,12 @@ class ApproximationToolGUI(tk.Tk):
         self._comtrade_popup = None
         self._comtrade_popup_canvas = None
         self._comtrade_popup_fig = None
+        self._sequence_window: tk.Toplevel | None = None
+        self._sequence_channel_vars: dict[str, tk.StringVar] = {}
+        self._sequence_result_text = None
+        self._sequence_fig = None
+        self._sequence_canvas = None
+        self._sequence_axes = ()
         self._comtrade_overlay_mode = tk.StringVar(value="stacked")
         self._comtrade_default_window_s = 0.12
         self._comtrade_vertical_zoom = 1.0
@@ -2383,7 +2397,8 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_path_var = tk.StringVar(value="")
         ttk.Entry(left, textvariable=self.comtrade_path_var, width=42).grid(row=2, column=0, columnspan=3, sticky="ew", padx=(0, 4), pady=2)
         ttk.Button(left, text="选择 CFG", command=self._browse_comtrade_cfg).grid(row=2, column=3, sticky="ew", pady=2)
-        ttk.Button(left, text="加载录波", command=self._load_comtrade_file).grid(row=3, column=0, columnspan=2, sticky="ew", pady=(4, 4), padx=(0, 4))
+        ttk.Button(left, text="加载录波", command=self._load_comtrade_file).grid(row=3, column=0, sticky="ew", pady=(4, 4), padx=(0, 4))
+        ttk.Button(left, text="序量分析", command=self._open_sequence_analysis_window).grid(row=3, column=1, sticky="ew", pady=(4, 4), padx=(0, 4))
         ttk.Button(left, text="多通道同图", command=self._open_comtrade_overlay_window).grid(row=3, column=2, columnspan=2, sticky="ew", pady=(4, 4))
 
         ttk.Label(left, text="通道选择（Ctrl/Shift 多选）").grid(row=4, column=0, columnspan=4, sticky="w", pady=(4, 2))
@@ -2477,6 +2492,7 @@ class ApproximationToolGUI(tk.Tk):
             self._populate_comtrade_channels()
             self._reset_comtrade_view()
             self._set_text(self.comtrade_info, self._format_comtrade_overview())
+            self._refresh_sequence_analysis_window()
         except Exception as exc:
             messagebox.showerror("录波加载失败", str(exc))
 
@@ -2607,6 +2623,7 @@ class ApproximationToolGUI(tk.Tk):
             return
         self._update_comtrade_cursor_label()
         self._refresh_comtrade_plot()
+        self._refresh_sequence_analysis_window()
 
     def _zoom_comtrade_vertical(self, factor: float) -> None:
         self._comtrade_vertical_zoom = min(6.0, max(0.25, self._comtrade_vertical_zoom * factor))
@@ -2762,6 +2779,168 @@ class ApproximationToolGUI(tk.Tk):
             self._set_text(self.comtrade_info, "\n".join(lines))
         except Exception as exc:
             messagebox.showerror("录波分析失败", str(exc))
+
+    def _sequence_channel_options(self) -> list[str]:
+        record = self._comtrade_record
+        options = ["未设置"]
+        if record is None:
+            return options
+        for idx, ch in enumerate(record.analog_channels):
+            options.append(f"{idx}:{ch.name} [{ch.phase or '-'}] {ch.unit or ''}".strip())
+        return options
+
+    def _parse_sequence_channel_selection(self, value: str) -> int | None:
+        value = value.strip()
+        if not value or value == "未设置":
+            return None
+        return int(value.split(":", 1)[0])
+
+    def _open_sequence_analysis_window(self) -> None:
+        if self._sequence_window is not None:
+            try:
+                if self._sequence_window.winfo_exists():
+                    self._sequence_window.deiconify()
+                    self._sequence_window.lift()
+                    self._refresh_sequence_analysis_window()
+                    return
+            except Exception:
+                self._sequence_window = None
+        win = tk.Toplevel(self)
+        self._sequence_window = win
+        win.title("序量分析")
+        win.geometry("1180x760")
+        win.rowconfigure(1, weight=1)
+        win.columnconfigure(0, weight=1)
+
+        top = ttk.Frame(win, padding=8)
+        top.grid(row=0, column=0, sticky="ew")
+        bottom = ttk.Frame(win, padding=8)
+        bottom.grid(row=1, column=0, sticky="nsew")
+        bottom.columnconfigure(1, weight=1)
+        bottom.rowconfigure(0, weight=1)
+
+        options = self._sequence_channel_options()
+        self._sequence_channel_vars = {key: tk.StringVar(value="未设置") for key in ["Ua", "Ub", "Uc", "Ia", "Ib", "Ic"]}
+        for box_idx, (title, prefix) in enumerate((("三相电压通道", "U"), ("三相电流通道", "I"))):
+            lf = ttk.LabelFrame(top, text=title, padding=6)
+            lf.grid(row=0, column=box_idx, sticky="nsew", padx=(0, 8) if box_idx == 0 else 0)
+            for ridx, phase in enumerate(("a", "b", "c")):
+                key = f"{prefix}{phase}".replace('a', 'a').replace('b', 'b').replace('c', 'c')
+                show_key = f"{prefix}{phase}"
+                ttk.Label(lf, text=show_key).grid(row=ridx, column=0, sticky="w", padx=4, pady=3)
+                cmb = ttk.Combobox(lf, textvariable=self._sequence_channel_vars[show_key], values=options, state="readonly", width=34)
+                cmb.grid(row=ridx, column=1, sticky="ew", padx=4, pady=3)
+                cmb.bind("<<ComboboxSelected>>", lambda _e: self._refresh_sequence_analysis_window())
+            lf.columnconfigure(1, weight=1)
+
+        ttk.Button(top, text="应用配置", command=self._refresh_sequence_analysis_window).grid(row=0, column=2, sticky="s", padx=(8, 0))
+
+        self._sequence_result_text = ScrolledText(bottom, width=52, height=28, wrap=tk.WORD, font="TkFixedFont")
+        self._sequence_result_text.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        self._sequence_result_text.configure(state="disabled")
+
+        self._sequence_fig = Figure(figsize=(8.0, 5.8), dpi=100)
+        ax_u = self._sequence_fig.add_subplot(211)
+        ax_i = self._sequence_fig.add_subplot(212)
+        self._sequence_axes = (ax_u, ax_i)
+        self._sequence_canvas = FigureCanvasTkAgg(self._sequence_fig, master=bottom)
+        self._sequence_canvas.get_tk_widget().grid(row=0, column=1, sticky="nsew")
+        toolbar = NavigationToolbar2Tk(self._sequence_canvas, bottom, pack_toolbar=False)
+        toolbar.update()
+        toolbar.grid(row=1, column=1, sticky="ew")
+        self._refresh_sequence_analysis_window()
+
+    def _read_sequence_group(self, labels: tuple[str, str, str]) -> tuple[int, int, int] | None:
+        indices = [self._parse_sequence_channel_selection(self._sequence_channel_vars[key].get()) for key in labels]
+        return tuple(indices) if all(idx is not None for idx in indices) else None
+
+    def _format_sequence_complex(self, value: complex, unit: str) -> str:
+        mag = abs(value)
+        ang = math.degrees(math.atan2(value.imag, value.real))
+        return f"{mag:.5g} ∠ {ang:+.2f}° {unit}"
+
+    def _draw_sequence_phasor_axis(self, ax, title: str, seq_set, unit: str) -> None:
+        ax.clear()
+        ax.axhline(0.0, color="#cccccc", linewidth=0.8)
+        ax.axvline(0.0, color="#cccccc", linewidth=0.8)
+        colors = {"零序": "#d62728", "正序": "#2ca02c", "负序": "#1f77b4"}
+        vectors = {"零序": seq_set.zero, "正序": seq_set.positive, "负序": seq_set.negative}
+        max_mag = max(1.0, max(abs(v) for v in vectors.values()))
+        for name, val in vectors.items():
+            ax.arrow(0.0, 0.0, val.real, val.imag, color=colors[name], width=0.0, head_width=max_mag * 0.05, length_includes_head=True)
+            ax.text(val.real, val.imag, f" {name}", color=colors[name], fontsize=9, ha="left", va="bottom")
+        lim = max_mag * 1.25
+        ax.set_xlim(-lim, lim)
+        ax.set_ylim(-lim, lim)
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(True, linestyle="--", alpha=0.35)
+        ax.set_title(f"{title}序分量相量图 ({unit})")
+        ax.set_xlabel("实部")
+        ax.set_ylabel("虚部")
+
+    def _refresh_sequence_analysis_window(self) -> None:
+        if self._sequence_window is None or self._sequence_result_text is None or self._sequence_fig is None or self._sequence_canvas is None:
+            return
+        try:
+            if not self._sequence_window.winfo_exists():
+                return
+        except Exception:
+            return
+        record = self._comtrade_record
+        if record is None:
+            self._set_text(self._sequence_result_text, "未加载录波文件。")
+            for ax in self._sequence_axes:
+                ax.clear()
+            self._sequence_canvas.draw()
+            return
+        t1 = self._comtrade_cursor_indices.get("T1")
+        if t1 is None:
+            self._set_text(self._sequence_result_text, "请先在主窗口左键设置 T1 光标，再进行序量分析。")
+            for ax in self._sequence_axes:
+                ax.clear()
+                ax.set_title("等待 T1 光标")
+            self._sequence_canvas.draw()
+            return
+        sample_rate = estimate_sampling_rate(record)
+        fundamental = _safe_float(self.comtrade_fund_entry.get(), "基波频率")
+        lines = [f"T1 点号 = {t1 + 1}", f"T1 时间 = {record.time_s[t1]:.6f} s", ""]
+        voltage_group = self._read_sequence_group(("Ua", "Ub", "Uc"))
+        current_group = self._read_sequence_group(("Ia", "Ib", "Ic"))
+        results = []
+        if voltage_group is not None:
+            va = single_frequency_phasor(record.analog_values[:, voltage_group[0]], sample_rate, fundamental, t1)
+            vb = single_frequency_phasor(record.analog_values[:, voltage_group[1]], sample_rate, fundamental, t1)
+            vc = single_frequency_phasor(record.analog_values[:, voltage_group[2]], sample_rate, fundamental, t1)
+            results.append(("电压", sequence_phasors(va, vb, vc), record.analog_channels[voltage_group[0]].unit or "pu"))
+        if current_group is not None:
+            ia = single_frequency_phasor(record.analog_values[:, current_group[0]], sample_rate, fundamental, t1)
+            ib = single_frequency_phasor(record.analog_values[:, current_group[1]], sample_rate, fundamental, t1)
+            ic = single_frequency_phasor(record.analog_values[:, current_group[2]], sample_rate, fundamental, t1)
+            results.append(("电流", sequence_phasors(ia, ib, ic), record.analog_channels[current_group[0]].unit or "A"))
+        if not results:
+            self._set_text(self._sequence_result_text, "请在序量分析窗口中至少完整设置一组三相电压或三相电流通道。")
+            for ax in self._sequence_axes:
+                ax.clear()
+                ax.set_title("等待完整 ABC 通道配置")
+            self._sequence_canvas.draw()
+            return
+        axes = self._sequence_axes
+        for ax in axes:
+            ax.clear()
+        for idx, (title, seq_set, unit) in enumerate(results):
+            lines.append(f"══ {title}序分量 ══")
+            lines.append(f"{title}零序: {self._format_sequence_complex(seq_set.zero, unit)}")
+            lines.append(f"{title}正序: {self._format_sequence_complex(seq_set.positive, unit)}")
+            lines.append(f"{title}负序: {self._format_sequence_complex(seq_set.negative, unit)}")
+            lines.append("")
+            self._draw_sequence_phasor_axis(axes[idx], title, seq_set, unit)
+        if len(results) == 1:
+            axes[1].clear()
+            axes[1].set_title("未配置另一组三相通道")
+            axes[1].axis("off")
+        self._set_text(self._sequence_result_text, "\n".join(lines).strip())
+        self._sequence_fig.tight_layout()
+        self._sequence_canvas.draw()
 
     def _toggle_comtrade_overlay_mode(self) -> None:
         self._comtrade_overlay_mode.set("overlay" if self._comtrade_overlay_mode.get() == "stacked" else "stacked")

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from power_tool_comtrade import estimate_sampling_rate, fourier_summary, parse_comtrade
+from power_tool_comtrade import estimate_sampling_rate, fourier_summary, parse_comtrade, sequence_phasors, single_frequency_phasor
 
 
 def _write_cfg(path: Path, dat_type: str) -> None:
@@ -77,3 +77,19 @@ def test_fourier_summary_extracts_fundamental() -> None:
     summary = fourier_summary(signal, fs, fundamental_hz=50.0, max_order=5)
     assert abs(summary.harmonics[0].amplitude - 10) < 0.2
     assert summary.thd_percent > 5.0
+
+
+def test_sequence_phasors_detects_positive_sequence() -> None:
+    fs = 2000.0
+    t = np.arange(0.0, 0.2, 1 / fs)
+    va = 10 * np.sin(2 * np.pi * 50 * t)
+    vb = 10 * np.sin(2 * np.pi * 50 * t - 2 * np.pi / 3)
+    vc = 10 * np.sin(2 * np.pi * 50 * t + 2 * np.pi / 3)
+    center = len(t) // 2
+    pha = single_frequency_phasor(va, fs, 50.0, center)
+    phb = single_frequency_phasor(vb, fs, 50.0, center)
+    phc = single_frequency_phasor(vc, fs, 50.0, center)
+    seq = sequence_phasors(pha, phb, phc)
+    assert abs(seq.positive) > 1.0
+    assert abs(seq.negative) < 1e-6
+    assert abs(seq.zero) < 1e-6
