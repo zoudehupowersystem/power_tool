@@ -2726,7 +2726,6 @@ class ApproximationToolGUI(tk.Tk):
         self._sync_comtrade_vertical_scrollbar(len(selection))
         visible_selection = self._current_visible_comtrade_indices(selection)
         start_s, end_s = self._current_comtrade_window()
-        all_time, _ = self._sample_for_plot(record.time_s, record.analog_values[:, 0])
         colors = ["#f5e663", "#00ff00", "#ff4040", "#e0e0e0", "#00ffff", "#ff7f00", "#adff2f", "#ff66cc", "#4db6ff", "#ffb3e6"]
         band_gap = 1.55
         base_offset = (len(visible_selection) - 1) * band_gap
@@ -2740,15 +2739,23 @@ class ApproximationToolGUI(tk.Tk):
             ax.plot(raw_time, y_norm, color=color, linewidth=1.0)
             ax.axhline(offset + 0.98, color="#0c8f0c", linewidth=0.6, alpha=0.8)
             ax.axhline(offset - 0.98, color="#0c8f0c", linewidth=0.6, alpha=0.8)
-            ax.text(float(record.time_s[0]), offset + 1.05, record.analog_channels[ch_idx].name, color=color, fontsize=9, ha="left", va="bottom")
+            ax.text(0.01, offset + 1.05, record.analog_channels[ch_idx].name, transform=ax.get_yaxis_transform(), color=color, fontsize=9, ha="left", va="bottom")
 
         for key, color in (("T1", "#00ffff"), ("T2", "#ff7f00")):
             idx = self._comtrade_cursor_indices.get(key)
             if idx is None:
                 continue
             x = float(record.time_s[idx])
-            ax.axvline(x, color=color, linewidth=1.1, linestyle="--")
-            ax.text(x, base_offset + 1.18, key, color=color, fontsize=9, ha="center", va="bottom", bbox=dict(facecolor="#101010", edgecolor=color, boxstyle="round,pad=0.2"))
+            label = key
+            draw_x = x
+            if x < start_s:
+                draw_x = start_s
+                label = f"<{key}"
+            elif x > end_s:
+                draw_x = end_s
+                label = f"{key}>"
+            ax.axvline(draw_x, color=color, linewidth=1.1, linestyle="--")
+            ax.text(draw_x, base_offset + 1.18, label, color=color, fontsize=9, ha="center", va="bottom", bbox=dict(facecolor="#101010", edgecolor=color, boxstyle="round,pad=0.2"))
 
         lower = -1.2
         upper = base_offset + 1.35
@@ -2761,7 +2768,7 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_time_label.configure(text=f"当前时间窗：{start_s:.6f} s ~ {end_s:.6f} s，共 {len(record.time_s)} 点，{shown_text}")
         self._update_comtrade_cursor_label()
         self._comtrade_is_syncing_view = True
-        self.comtrade_fig.tight_layout()
+        self.comtrade_fig.subplots_adjust(left=0.06, right=0.98, top=0.93, bottom=0.10)
         self.comtrade_canvas.draw()
         self._comtrade_is_syncing_view = False
         if self._comtrade_popup is not None and self._comtrade_popup.winfo_exists() and not from_scroll:
