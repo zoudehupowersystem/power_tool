@@ -2451,8 +2451,10 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Label(right, text="录波浏览区", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
         self.comtrade_time_label = ttk.Label(right, text="未加载文件")
         self.comtrade_time_label.grid(row=1, column=0, sticky="w", pady=(0, 2))
-        self.comtrade_cursor_label = tk.Message(right, text="光标：左键放置 T1，右键放置 T2。", justify="left", width=1200, anchor="w")
+        self.comtrade_cursor_label = tk.Text(right, height=4, wrap=tk.WORD)
         self.comtrade_cursor_label.grid(row=5, column=0, sticky="ew", pady=(6, 0))
+        self.comtrade_cursor_label.insert("1.0", "光标：左键放置 T1，右键放置 T2。")
+        self.comtrade_cursor_label.configure(state="disabled")
 
         self.comtrade_fig = Figure(figsize=(9.0, 6.2), dpi=100, facecolor="#101010")
         self.comtrade_ax = self.comtrade_fig.add_subplot(111)
@@ -2646,7 +2648,10 @@ class ApproximationToolGUI(tk.Tk):
     def _update_comtrade_cursor_label(self) -> None:
         record = self._comtrade_record
         if record is None:
-            self.comtrade_cursor_label.configure(text="光标：左键放置 T1，右键放置 T2。")
+            self.comtrade_cursor_label.configure(state="normal")
+            self.comtrade_cursor_label.delete("1.0", tk.END)
+            self.comtrade_cursor_label.insert("1.0", "光标：左键放置 T1，右键放置 T2。")
+            self.comtrade_cursor_label.configure(state="disabled")
             return
         selection = self._selected_comtrade_indices() if self._comtrade_record is not None else []
         lines = []
@@ -2674,7 +2679,10 @@ class ApproximationToolGUI(tk.Tk):
             lines.append(f"Δt = {dt:.6f} s，ΔN = {ds} 点")
         else:
             lines.append("提示：左键定位 T1，右键定位 T2；可用于故障前后对比和时间差测量。")
-        self.comtrade_cursor_label.configure(text="\n".join(lines))
+        self.comtrade_cursor_label.configure(state="normal")
+        self.comtrade_cursor_label.delete("1.0", tk.END)
+        self.comtrade_cursor_label.insert("1.0", "\n".join(lines))
+        self.comtrade_cursor_label.configure(state="disabled")
 
     def _on_comtrade_mouse_click(self, event) -> None:
         if event.inaxes is not self.comtrade_ax or event.xdata is None:
@@ -2875,6 +2883,7 @@ class ApproximationToolGUI(tk.Tk):
         top.columnconfigure(0, weight=1)
         top.columnconfigure(1, weight=1)
         self._sequence_channel_vars = {key: tk.StringVar(value="未设置") for key in ["Ua", "Ub", "Uc", "Ia", "Ib", "Ic"]}
+        self._sequence_comboboxes: list[ttk.Combobox] = []
 
         for box_idx, (title, prefix) in enumerate((("三相电压通道", "U"), ("三相电流通道", "I"))):
             lf = ttk.LabelFrame(top, text=title, padding=4)
@@ -2885,6 +2894,7 @@ class ApproximationToolGUI(tk.Tk):
                 cmb = ttk.Combobox(lf, textvariable=self._sequence_channel_vars[show_key], values=["未设置"], state="readonly", width=24)
                 cmb.grid(row=ridx, column=1, sticky="ew", padx=2, pady=2)
                 cmb.bind("<<ComboboxSelected>>", lambda _e: self._refresh_sequence_analysis_window())
+                self._sequence_comboboxes.append(cmb)
             lf.columnconfigure(1, weight=1)
 
         btn_row = ttk.Frame(self.comtrade_sequence_frame)
@@ -2909,11 +2919,8 @@ class ApproximationToolGUI(tk.Tk):
 
     def _show_comtrade_sequence_panel(self) -> None:
         options = self._sequence_channel_options()
-        for child in self.comtrade_sequence_frame.winfo_children():
-            if isinstance(child, ttk.Frame):
-                for grand in child.winfo_children():
-                    if isinstance(grand, ttk.Combobox):
-                        grand.configure(values=options)
+        for cmb in self._sequence_comboboxes:
+            cmb.configure(values=options)
         self.comtrade_overview_frame.grid_remove()
         self.comtrade_sequence_frame.grid()
         self._refresh_sequence_analysis_window()
