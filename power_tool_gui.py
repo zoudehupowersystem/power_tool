@@ -2363,7 +2363,6 @@ class ApproximationToolGUI(tk.Tk):
         self._comtrade_popup = None
         self._comtrade_popup_canvas = None
         self._comtrade_popup_fig = None
-        self._sequence_window: tk.Toplevel | None = None
         self._sequence_channel_vars: dict[str, tk.StringVar] = {}
         self._sequence_result_text = None
         self._sequence_fig = None
@@ -2422,9 +2421,26 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Button(left, text="分析选中通道", command=self._analyze_comtrade_selection).grid(row=7, column=2, sticky="ew", pady=(6, 2), padx=(0, 4))
         ttk.Button(left, text="全选通道", command=self._select_all_comtrade_channels).grid(row=7, column=3, sticky="ew", pady=(6, 2))
 
-        self.comtrade_info = ScrolledText(left, width=54, height=24, wrap=tk.WORD, font="TkFixedFont")
-        self.comtrade_info.grid(row=8, column=0, columnspan=4, sticky="nsew", pady=(8, 0))
+        self.comtrade_analysis_host = ttk.Frame(left)
+        self.comtrade_analysis_host.grid(row=8, column=0, columnspan=4, sticky="nsew", pady=(8, 0))
+        self.comtrade_analysis_host.columnconfigure(0, weight=1)
+        self.comtrade_analysis_host.rowconfigure(0, weight=1)
+
+        self.comtrade_overview_frame = ttk.Frame(self.comtrade_analysis_host)
+        self.comtrade_overview_frame.grid(row=0, column=0, sticky="nsew")
+        self.comtrade_overview_frame.columnconfigure(0, weight=1)
+        self.comtrade_overview_frame.rowconfigure(0, weight=1)
+        self.comtrade_info = ScrolledText(self.comtrade_overview_frame, width=54, height=24, wrap=tk.WORD, font="TkFixedFont")
+        self.comtrade_info.grid(row=0, column=0, sticky="nsew")
         self.comtrade_info.configure(state="disabled")
+
+        self.comtrade_sequence_frame = ttk.Frame(self.comtrade_analysis_host)
+        self.comtrade_sequence_frame.columnconfigure(0, weight=1)
+        self.comtrade_sequence_frame.rowconfigure(2, weight=1)
+        self.comtrade_sequence_frame.rowconfigure(3, weight=1)
+        self.comtrade_sequence_frame.grid(row=0, column=0, sticky="nsew")
+        self.comtrade_sequence_frame.grid_remove()
+        self._build_embedded_sequence_panel()
 
         ttk.Label(right, text="录波浏览区", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
         self.comtrade_time_label = ttk.Label(right, text="未加载文件")
@@ -2519,6 +2535,7 @@ class ApproximationToolGUI(tk.Tk):
         if self._comtrade_record.analog_channels:
             self.comtrade_channel_list.selection_set(0, tk.END)
         self._comtrade_channel_scroll = 0
+        self._show_comtrade_overview_panel()
         self._refresh_comtrade_plot()
 
     def _reset_comtrade_view(self) -> None:
@@ -2828,6 +2845,55 @@ class ApproximationToolGUI(tk.Tk):
         except Exception as exc:
             messagebox.showerror("录波分析失败", str(exc))
 
+    def _build_embedded_sequence_panel(self) -> None:
+        top = ttk.Frame(self.comtrade_sequence_frame)
+        top.grid(row=0, column=0, sticky="ew")
+        top.columnconfigure(0, weight=1)
+        top.columnconfigure(1, weight=1)
+        self._sequence_channel_vars = {key: tk.StringVar(value="未设置") for key in ["Ua", "Ub", "Uc", "Ia", "Ib", "Ic"]}
+
+        for box_idx, (title, prefix) in enumerate((("三相电压通道", "U"), ("三相电流通道", "I"))):
+            lf = ttk.LabelFrame(top, text=title, padding=4)
+            lf.grid(row=0, column=box_idx, sticky="nsew", padx=(0, 6) if box_idx == 0 else 0)
+            for ridx, phase in enumerate(("a", "b", "c")):
+                show_key = f"{prefix}{phase}"
+                ttk.Label(lf, text=show_key).grid(row=ridx, column=0, sticky="w", padx=2, pady=2)
+                cmb = ttk.Combobox(lf, textvariable=self._sequence_channel_vars[show_key], values=["未设置"], state="readonly", width=24)
+                cmb.grid(row=ridx, column=1, sticky="ew", padx=2, pady=2)
+                cmb.bind("<<ComboboxSelected>>", lambda _e: self._refresh_sequence_analysis_window())
+            lf.columnconfigure(1, weight=1)
+
+        btn_row = ttk.Frame(self.comtrade_sequence_frame)
+        btn_row.grid(row=1, column=0, sticky="ew", pady=(6, 4))
+        ttk.Button(btn_row, text="应用配置", command=self._refresh_sequence_analysis_window).pack(side="left")
+        ttk.Button(btn_row, text="返回概览", command=self._show_comtrade_overview_panel).pack(side="left", padx=(6, 0))
+
+        self._sequence_result_text = ScrolledText(self.comtrade_sequence_frame, width=54, height=12, wrap=tk.WORD, font="TkFixedFont")
+        self._sequence_result_text.grid(row=2, column=0, sticky="nsew")
+        self._sequence_result_text.configure(state="disabled")
+
+        self._sequence_fig = Figure(figsize=(4.8, 3.6), dpi=100)
+        ax_u = self._sequence_fig.add_subplot(211)
+        ax_i = self._sequence_fig.add_subplot(212)
+        self._sequence_axes = (ax_u, ax_i)
+        self._sequence_canvas = FigureCanvasTkAgg(self._sequence_fig, master=self.comtrade_sequence_frame)
+        self._sequence_canvas.get_tk_widget().grid(row=3, column=0, sticky="nsew", pady=(6, 0))
+
+    def _show_comtrade_overview_panel(self) -> None:
+        self.comtrade_sequence_frame.grid_remove()
+        self.comtrade_overview_frame.grid()
+
+    def _show_comtrade_sequence_panel(self) -> None:
+        options = self._sequence_channel_options()
+        for child in self.comtrade_sequence_frame.winfo_children():
+            if isinstance(child, ttk.Frame):
+                for grand in child.winfo_children():
+                    if isinstance(grand, ttk.Combobox):
+                        grand.configure(values=options)
+        self.comtrade_overview_frame.grid_remove()
+        self.comtrade_sequence_frame.grid()
+        self._refresh_sequence_analysis_window()
+
     def _sequence_channel_options(self) -> list[str]:
         record = self._comtrade_record
         options = ["未设置"]
@@ -2844,59 +2910,7 @@ class ApproximationToolGUI(tk.Tk):
         return int(value.split(":", 1)[0])
 
     def _open_sequence_analysis_window(self) -> None:
-        if self._sequence_window is not None:
-            try:
-                if self._sequence_window.winfo_exists():
-                    self._sequence_window.deiconify()
-                    self._sequence_window.lift()
-                    self._refresh_sequence_analysis_window()
-                    return
-            except Exception:
-                self._sequence_window = None
-        win = tk.Toplevel(self)
-        self._sequence_window = win
-        win.title("序量分析")
-        win.geometry("1180x760")
-        win.rowconfigure(1, weight=1)
-        win.columnconfigure(0, weight=1)
-
-        top = ttk.Frame(win, padding=8)
-        top.grid(row=0, column=0, sticky="ew")
-        bottom = ttk.Frame(win, padding=8)
-        bottom.grid(row=1, column=0, sticky="nsew")
-        bottom.columnconfigure(1, weight=1)
-        bottom.rowconfigure(0, weight=1)
-
-        options = self._sequence_channel_options()
-        self._sequence_channel_vars = {key: tk.StringVar(value="未设置") for key in ["Ua", "Ub", "Uc", "Ia", "Ib", "Ic"]}
-        for box_idx, (title, prefix) in enumerate((("三相电压通道", "U"), ("三相电流通道", "I"))):
-            lf = ttk.LabelFrame(top, text=title, padding=6)
-            lf.grid(row=0, column=box_idx, sticky="nsew", padx=(0, 8) if box_idx == 0 else 0)
-            for ridx, phase in enumerate(("a", "b", "c")):
-                key = f"{prefix}{phase}".replace('a', 'a').replace('b', 'b').replace('c', 'c')
-                show_key = f"{prefix}{phase}"
-                ttk.Label(lf, text=show_key).grid(row=ridx, column=0, sticky="w", padx=4, pady=3)
-                cmb = ttk.Combobox(lf, textvariable=self._sequence_channel_vars[show_key], values=options, state="readonly", width=34)
-                cmb.grid(row=ridx, column=1, sticky="ew", padx=4, pady=3)
-                cmb.bind("<<ComboboxSelected>>", lambda _e: self._refresh_sequence_analysis_window())
-            lf.columnconfigure(1, weight=1)
-
-        ttk.Button(top, text="应用配置", command=self._refresh_sequence_analysis_window).grid(row=0, column=2, sticky="s", padx=(8, 0))
-
-        self._sequence_result_text = ScrolledText(bottom, width=52, height=28, wrap=tk.WORD, font="TkFixedFont")
-        self._sequence_result_text.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        self._sequence_result_text.configure(state="disabled")
-
-        self._sequence_fig = Figure(figsize=(8.0, 5.8), dpi=100)
-        ax_u = self._sequence_fig.add_subplot(211)
-        ax_i = self._sequence_fig.add_subplot(212)
-        self._sequence_axes = (ax_u, ax_i)
-        self._sequence_canvas = FigureCanvasTkAgg(self._sequence_fig, master=bottom)
-        self._sequence_canvas.get_tk_widget().grid(row=0, column=1, sticky="nsew")
-        toolbar = NavigationToolbar2Tk(self._sequence_canvas, bottom, pack_toolbar=False)
-        toolbar.update()
-        toolbar.grid(row=1, column=1, sticky="ew")
-        self._refresh_sequence_analysis_window()
+        self._show_comtrade_sequence_panel()
 
     def _read_sequence_group(self, labels: tuple[str, str, str]) -> tuple[int, int, int] | None:
         indices = [self._parse_sequence_channel_selection(self._sequence_channel_vars[key].get()) for key in labels]
@@ -2927,12 +2941,7 @@ class ApproximationToolGUI(tk.Tk):
         ax.set_ylabel("虚部")
 
     def _refresh_sequence_analysis_window(self) -> None:
-        if self._sequence_window is None or self._sequence_result_text is None or self._sequence_fig is None or self._sequence_canvas is None:
-            return
-        try:
-            if not self._sequence_window.winfo_exists():
-                return
-        except Exception:
+        if self._sequence_result_text is None or self._sequence_fig is None or self._sequence_canvas is None:
             return
         record = self._comtrade_record
         if record is None:
