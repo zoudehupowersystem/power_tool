@@ -2358,6 +2358,7 @@ class ApproximationToolGUI(tk.Tk):
         self._comtrade_overlay_mode = tk.StringVar(value="stacked")
         self._comtrade_default_window_s = 0.12
         self._comtrade_vertical_zoom = 1.0
+        self._comtrade_cursor_indices: dict[str, int | None] = {"T1": None, "T2": None}
         self._comtrade_is_syncing_view = False
         self._comtrade_xlimit_callback_registered = False
 
@@ -2410,7 +2411,9 @@ class ApproximationToolGUI(tk.Tk):
 
         ttk.Label(right, text="录波浏览区", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
         self.comtrade_time_label = ttk.Label(right, text="未加载文件")
-        self.comtrade_time_label.grid(row=1, column=0, sticky="w", pady=(0, 4))
+        self.comtrade_time_label.grid(row=1, column=0, sticky="w", pady=(0, 2))
+        self.comtrade_cursor_label = ttk.Label(right, text="光标：左键放置 T1，右键放置 T2。", justify="left")
+        self.comtrade_cursor_label.grid(row=5, column=0, sticky="ew", pady=(6, 0))
 
         self.comtrade_fig = Figure(figsize=(9.0, 6.2), dpi=100, facecolor="#101010")
         self.comtrade_ax = self.comtrade_fig.add_subplot(111)
@@ -2441,6 +2444,7 @@ class ApproximationToolGUI(tk.Tk):
         )
         self._set_text(self.comtrade_info, intro)
         self.comtrade_ax.callbacks.connect("xlim_changed", self._on_comtrade_axis_xlim_changed)
+        self.comtrade_canvas.mpl_connect("button_press_event", self._on_comtrade_mouse_click)
         self._comtrade_xlimit_callback_registered = True
         self.comtrade_canvas.draw()
 
@@ -2498,6 +2502,7 @@ class ApproximationToolGUI(tk.Tk):
             return
         self._select_all_comtrade_channels()
         self._comtrade_vertical_zoom = 1.0
+        self._comtrade_cursor_indices = {"T1": None, "T2": None}
         default_window = self._default_comtrade_window(record.duration_s)
         self.comtrade_window_entry.delete(0, tk.END)
         self.comtrade_window_entry.insert(0, f"{default_window:.4g}")
@@ -2547,6 +2552,61 @@ class ApproximationToolGUI(tk.Tk):
             return time_s, values
         step = max(1, int(np.ceil(time_s.size / max_points)))
         return time_s[::step], values[::step]
+
+    def _nearest_comtrade_index(self, x_value: float) -> int | None:
+        record = self._comtrade_record
+        if record is None or record.time_s.size == 0:
+            return None
+        idx = int(np.clip(np.searchsorted(record.time_s, x_value), 0, record.time_s.size - 1))
+        if idx > 0 and abs(record.time_s[idx - 1] - x_value) <= abs(record.time_s[idx] - x_value):
+            idx -= 1
+        return idx
+
+    def _update_comtrade_cursor_label(self) -> None:
+        record = self._comtrade_record
+        if record is None:
+            self.comtrade_cursor_label.configure(text="光标：左键放置 T1，右键放置 T2。")
+            return
+        selection = self._selected_comtrade_indices() if self._comtrade_record is not None else []
+        lines = []
+        for key, color in (("T1", "#00ffff"), ("T2", "#ff7f00")):
+            idx = self._comtrade_cursor_indices.get(key)
+            if idx is None:
+                lines.append(f"{key}: 未设置")
+                continue
+            time_s = float(record.time_s[idx])
+            value_parts = []
+            for ch_idx in selection[:4]:
+                ch = record.analog_channels[ch_idx]
+                value_parts.append(f"{ch.name}={record.analog_values[idx, ch_idx]:.5g}{ch.unit or ''}")
+            prefix = f"{key}: t={time_s:.6f}s, 点号={idx + 1}"
+            if value_parts:
+                prefix += " | " + "；".join(value_parts)
+            lines.append(prefix)
+        idx1 = self._comtrade_cursor_indices.get("T1")
+        idx2 = self._comtrade_cursor_indices.get("T2")
+        if idx1 is not None and idx2 is not None:
+            dt = float(record.time_s[idx2] - record.time_s[idx1])
+            ds = idx2 - idx1
+            lines.append(f"Δt = {dt:.6f} s，ΔN = {ds} 点")
+        else:
+            lines.append("提示：左键定位 T1，右键定位 T2；可用于故障前后对比和时间差测量。")
+        self.comtrade_cursor_label.configure(text="\n".join(lines))
+
+    def _on_comtrade_mouse_click(self, event) -> None:
+        if event.inaxes is not self.comtrade_ax or event.xdata is None:
+            return
+        idx = self._nearest_comtrade_index(float(event.xdata))
+        if idx is None:
+            return
+        if event.button == 1:
+            self._comtrade_cursor_indices["T1"] = idx
+        elif event.button == 3:
+            self._comtrade_cursor_indices["T2"] = idx
+        else:
+            return
+        self._update_comtrade_cursor_label()
+        self._refresh_comtrade_plot()
 
     def _zoom_comtrade_vertical(self, factor: float) -> None:
         self._comtrade_vertical_zoom = min(6.0, max(0.25, self._comtrade_vertical_zoom * factor))
@@ -2633,6 +2693,14 @@ class ApproximationToolGUI(tk.Tk):
             ax.axhline(offset - 0.98, color="#0c8f0c", linewidth=0.6, alpha=0.8)
             ax.text(float(record.time_s[0]), offset + 1.05, record.analog_channels[ch_idx].name, color=color, fontsize=9, ha="left", va="bottom")
 
+        for key, color in (("T1", "#00ffff"), ("T2", "#ff7f00")):
+            idx = self._comtrade_cursor_indices.get(key)
+            if idx is None:
+                continue
+            x = float(record.time_s[idx])
+            ax.axvline(x, color=color, linewidth=1.1, linestyle="--")
+            ax.text(x, base_offset + 1.18, key, color=color, fontsize=9, ha="center", va="bottom", bbox=dict(facecolor="#101010", edgecolor=color, boxstyle="round,pad=0.2"))
+
         lower = -1.2
         upper = base_offset + 1.35
         ax.set_xlim(start_s, end_s)
@@ -2641,6 +2709,7 @@ class ApproximationToolGUI(tk.Tk):
         ax.set_yticks([])
         ax.set_title("录波曲线浏览（整体可平移/缩放；滑条用于长录波滚动；每条通道带独立边界）")
         self.comtrade_time_label.configure(text=f"当前时间窗：{start_s:.6f} s ~ {end_s:.6f} s，共 {len(record.time_s)} 点，全通道视图")
+        self._update_comtrade_cursor_label()
         self._comtrade_is_syncing_view = True
         self.comtrade_fig.tight_layout()
         self.comtrade_canvas.draw()
