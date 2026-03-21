@@ -2829,6 +2829,7 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_fig.subplots_adjust(left=0.06, right=0.98, top=0.93, bottom=0.10)
         self.comtrade_canvas.draw()
         self._comtrade_is_syncing_view = False
+        self._refresh_sequence_analysis_window()
         if self._comtrade_popup is not None and self._comtrade_popup.winfo_exists() and not from_scroll:
             self._draw_comtrade_overlay()
 
