@@ -2451,7 +2451,7 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Label(right, text="录波浏览区", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
         self.comtrade_time_label = ttk.Label(right, text="未加载文件")
         self.comtrade_time_label.grid(row=1, column=0, sticky="w", pady=(0, 2))
-        self.comtrade_cursor_label = ttk.Label(right, text="光标：左键放置 T1，右键放置 T2。", justify="left")
+        self.comtrade_cursor_label = tk.Message(right, text="光标：左键放置 T1，右键放置 T2。", justify="left", width=1200, anchor="w")
         self.comtrade_cursor_label.grid(row=5, column=0, sticky="ew", pady=(6, 0))
 
         self.comtrade_fig = Figure(figsize=(9.0, 6.2), dpi=100, facecolor="#101010")
@@ -2657,13 +2657,15 @@ class ApproximationToolGUI(tk.Tk):
                 continue
             time_s = float(record.time_s[idx])
             value_parts = []
-            for ch_idx in selection[:4]:
+            for ch_idx in selection:
                 ch = record.analog_channels[ch_idx]
                 value_parts.append(f"{ch.name}={record.analog_values[idx, ch_idx]:.5g}{ch.unit or ''}")
-            prefix = f"{key}: t={time_s:.6f}s, 点号={idx + 1}"
+            lines.append(f"{key}: t={time_s:.6f}s, 点号={idx + 1}")
             if value_parts:
-                prefix += " | " + "；".join(value_parts)
-            lines.append(prefix)
+                chunk = 4
+                for pos in range(0, len(value_parts), chunk):
+                    prefix = "    " if pos == 0 else "    ↳ "
+                    lines.append(prefix + "；".join(value_parts[pos:pos + chunk]))
         idx1 = self._current_comtrade_cursor_index("T1")
         idx2 = self._current_comtrade_cursor_index("T2")
         if idx1 is not None and idx2 is not None:
