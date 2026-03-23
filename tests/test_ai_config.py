@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from power_tool_ai import DEFAULT_OVERVIEW_PROMPT, PowerToolAIConfig, compose_prompt, save_ai_config
+from power_tool_ai import DEFAULT_OVERVIEW_PROMPT, PowerToolAIConfig, api_key_status, compose_prompt, load_ai_config, save_ai_config
 
 
 def test_compose_prompt_includes_question_tab_case_and_note() -> None:
@@ -19,12 +19,49 @@ def test_compose_prompt_includes_question_tab_case_and_note() -> None:
     assert "ui_capture.png" in prompt
 
 
-def test_save_ai_config_writes_default_overview_prompt(tmp_path: Path, monkeypatch) -> None:
+def test_save_ai_config_uses_nested_provider_api_ollama_shape(tmp_path: Path, monkeypatch) -> None:
     import power_tool_ai
 
     monkeypatch.setattr(power_tool_ai, "_config_path", lambda: tmp_path / "power_tool_ai_config.json")
     path = save_ai_config(PowerToolAIConfig())
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["provider"] == "ollama"
-    assert data["model"] == "qwen3.5:9b"
+    assert data["provider"]["mode"] == "ollama"
+    assert data["api"]["env_key_name"] == "DASHSCOPE_API_KEY"
+    assert data["ollama"]["default_model"] == "qwen3.5:9b"
     assert data["system_prompt"] == DEFAULT_OVERVIEW_PROMPT
+    assert "api_key" not in data
+
+
+def test_load_ai_config_migrates_legacy_flat_shape(tmp_path: Path, monkeypatch) -> None:
+    import power_tool_ai
+
+    path = tmp_path / "power_tool_ai_config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "provider": "api",
+                "api_url": "https://example.com/v1/chat/completions",
+                "api_model": "demo-model",
+                "model": "qwen3.5:14b",
+                "timeout_s": 30,
+                "system_prompt": "legacy prompt",
+                "max_tokens": 256,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(power_tool_ai, "_config_path", lambda: path)
+    config = load_ai_config()
+    assert config.provider.mode == "api"
+    assert config.api.base_url == "https://example.com/v1"
+    assert config.api.default_model == "demo-model"
+    assert config.ollama.default_model == "qwen3.5:14b"
+    assert config.system_prompt == "legacy prompt"
+    assert config.max_tokens == 256
+
+
+def test_api_key_status_reads_environment_variable(monkeypatch) -> None:
+    config = PowerToolAIConfig()
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "secret")
+    assert api_key_status(config).endswith("已设置")

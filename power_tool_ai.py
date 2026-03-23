@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,18 +22,35 @@ DEFAULT_OVERVIEW_PROMPT = (
 
 
 @dataclass
+class ProviderSettings:
+    mode: str = "ollama"
+
+
+@dataclass
+class APISettings:
+    env_key_name: str = "DASHSCOPE_API_KEY"
+    base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    default_model: str = "qwen3.5-27b"
+    models: list[str] = field(default_factory=lambda: ["qwen3.5-27b", "Qwen3.5-Plus", "qwen3.5-35b-a3b"])
+    temperature: float = 0.7
+    timeout: float = 600.0
+
+
+@dataclass
+class OllamaSettings:
+    host: str = "http://127.0.0.1:11434"
+    default_model: str = "qwen3.5:9b"
+    models: list[str] = field(default_factory=lambda: ["qwen3.5:9b", "qwen3-vl:8b"])
+    timeout: float = 600.0
+
+
+@dataclass
 class PowerToolAIConfig:
-    provider: str = "ollama"
-    model: str = "qwen3.5:9b"
-    ollama_url: str = "http://127.0.0.1:11434/api/chat"
-    api_url: str = "https://api.openai.com/v1/chat/completions"
-    api_key: str = ""
-    api_model: str = "gpt-4.1-mini"
-    timeout_s: float = 90.0
+    provider: ProviderSettings = field(default_factory=ProviderSettings)
+    api: APISettings = field(default_factory=APISettings)
+    ollama: OllamaSettings = field(default_factory=OllamaSettings)
     system_prompt: str = DEFAULT_OVERVIEW_PROMPT
-    temperature: float = 0.2
     max_tokens: int = 1200
-    extra_headers: dict[str, str] = field(default_factory=dict)
 
 
 class PowerToolAIError(RuntimeError):
@@ -43,6 +61,55 @@ def _config_path() -> Path:
     return Path(__file__).resolve().with_name("power_tool_ai_config.json")
 
 
+def _clean_models(values: Any, fallback: list[str]) -> list[str]:
+    if isinstance(values, str):
+        items = [item.strip() for item in values.replace("\n", ",").split(",") if item.strip()]
+        return items or fallback
+    if isinstance(values, list):
+        items = [str(item).strip() for item in values if str(item).strip()]
+        return items or fallback
+    return fallback
+
+
+def _normalize_base_url(base_url: str) -> str:
+    return base_url.rstrip("/")
+
+
+def _chat_completions_url(base_url: str) -> str:
+    base = _normalize_base_url(base_url)
+    return base if base.endswith("/chat/completions") else f"{base}/chat/completions"
+
+
+def _ollama_chat_url(host: str) -> str:
+    base = _normalize_base_url(host)
+    return base if base.endswith("/api/chat") else f"{base}/api/chat"
+
+
+def _migrate_legacy_config(raw: dict[str, Any]) -> PowerToolAIConfig:
+    provider_mode = str(raw.get("provider", "ollama")) if not isinstance(raw.get("provider"), dict) else str(dict(raw["provider"]).get("mode", "ollama"))
+    api_model = str(raw.get("api_model", APISettings().default_model))
+    ollama_model = str(raw.get("model", OllamaSettings().default_model))
+    return PowerToolAIConfig(
+        provider=ProviderSettings(mode=provider_mode),
+        api=APISettings(
+            env_key_name="DASHSCOPE_API_KEY",
+            base_url=str(raw.get("api_url", APISettings().base_url)).removesuffix("/chat/completions"),
+            default_model=api_model,
+            models=[api_model],
+            temperature=float(raw.get("temperature", APISettings().temperature)),
+            timeout=float(raw.get("timeout_s", APISettings().timeout)),
+        ),
+        ollama=OllamaSettings(
+            host=str(raw.get("ollama_url", _ollama_chat_url(OllamaSettings().host))).removesuffix("/api/chat"),
+            default_model=ollama_model,
+            models=[ollama_model],
+            timeout=float(raw.get("timeout_s", OllamaSettings().timeout)),
+        ),
+        system_prompt=str(raw.get("system_prompt", DEFAULT_OVERVIEW_PROMPT)),
+        max_tokens=int(raw.get("max_tokens", 1200)),
+    )
+
+
 def load_ai_config() -> PowerToolAIConfig:
     path = _config_path()
     if not path.exists():
@@ -51,18 +118,31 @@ def load_ai_config() -> PowerToolAIConfig:
         return config
     with path.open("r", encoding="utf-8") as f:
         raw = json.load(f)
+    if "api" not in raw or "ollama" not in raw:
+        config = _migrate_legacy_config(raw)
+        save_ai_config(config)
+        return config
+    provider_raw = dict(raw.get("provider", {}))
+    api_raw = dict(raw.get("api", {}))
+    ollama_raw = dict(raw.get("ollama", {}))
     return PowerToolAIConfig(
-        provider=str(raw.get("provider", "ollama")),
-        model=str(raw.get("model", "qwen3.5:9b")),
-        ollama_url=str(raw.get("ollama_url", "http://127.0.0.1:11434/api/chat")),
-        api_url=str(raw.get("api_url", "https://api.openai.com/v1/chat/completions")),
-        api_key=str(raw.get("api_key", "")),
-        api_model=str(raw.get("api_model", "gpt-4.1-mini")),
-        timeout_s=float(raw.get("timeout_s", 90.0)),
+        provider=ProviderSettings(mode=str(provider_raw.get("mode", "ollama"))),
+        api=APISettings(
+            env_key_name=str(api_raw.get("env_key_name", "DASHSCOPE_API_KEY")),
+            base_url=_normalize_base_url(str(api_raw.get("base_url", APISettings().base_url))),
+            default_model=str(api_raw.get("default_model", APISettings().default_model)),
+            models=_clean_models(api_raw.get("models"), APISettings().models),
+            temperature=float(api_raw.get("temperature", APISettings().temperature)),
+            timeout=float(api_raw.get("timeout", APISettings().timeout)),
+        ),
+        ollama=OllamaSettings(
+            host=_normalize_base_url(str(ollama_raw.get("host", OllamaSettings().host))),
+            default_model=str(ollama_raw.get("default_model", OllamaSettings().default_model)),
+            models=_clean_models(ollama_raw.get("models"), OllamaSettings().models),
+            timeout=float(ollama_raw.get("timeout", OllamaSettings().timeout)),
+        ),
         system_prompt=str(raw.get("system_prompt", DEFAULT_OVERVIEW_PROMPT)),
-        temperature=float(raw.get("temperature", 0.2)),
         max_tokens=int(raw.get("max_tokens", 1200)),
-        extra_headers={str(k): str(v) for k, v in dict(raw.get("extra_headers", {})).items()},
     )
 
 
@@ -75,6 +155,11 @@ def save_ai_config(config: PowerToolAIConfig) -> Path:
 
 def config_path() -> Path:
     return _config_path()
+
+
+def api_key_status(config: PowerToolAIConfig) -> str:
+    name = config.api.env_key_name.strip() or "DASHSCOPE_API_KEY"
+    return f"环境变量 {name}: {'已设置' if os.getenv(name) else '未设置'}"
 
 
 def encode_image_base64(image_path: str | Path) -> str:
@@ -100,11 +185,11 @@ def compose_prompt(question: str, tab_name: str, case_text: str, screenshot_note
 def ask_ai(config: PowerToolAIConfig, question: str, tab_name: str, case_text: str,
            screenshot_note: str, screenshot_path: str | Path | None = None) -> str:
     prompt = compose_prompt(question, tab_name, case_text, screenshot_note)
-    if config.provider == "ollama":
+    if config.provider.mode == "ollama":
         return _ask_ollama(config, prompt, screenshot_path)
-    if config.provider == "api":
+    if config.provider.mode == "api":
         return _ask_openai_compatible(config, prompt, screenshot_path)
-    raise PowerToolAIError(f"不支持的 AI 提供方式：{config.provider}")
+    raise PowerToolAIError(f"不支持的 AI 提供方式：{config.provider.mode}")
 
 
 def _http_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeout_s: float) -> dict[str, Any]:
@@ -133,18 +218,18 @@ def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | P
     if screenshot_path:
         user_message["images"] = [encode_image_base64(screenshot_path)]
     payload = {
-        "model": config.model,
+        "model": config.ollama.default_model,
         "stream": False,
-        "options": {
-            "temperature": config.temperature,
-            "num_predict": config.max_tokens,
-        },
         "messages": [
             {"role": "system", "content": config.system_prompt},
             user_message,
         ],
+        "options": {
+            "temperature": 0.2,
+            "num_predict": config.max_tokens,
+        },
     }
-    data = _http_json(config.ollama_url, payload, config.extra_headers, config.timeout_s)
+    data = _http_json(_ollama_chat_url(config.ollama.host), payload, {}, config.ollama.timeout)
     message = data.get("message") or {}
     content = str(message.get("content", "")).strip()
     if not content:
@@ -153,29 +238,25 @@ def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | P
 
 
 def _ask_openai_compatible(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> str:
-    if not config.api_key.strip():
-        raise PowerToolAIError("当前为 API 模式，但配置文件中未填写 api_key。")
+    env_name = config.api.env_key_name.strip() or "DASHSCOPE_API_KEY"
+    api_key = os.getenv(env_name, "").strip()
+    if not api_key:
+        raise PowerToolAIError(f"当前为 API 模式，但环境变量 {env_name} 未设置。")
     user_content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
     if screenshot_path:
         image_b64 = encode_image_base64(screenshot_path)
-        user_content.append(
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{image_b64}"},
-            }
-        )
+        user_content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}})
     payload = {
-        "model": config.api_model,
-        "temperature": config.temperature,
+        "model": config.api.default_model,
+        "temperature": config.api.temperature,
         "max_tokens": config.max_tokens,
         "messages": [
             {"role": "system", "content": config.system_prompt},
             {"role": "user", "content": user_content},
         ],
     }
-    headers = {"Authorization": f"Bearer {config.api_key.strip()}"}
-    headers.update(config.extra_headers)
-    data = _http_json(config.api_url, payload, headers, config.timeout_s)
+    headers = {"Authorization": f"Bearer {api_key}"}
+    data = _http_json(_chat_completions_url(config.api.base_url), payload, headers, config.api.timeout)
     choices = data.get("choices")
     if not isinstance(choices, list) or not choices:
         raise PowerToolAIError("API 未返回 choices 字段。")
@@ -191,9 +272,13 @@ def _ask_openai_compatible(config: PowerToolAIConfig, prompt: str, screenshot_pa
 
 
 __all__ = [
+    "APISettings",
     "DEFAULT_OVERVIEW_PROMPT",
+    "OllamaSettings",
     "PowerToolAIConfig",
     "PowerToolAIError",
+    "ProviderSettings",
+    "api_key_status",
     "ask_ai",
     "compose_prompt",
     "config_path",
