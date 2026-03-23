@@ -361,7 +361,7 @@ class ApproximationToolGUI(tk.Tk):
                   font=("TkDefaultFont", 12, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(
             panel,
-            text="AI 配置和标准提示词仅从 JSON 文件读取，不在软件界面中显示；提问时会自动附带当前界面截图和算例摘要。",
+            text="向AI提问时会自动附带当前界面截图和算例摘要",
             style="Card.TLabel", justify="left", wraplength=360,
         ).grid(row=1, column=0, sticky="ew", pady=(4, 8))
 
