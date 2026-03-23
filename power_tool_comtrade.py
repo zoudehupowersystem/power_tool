@@ -231,8 +231,7 @@ def parse_yokogawa_waveform(path: str | Path) -> ComtradeRecord:
     source_path = Path(path)
     suffix = source_path.suffix.lower()
     if suffix == '.wdf':
-        source_path = _convert_wdf_to_wvf(source_path)
-        suffix = source_path.suffix.lower()
+        return _parse_wdf_waveform(source_path)
     if suffix == '.wvf':
         wvf_path = source_path
         hdr_path = _resolve_companion_file(source_path, '.HDR')
@@ -302,25 +301,67 @@ def _convert_wdf_to_wvf(path: Path) -> Path:
     return wvf_path
 
 
-def _resolve_companion_file(path: Path, suffix: str) -> Path:
-    direct = path.with_suffix(suffix)
-    if direct.exists():
-        return direct
-    lower = path.with_suffix(suffix.lower())
-    if lower.exists():
-        return lower
-    upper = path.with_suffix(suffix.upper())
-    if upper.exists():
-        return upper
-    return direct
 
 
-def _parse_yokogawa_hdr(hdr_path: Path) -> dict:
+def _parse_wdf_waveform(path: Path) -> ComtradeRecord:
+    try:
+        header, raw_path = _extract_wdf_embedded_header(path)
+        analog_values, time_s = _read_yokogawa_wvf(raw_path, header)
+    except ValueError:
+        raw_path = _convert_wdf_to_wvf(path)
+        header = _parse_yokogawa_hdr(_resolve_companion_file(raw_path, '.HDR'))
+        analog_values, time_s = _read_yokogawa_wvf(raw_path, header)
+    channels = [
+        ComtradeChannel(
+            index=idx + 1,
+            name=str(trace['name']),
+            phase='',
+            unit=str(trace['y_unit']),
+            a=1.0,
+            b=0.0,
+        )
+        for idx, trace in enumerate(header['traces'])
+    ]
+    frequency_hz = _infer_nominal_frequency(time_s)
+    return ComtradeRecord(
+        station_name=path.stem,
+        device_id='Yokogawa',
+        revision='WDF',
+        frequency_hz=frequency_hz,
+        sample_rates=[(1.0 / max(float(np.median(np.diff(time_s))), 1e-12), len(time_s))] if time_s.size > 1 else [],
+        analog_channels=channels,
+        digital_channel_names=[],
+        time_s=time_s,
+        analog_values=analog_values,
+        digital_values=np.zeros((analog_values.shape[0], 0), dtype=int),
+        file_type='WDF',
+        cfg_path=path,
+        dat_path=raw_path,
+    )
+
+
+def _extract_wdf_embedded_header(path: Path) -> tuple[dict, Path]:
+    raw = path.read_bytes()
+    marker = b'//YOKOGAWA ASCII FILE FORMAT'
+    start = raw.find(marker)
+    if start < 0:
+        raise ValueError('WDF 文件中未找到嵌入式 Yokogawa ASCII 头信息。')
+    tail = raw[start:].decode('ascii', errors='ignore')
+    end_marker = '\nFeND'
+    end = tail.find(end_marker)
+    if end >= 0:
+        tail = tail[:end]
+    header = _parse_yokogawa_text_header(tail)
+    header['raw_bytes'] = raw
+    return header, path
+
+
+def _parse_yokogawa_text_header(text: str) -> dict:
     sections: dict[str, dict[str, object]] = {}
     current = None
-    for raw_line in hdr_path.read_text(encoding='utf-8', errors='ignore').splitlines():
+    for raw_line in text.splitlines():
         line = raw_line.strip()
-        if not line:
+        if not line or line.startswith('//'):
             continue
         if line.startswith('$'):
             current = line[1:].strip()
@@ -328,22 +369,22 @@ def _parse_yokogawa_hdr(hdr_path: Path) -> dict:
             continue
         if current is None:
             continue
-        parts = line.split()
+        parts = [part for part in re.split(r'\s{2,}', raw_line.strip()) if part]
         if len(parts) < 2:
             continue
         key = parts[0]
         values = [_coerce_token(token) for token in parts[1:]]
         sections[current][key] = values[0] if len(values) == 1 else values
+    return _build_yokogawa_header(sections)
+
+
+def _build_yokogawa_header(sections: dict[str, dict[str, object]]) -> dict:
     public = sections.get('PublicInfo', {})
     groups = [sections[name] for name in sorted(sections) if re.match(r'Group\d+', name)]
     if not groups:
         raise ValueError('HDR 文件中未找到 Group 段，无法解析横河录波。')
-    first_group = groups[0]
     endian_text = str(public.get('Endian', 'Little'))
-    if endian_text.startswith('Big'):
-        endian = '>'
-    else:
-        endian = '<'
+    endian = '>' if endian_text.startswith('Big') else '<'
     trace_fields = {
         'name': [],
         'block_size': [],
@@ -394,11 +435,47 @@ def _parse_yokogawa_hdr(hdr_path: Path) -> dict:
                 'num_bytes': num_bytes,
             }
         )
+    first_group = groups[0]
     return {
         'data_offset': int(public.get('DataOffset', 0)),
         'number_of_blocks': int(first_group.get('BlockNumber', 1)),
         'traces': traces,
     }
+
+
+def _resolve_companion_file(path: Path, suffix: str) -> Path:
+    direct = path.with_suffix(suffix)
+    if direct.exists():
+        return direct
+    lower = path.with_suffix(suffix.lower())
+    if lower.exists():
+        return lower
+    upper = path.with_suffix(suffix.upper())
+    if upper.exists():
+        return upper
+    return direct
+
+
+def _parse_yokogawa_hdr(hdr_path: Path) -> dict:
+    sections: dict[str, dict[str, object]] = {}
+    current = None
+    for raw_line in hdr_path.read_text(encoding='utf-8', errors='ignore').splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith('$'):
+            current = line[1:].strip()
+            sections.setdefault(current, {})
+            continue
+        if current is None:
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        key = parts[0]
+        values = [_coerce_token(token) for token in parts[1:]]
+        sections[current][key] = values[0] if len(values) == 1 else values
+    return _build_yokogawa_header(sections)
 
 
 def _decode_yokogawa_data_type(dtype_text: str) -> tuple[int, str]:
@@ -428,7 +505,7 @@ def _read_yokogawa_wvf(wvf_path: Path, header: dict) -> tuple[np.ndarray, np.nda
         return np.zeros((0, 0), dtype=float), np.zeros(0, dtype=float)
     trace_arrays = []
     time_s = None
-    raw = wvf_path.read_bytes()
+    raw = header.get('raw_bytes') if isinstance(header.get('raw_bytes'), (bytes, bytearray)) else wvf_path.read_bytes()
     for trace in traces:
         block_size = trace['block_size']
         dtype = np.dtype(trace['fmt'])

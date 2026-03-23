@@ -152,6 +152,16 @@ def test_parse_yokogawa_wdf_via_converter(tmp_path: Path, monkeypatch) -> None:
     assert np.allclose(record.analog_values[:, 0], [0.0, 1.0, 2.0, 3.0])
 
 
+def test_parse_embedded_wdf_samples() -> None:
+    for name in ["不接地系统500Ω单相接地.WDF", "消弧线圈系统1000Ω单相接地.WDF"]:
+        record = parse_waveform_file(Path(__file__).with_name(name))
+        assert record.file_type == "WDF"
+        assert record.analog_values.shape == (250250, 11)
+        assert record.analog_channels[0].name == "CH1"
+        assert record.analog_channels[-1].name == "CH11"
+        assert np.isclose(record.time_s[0], -5.00498)
+        assert np.isclose(record.time_s[1] - record.time_s[0], 2e-5)
+
 def test_fourier_summary_extracts_fundamental() -> None:
     fs = 2000.0
     t = np.arange(0.0, 0.2, 1 / fs)
