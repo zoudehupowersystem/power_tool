@@ -32,19 +32,29 @@ def test_save_ai_config_uses_nested_provider_api_ollama_shape(tmp_path: Path, mo
     assert "api_key" not in data
 
 
-def test_load_ai_config_migrates_legacy_flat_shape(tmp_path: Path, monkeypatch) -> None:
+def test_load_ai_config_reads_nested_shape(tmp_path: Path, monkeypatch) -> None:
     import power_tool_ai
 
     path = tmp_path / "power_tool_ai_config.json"
     path.write_text(
         json.dumps(
             {
-                "provider": "api",
-                "api_url": "https://example.com/v1/chat/completions",
-                "api_model": "demo-model",
-                "model": "qwen3.5:14b",
-                "timeout_s": 30,
-                "system_prompt": "legacy prompt",
+                "provider": {"mode": "api"},
+                "api": {
+                    "env_key_name": "CUSTOM_KEY",
+                    "base_url": "https://example.com/v1",
+                    "default_model": "demo-model",
+                    "models": ["demo-model", "demo-vl"],
+                    "temperature": 0.5,
+                    "timeout": 120,
+                },
+                "ollama": {
+                    "host": "http://localhost:11434",
+                    "default_model": "qwen3.5:14b",
+                    "models": ["qwen3.5:14b"],
+                    "timeout": 60,
+                },
+                "system_prompt": "nested prompt",
                 "max_tokens": 256,
             },
             ensure_ascii=False,
@@ -54,10 +64,11 @@ def test_load_ai_config_migrates_legacy_flat_shape(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(power_tool_ai, "_config_path", lambda: path)
     config = load_ai_config()
     assert config.provider.mode == "api"
+    assert config.api.env_key_name == "CUSTOM_KEY"
     assert config.api.base_url == "https://example.com/v1"
     assert config.api.default_model == "demo-model"
     assert config.ollama.default_model == "qwen3.5:14b"
-    assert config.system_prompt == "legacy prompt"
+    assert config.system_prompt == "nested prompt"
     assert config.max_tokens == 256
 
 

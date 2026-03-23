@@ -85,31 +85,6 @@ def _ollama_chat_url(host: str) -> str:
     return base if base.endswith("/api/chat") else f"{base}/api/chat"
 
 
-def _migrate_legacy_config(raw: dict[str, Any]) -> PowerToolAIConfig:
-    provider_mode = str(raw.get("provider", "ollama")) if not isinstance(raw.get("provider"), dict) else str(dict(raw["provider"]).get("mode", "ollama"))
-    api_model = str(raw.get("api_model", APISettings().default_model))
-    ollama_model = str(raw.get("model", OllamaSettings().default_model))
-    return PowerToolAIConfig(
-        provider=ProviderSettings(mode=provider_mode),
-        api=APISettings(
-            env_key_name="DASHSCOPE_API_KEY",
-            base_url=str(raw.get("api_url", APISettings().base_url)).removesuffix("/chat/completions"),
-            default_model=api_model,
-            models=[api_model],
-            temperature=float(raw.get("temperature", APISettings().temperature)),
-            timeout=float(raw.get("timeout_s", APISettings().timeout)),
-        ),
-        ollama=OllamaSettings(
-            host=str(raw.get("ollama_url", _ollama_chat_url(OllamaSettings().host))).removesuffix("/api/chat"),
-            default_model=ollama_model,
-            models=[ollama_model],
-            timeout=float(raw.get("timeout_s", OllamaSettings().timeout)),
-        ),
-        system_prompt=str(raw.get("system_prompt", DEFAULT_OVERVIEW_PROMPT)),
-        max_tokens=int(raw.get("max_tokens", 1200)),
-    )
-
-
 def load_ai_config() -> PowerToolAIConfig:
     path = _config_path()
     if not path.exists():
@@ -118,10 +93,6 @@ def load_ai_config() -> PowerToolAIConfig:
         return config
     with path.open("r", encoding="utf-8") as f:
         raw = json.load(f)
-    if "api" not in raw or "ollama" not in raw:
-        config = _migrate_legacy_config(raw)
-        save_ai_config(config)
-        return config
     provider_raw = dict(raw.get("provider", {}))
     api_raw = dict(raw.get("api", {}))
     ollama_raw = dict(raw.get("ollama", {}))
