@@ -3,7 +3,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from power_tool_ai import DEFAULT_OVERVIEW_PROMPT, PowerToolAIConfig, api_key_status, compose_prompt, load_ai_config, save_ai_config
+from power_tool_ai import (
+    DEFAULT_OVERVIEW_PROMPT,
+    PowerToolAIConfig,
+    _extract_ollama_text,
+    api_key_status,
+    compose_prompt,
+    load_ai_config,
+    save_ai_config,
+)
 
 
 def test_compose_prompt_includes_question_tab_case_and_note() -> None:
@@ -76,3 +84,8 @@ def test_api_key_status_reads_environment_variable(monkeypatch) -> None:
     config = PowerToolAIConfig()
     monkeypatch.setenv("DASHSCOPE_API_KEY", "secret")
     assert api_key_status(config).endswith("已设置")
+
+
+def test_extract_ollama_text_supports_message_and_response_shapes() -> None:
+    assert _extract_ollama_text({"message": {"content": "本地回答"}}) == "本地回答"
+    assert _extract_ollama_text({"response": "兼容回答"}) == "兼容回答"

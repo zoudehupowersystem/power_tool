@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import mimetypes
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -138,6 +139,11 @@ def encode_image_base64(image_path: str | Path) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
+def _image_data_url(image_path: str | Path) -> str:
+    mime, _ = mimetypes.guess_type(str(image_path))
+    return f"data:{mime or 'image/png'};base64,{encode_image_base64(image_path)}"
+
+
 def compose_prompt(question: str, tab_name: str, case_text: str, screenshot_note: str) -> str:
     case_block = case_text.strip() if case_text.strip() else "当前页暂未提取到数值算例。"
     return (
@@ -184,6 +190,28 @@ def _http_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeo
         raise PowerToolAIError(f"AI 返回了非 JSON 内容：{body[:300]}") from exc
 
 
+
+
+def _extract_ollama_text(data: dict[str, Any]) -> str:
+    message = data.get("message")
+    if isinstance(message, dict):
+        content = str(message.get("content", "")).strip()
+        if content:
+            return content
+    response_text = str(data.get("response", "")).strip()
+    if response_text:
+        return response_text
+    if isinstance(data.get("messages"), list):
+        texts = []
+        for item in data["messages"]:
+            if isinstance(item, dict):
+                piece = str(item.get("content", "")).strip()
+                if piece:
+                    texts.append(piece)
+        if texts:
+            return "\n".join(texts)
+    return ""
+
 def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> str:
     user_message: dict[str, Any] = {"role": "user", "content": prompt}
     if screenshot_path:
@@ -201,10 +229,9 @@ def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | P
         },
     }
     data = _http_json(_ollama_chat_url(config.ollama.host), payload, {}, config.ollama.timeout)
-    message = data.get("message") or {}
-    content = str(message.get("content", "")).strip()
+    content = _extract_ollama_text(data)
     if not content:
-        raise PowerToolAIError("Ollama 未返回有效文本内容。")
+        raise PowerToolAIError(f"Ollama 未返回有效文本内容。原始响应字段：{sorted(data.keys())}")
     return content
 
 
@@ -215,8 +242,7 @@ def _ask_openai_compatible(config: PowerToolAIConfig, prompt: str, screenshot_pa
         raise PowerToolAIError(f"当前为 API 模式，但环境变量 {env_name} 未设置。")
     user_content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
     if screenshot_path:
-        image_b64 = encode_image_base64(screenshot_path)
-        user_content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}})
+        user_content.append({"type": "image_url", "image_url": {"url": _image_data_url(screenshot_path)}})
     payload = {
         "model": config.api.default_model,
         "temperature": config.api.temperature,

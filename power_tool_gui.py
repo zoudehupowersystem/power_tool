@@ -68,7 +68,7 @@ from power_tool_smib import (
 )
 
 from power_tool_line_geometry import calculate_overhead_line_sequence
-from power_tool_ai import PowerToolAIConfig, PowerToolAIError, api_key_status, ask_ai, config_path, load_ai_config, save_ai_config
+from power_tool_ai import PowerToolAIError, api_key_status, ask_ai, config_path, load_ai_config
 from power_tool_loop_closure import loop_closure_analysis
 from power_tool_comtrade import (
     estimate_sampling_rate,
@@ -354,158 +354,50 @@ class ApproximationToolGUI(tk.Tk):
         panel = ttk.Frame(self, padding=10, style="Card.TFrame")
         panel.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
         panel.columnconfigure(0, weight=1)
-        panel.rowconfigure(7, weight=1)
+        panel.rowconfigure(4, weight=1)
 
         ttk.Label(panel, text="PowerTool AI", style="Card.TLabel",
                   font=("TkDefaultFont", 12, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(
             panel,
-            text="右侧问答面板固定显示；支持本地 Ollama 或 API，并通过环境变量隐藏 API Key。",
+            text="AI 配置和标准提示词仅从 JSON 文件读取，不在软件界面中显示；提问时会自动附带当前界面截图和算例摘要。",
             style="Card.TLabel", justify="left", wraplength=360,
         ).grid(row=1, column=0, sticky="ew", pady=(4, 8))
 
-        cfg = ttk.LabelFrame(panel, text="AI 配置", padding=8)
-        cfg.grid(row=2, column=0, sticky="ew")
-        cfg.columnconfigure(1, weight=1)
+        self.ai_status_var = tk.StringVar(value=self._ai_status_summary())
+        ttk.Label(panel, textvariable=self.ai_status_var, style="Card.TLabel", justify="left",
+                  wraplength=360).grid(row=2, column=0, sticky="ew", pady=(0, 8))
 
-        self.ai_provider_var = tk.StringVar(value=self.ai_config.provider.mode)
-        self.ai_ollama_host_var = tk.StringVar(value=self.ai_config.ollama.host)
-        self.ai_ollama_model_var = tk.StringVar(value=self.ai_config.ollama.default_model)
-        self.ai_ollama_models_var = tk.StringVar(value=", ".join(self.ai_config.ollama.models))
-        self.ai_api_env_var = tk.StringVar(value=self.ai_config.api.env_key_name)
-        self.ai_api_base_url_var = tk.StringVar(value=self.ai_config.api.base_url)
-        self.ai_api_model_var = tk.StringVar(value=self.ai_config.api.default_model)
-        self.ai_api_models_var = tk.StringVar(value=", ".join(self.ai_config.api.models))
-        self.ai_status_var = tk.StringVar(value=f"配置文件：{config_path().name}；{api_key_status(self.ai_config)}")
-
-        ttk.Label(cfg, text="方式").grid(row=0, column=0, sticky="w", padx=4, pady=4)
-        provider = ttk.Combobox(cfg, state="readonly", textvariable=self.ai_provider_var, values=["ollama", "api"], width=12)
-        provider.grid(row=0, column=1, sticky="ew", padx=4, pady=4)
-        provider.bind("<<ComboboxSelected>>", self._on_ai_provider_change)
-
-        ttk.Label(cfg, text="Ollama Host").grid(row=1, column=0, sticky="w", padx=4, pady=4)
-        self.ai_ollama_host_entry = ttk.Entry(cfg, textvariable=self.ai_ollama_host_var)
-        self.ai_ollama_host_entry.grid(row=1, column=1, sticky="ew", padx=4, pady=4)
-
-        ttk.Label(cfg, text="本地模型").grid(row=2, column=0, sticky="w", padx=4, pady=4)
-        self.ai_ollama_model_box = ttk.Combobox(cfg, textvariable=self.ai_ollama_model_var)
-        self.ai_ollama_model_box.grid(row=2, column=1, sticky="ew", padx=4, pady=4)
-
-        ttk.Label(cfg, text="本地模型列表").grid(row=3, column=0, sticky="w", padx=4, pady=4)
-        self.ai_ollama_models_entry = ttk.Entry(cfg, textvariable=self.ai_ollama_models_var)
-        self.ai_ollama_models_entry.grid(row=3, column=1, sticky="ew", padx=4, pady=4)
-
-        ttk.Label(cfg, text="API 环境变量").grid(row=4, column=0, sticky="w", padx=4, pady=4)
-        self.ai_api_env_entry = ttk.Entry(cfg, textvariable=self.ai_api_env_var)
-        self.ai_api_env_entry.grid(row=4, column=1, sticky="ew", padx=4, pady=4)
-
-        ttk.Label(cfg, text="API Base URL").grid(row=5, column=0, sticky="w", padx=4, pady=4)
-        self.ai_api_base_url_entry = ttk.Entry(cfg, textvariable=self.ai_api_base_url_var)
-        self.ai_api_base_url_entry.grid(row=5, column=1, sticky="ew", padx=4, pady=4)
-
-        ttk.Label(cfg, text="API 默认模型").grid(row=6, column=0, sticky="w", padx=4, pady=4)
-        self.ai_api_model_box = ttk.Combobox(cfg, textvariable=self.ai_api_model_var)
-        self.ai_api_model_box.grid(row=6, column=1, sticky="ew", padx=4, pady=4)
-
-        ttk.Label(cfg, text="API 模型列表").grid(row=7, column=0, sticky="w", padx=4, pady=4)
-        self.ai_api_models_entry = ttk.Entry(cfg, textvariable=self.ai_api_models_var)
-        self.ai_api_models_entry.grid(row=7, column=1, sticky="ew", padx=4, pady=4)
-
-        ttk.Button(cfg, text="保存配置", command=self._save_ai_config_from_form).grid(row=8, column=0, sticky="ew", padx=4, pady=(8, 4))
-        ttk.Button(cfg, text="重新载入", command=self._reload_ai_config).grid(row=8, column=1, sticky="ew", padx=4, pady=(8, 4))
-
-        ttk.Label(panel, text="标准提示词（写入配置文件）", style="Card.TLabel",
-                  font=("TkDefaultFont", 10, "bold")).grid(row=3, column=0, sticky="w", pady=(10, 4))
-        self.ai_system_prompt = ScrolledText(panel, width=44, height=9, wrap=tk.WORD)
-        self.ai_system_prompt.grid(row=4, column=0, sticky="nsew")
-        self.ai_system_prompt.insert("1.0", self.ai_config.system_prompt)
-
-        ttk.Label(panel, text="提问", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=5, column=0, sticky="w", pady=(10, 4))
-        self.ai_question = ScrolledText(panel, width=44, height=7, wrap=tk.WORD)
-        self.ai_question.grid(row=6, column=0, sticky="nsew")
+        ttk.Label(panel, text="提问", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=3, column=0, sticky="w", pady=(4, 4))
+        self.ai_question = ScrolledText(panel, width=44, height=9, wrap=tk.WORD)
+        self.ai_question.grid(row=4, column=0, sticky="nsew")
         self.ai_question.insert("1.0", "请结合当前界面，解释这个算例的意义、关键结果和下一步建议。")
 
         action = ttk.Frame(panel, style="Card.TFrame")
-        action.grid(row=7, column=0, sticky="ew", pady=(8, 6))
+        action.grid(row=5, column=0, sticky="ew", pady=(8, 6))
         action.columnconfigure(0, weight=1)
         action.columnconfigure(1, weight=1)
         ttk.Button(action, text="发送到 PowerTool AI", command=self._ask_power_tool_ai).grid(row=0, column=0, sticky="ew", padx=(0, 4))
         ttk.Button(action, text="填入当前算例摘要", command=self._insert_current_case_summary).grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
-        ttk.Label(panel, textvariable=self.ai_status_var, style="Card.TLabel", justify="left",
-                  wraplength=360).grid(row=8, column=0, sticky="ew", pady=(0, 6))
-
-        ttk.Label(panel, text="AI 回复", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=9, column=0, sticky="w", pady=(4, 4))
+        ttk.Label(panel, text="AI 回复", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=6, column=0, sticky="w", pady=(4, 4))
         self.ai_answer = ScrolledText(panel, width=44, height=18, wrap=tk.WORD)
-        self.ai_answer.grid(row=10, column=0, sticky="nsew")
+        self.ai_answer.grid(row=7, column=0, sticky="nsew")
         self.ai_answer.insert("1.0", "PowerTool AI 已就绪。")
         self.ai_answer.configure(state="disabled")
 
-        panel.rowconfigure(10, weight=1)
-        self._refresh_ai_model_values()
-        self._on_ai_provider_change()
+        panel.rowconfigure(7, weight=1)
 
-    def _refresh_ai_model_values(self) -> None:
-        ollama_models = [item.strip() for item in self.ai_ollama_models_var.get().split(",") if item.strip()]
-        api_models = [item.strip() for item in self.ai_api_models_var.get().split(",") if item.strip()]
-        self.ai_ollama_model_box.configure(values=ollama_models)
-        self.ai_api_model_box.configure(values=api_models)
-
-    def _on_ai_provider_change(self, _event: object | None = None) -> None:
-        self._refresh_ai_model_values()
-        is_ollama = self.ai_provider_var.get().strip() != "api"
-        self.ai_ollama_host_entry.configure(state="normal" if is_ollama else "disabled")
-        self.ai_ollama_model_box.configure(state="normal" if is_ollama else "disabled")
-        self.ai_ollama_models_entry.configure(state="normal" if is_ollama else "disabled")
-        self.ai_api_env_entry.configure(state="disabled" if is_ollama else "normal")
-        self.ai_api_base_url_entry.configure(state="disabled" if is_ollama else "normal")
-        self.ai_api_model_box.configure(state="disabled" if is_ollama else "normal")
-        self.ai_api_models_entry.configure(state="disabled" if is_ollama else "normal")
-
-    def _config_from_form(self) -> PowerToolAIConfig:
-        self._refresh_ai_model_values()
-        ollama_models = [item.strip() for item in self.ai_ollama_models_var.get().split(",") if item.strip()]
-        api_models = [item.strip() for item in self.ai_api_models_var.get().split(",") if item.strip()]
-        return PowerToolAIConfig(
-            provider=type(self.ai_config.provider)(mode=self.ai_provider_var.get().strip() or "ollama"),
-            ollama=type(self.ai_config.ollama)(
-                host=self.ai_ollama_host_var.get().strip() or "http://127.0.0.1:11434",
-                default_model=self.ai_ollama_model_var.get().strip() or "qwen3.5:9b",
-                models=ollama_models or ["qwen3.5:9b"],
-                timeout=self.ai_config.ollama.timeout,
-            ),
-            api=type(self.ai_config.api)(
-                env_key_name=self.ai_api_env_var.get().strip() or "DASHSCOPE_API_KEY",
-                base_url=self.ai_api_base_url_var.get().strip() or "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                default_model=self.ai_api_model_var.get().strip() or "qwen3.5-27b",
-                models=api_models or ["qwen3.5-27b"],
-                temperature=self.ai_config.api.temperature,
-                timeout=self.ai_config.api.timeout,
-            ),
-            system_prompt=self.ai_system_prompt.get("1.0", tk.END).strip(),
-            max_tokens=self.ai_config.max_tokens,
+    def _ai_status_summary(self) -> str:
+        return (
+            f"配置文件：{config_path().name}\n"
+            f"当前模式：{self.ai_config.provider.mode}\n"
+            f"{api_key_status(self.ai_config)}"
         )
-
-    def _save_ai_config_from_form(self) -> None:
-        self.ai_config = self._config_from_form()
-        path = save_ai_config(self.ai_config)
-        self.ai_status_var.set(f"配置已保存：{path.name}；{api_key_status(self.ai_config)}")
-        self._on_ai_provider_change()
 
     def _reload_ai_config(self) -> None:
         self.ai_config = load_ai_config()
-        self.ai_provider_var.set(self.ai_config.provider.mode)
-        self.ai_ollama_host_var.set(self.ai_config.ollama.host)
-        self.ai_ollama_model_var.set(self.ai_config.ollama.default_model)
-        self.ai_ollama_models_var.set(", ".join(self.ai_config.ollama.models))
-        self.ai_api_env_var.set(self.ai_config.api.env_key_name)
-        self.ai_api_base_url_var.set(self.ai_config.api.base_url)
-        self.ai_api_model_var.set(self.ai_config.api.default_model)
-        self.ai_api_models_var.set(", ".join(self.ai_config.api.models))
-        self.ai_system_prompt.delete("1.0", tk.END)
-        self.ai_system_prompt.insert("1.0", self.ai_config.system_prompt)
-        self.ai_status_var.set(f"配置已重新载入：{config_path().name}；{api_key_status(self.ai_config)}")
-        self._on_ai_provider_change()
+        self.ai_status_var.set(self._ai_status_summary())
 
     def _set_ai_answer(self, text: str) -> None:
         self.ai_answer.configure(state="normal")
@@ -596,7 +488,7 @@ class ApproximationToolGUI(tk.Tk):
         if not question:
             messagebox.showinfo("PowerTool AI", "请输入问题后再发送。")
             return
-        self._save_ai_config_from_form()
+        self._reload_ai_config()
         tab_name = self._current_tab_name()
         case_text = self._tab_numeric_summary()
         screenshot_path, screenshot_note = self._capture_current_ui()
@@ -617,7 +509,7 @@ class ApproximationToolGUI(tk.Tk):
 
             def finish() -> None:
                 self._ai_busy = False
-                self.ai_status_var.set(status + f" 当前截图：{screenshot_note}")
+                self.ai_status_var.set(f"{status}\n当前截图：{screenshot_note}\n{self._ai_status_summary()}")
                 self._set_ai_answer(answer)
 
             self.after(0, finish)
