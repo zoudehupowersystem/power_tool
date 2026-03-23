@@ -5,7 +5,9 @@ from __future__ import annotations
 
 
 import math
-
+import threading
+from datetime import datetime
+from pathlib import Path
 
 import tkinter as tk
 
@@ -66,6 +68,7 @@ from power_tool_smib import (
 )
 
 from power_tool_line_geometry import calculate_overhead_line_sequence
+from power_tool_ai import PowerToolAIConfig, PowerToolAIError, ask_ai, config_path, load_ai_config, save_ai_config
 from power_tool_loop_closure import loop_closure_analysis
 from power_tool_comtrade import (
     estimate_sampling_rate,
@@ -213,15 +216,19 @@ class ApproximationToolGUI(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("电力系统近似公式工程工具")
-        self.geometry("1360x930")
-        self.minsize(1180, 820)
+        self.geometry("1660x930")
+        self.minsize(1400, 820)
         self._configure_styles()
+        self.ai_config = load_ai_config()
+        self._latest_ai_screenshot: Path | None = None
+        self._ai_busy = False
 
-        self.columnconfigure(0, weight=1)
+        self.columnconfigure(0, weight=5)
+        self.columnconfigure(1, weight=2)
         self.rowconfigure(0, weight=1)
 
         self.main_notebook = ttk.Notebook(self)
-        self.main_notebook.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        self.main_notebook.grid(row=0, column=0, sticky="nsew", padx=(8, 4), pady=8)
 
         notebook = self.main_notebook
         self.freq_tab = ttk.Frame(notebook)
@@ -267,6 +274,7 @@ class ApproximationToolGUI(tk.Tk):
         self._build_param_tab()
         self._build_short_circuit_tab()
         self._build_comtrade_tab()
+        self._build_ai_sidebar()
 
     @staticmethod
     def _add_entry(parent: ttk.Frame,
@@ -341,6 +349,249 @@ class ApproximationToolGUI(tk.Tk):
             hi = int(np.searchsorted(time_s, end_s, side="right"))
             idx = np.arange(max(0, lo - 1), min(time_s.size, hi + 1))
         return idx
+
+    def _build_ai_sidebar(self) -> None:
+        panel = ttk.Frame(self, padding=10, style="Card.TFrame")
+        panel.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
+        panel.columnconfigure(0, weight=1)
+        panel.rowconfigure(7, weight=1)
+
+        ttk.Label(panel, text="PowerTool AI", style="Card.TLabel",
+                  font=("TkDefaultFont", 12, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            panel,
+            text="无论切换哪个标签页，AI 问答都固定在右侧；提问时会附带当前界面截图与当前算例数值。",
+            style="Card.TLabel", justify="left", wraplength=360,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 8))
+
+        cfg = ttk.LabelFrame(panel, text="AI 配置", padding=8)
+        cfg.grid(row=2, column=0, sticky="ew")
+        cfg.columnconfigure(1, weight=1)
+
+        self.ai_provider_var = tk.StringVar(value=self.ai_config.provider)
+        self.ai_model_var = tk.StringVar(value=self.ai_config.model)
+        self.ai_ollama_url_var = tk.StringVar(value=self.ai_config.ollama_url)
+        self.ai_api_url_var = tk.StringVar(value=self.ai_config.api_url)
+        self.ai_api_key_var = tk.StringVar(value=self.ai_config.api_key)
+        self.ai_api_model_var = tk.StringVar(value=self.ai_config.api_model)
+        self.ai_status_var = tk.StringVar(value=f"配置文件：{config_path().name}")
+
+        ttk.Label(cfg, text="方式").grid(row=0, column=0, sticky="w", padx=4, pady=4)
+        provider = ttk.Combobox(cfg, state="readonly", textvariable=self.ai_provider_var, values=["ollama", "api"], width=12)
+        provider.grid(row=0, column=1, sticky="ew", padx=4, pady=4)
+        provider.bind("<<ComboboxSelected>>", self._on_ai_provider_change)
+
+        ttk.Label(cfg, text="本地模型").grid(row=1, column=0, sticky="w", padx=4, pady=4)
+        self.ai_model_entry = ttk.Entry(cfg, textvariable=self.ai_model_var)
+        self.ai_model_entry.grid(row=1, column=1, sticky="ew", padx=4, pady=4)
+
+        ttk.Label(cfg, text="Ollama URL").grid(row=2, column=0, sticky="w", padx=4, pady=4)
+        self.ai_ollama_url_entry = ttk.Entry(cfg, textvariable=self.ai_ollama_url_var)
+        self.ai_ollama_url_entry.grid(row=2, column=1, sticky="ew", padx=4, pady=4)
+
+        ttk.Label(cfg, text="API URL").grid(row=3, column=0, sticky="w", padx=4, pady=4)
+        self.ai_api_url_entry = ttk.Entry(cfg, textvariable=self.ai_api_url_var)
+        self.ai_api_url_entry.grid(row=3, column=1, sticky="ew", padx=4, pady=4)
+
+        ttk.Label(cfg, text="API Key").grid(row=4, column=0, sticky="w", padx=4, pady=4)
+        self.ai_api_key_entry = ttk.Entry(cfg, textvariable=self.ai_api_key_var, show="*")
+        self.ai_api_key_entry.grid(row=4, column=1, sticky="ew", padx=4, pady=4)
+
+        ttk.Label(cfg, text="API 模型").grid(row=5, column=0, sticky="w", padx=4, pady=4)
+        self.ai_api_model_entry = ttk.Entry(cfg, textvariable=self.ai_api_model_var)
+        self.ai_api_model_entry.grid(row=5, column=1, sticky="ew", padx=4, pady=4)
+
+        ttk.Button(cfg, text="保存配置", command=self._save_ai_config_from_form).grid(row=6, column=0, sticky="ew", padx=4, pady=(8, 4))
+        ttk.Button(cfg, text="重新载入", command=self._reload_ai_config).grid(row=6, column=1, sticky="ew", padx=4, pady=(8, 4))
+
+        ttk.Label(panel, text="标准提示词（写入配置文件）", style="Card.TLabel",
+                  font=("TkDefaultFont", 10, "bold")).grid(row=3, column=0, sticky="w", pady=(10, 4))
+        self.ai_system_prompt = ScrolledText(panel, width=44, height=9, wrap=tk.WORD)
+        self.ai_system_prompt.grid(row=4, column=0, sticky="nsew")
+        self.ai_system_prompt.insert("1.0", self.ai_config.system_prompt)
+
+        ttk.Label(panel, text="提问", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=5, column=0, sticky="w", pady=(10, 4))
+        self.ai_question = ScrolledText(panel, width=44, height=7, wrap=tk.WORD)
+        self.ai_question.grid(row=6, column=0, sticky="nsew")
+        self.ai_question.insert("1.0", "请结合当前界面，解释这个算例的意义、关键结果和下一步建议。")
+
+        action = ttk.Frame(panel, style="Card.TFrame")
+        action.grid(row=7, column=0, sticky="ew", pady=(8, 6))
+        action.columnconfigure(0, weight=1)
+        action.columnconfigure(1, weight=1)
+        ttk.Button(action, text="发送到 PowerTool AI", command=self._ask_power_tool_ai).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(action, text="填入当前算例摘要", command=self._insert_current_case_summary).grid(row=0, column=1, sticky="ew", padx=(4, 0))
+
+        ttk.Label(panel, textvariable=self.ai_status_var, style="Card.TLabel", justify="left",
+                  wraplength=360).grid(row=8, column=0, sticky="ew", pady=(0, 6))
+
+        ttk.Label(panel, text="AI 回复", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=9, column=0, sticky="w", pady=(4, 4))
+        self.ai_answer = ScrolledText(panel, width=44, height=18, wrap=tk.WORD)
+        self.ai_answer.grid(row=10, column=0, sticky="nsew")
+        self.ai_answer.insert("1.0", "PowerTool AI 已就绪。")
+        self.ai_answer.configure(state="disabled")
+
+        panel.rowconfigure(10, weight=1)
+        self._on_ai_provider_change()
+
+    def _on_ai_provider_change(self, _event: object | None = None) -> None:
+        is_ollama = self.ai_provider_var.get().strip() != "api"
+        self.ai_model_entry.configure(state="normal" if is_ollama else "disabled")
+        self.ai_ollama_url_entry.configure(state="normal" if is_ollama else "disabled")
+        self.ai_api_url_entry.configure(state="disabled" if is_ollama else "normal")
+        self.ai_api_key_entry.configure(state="disabled" if is_ollama else "normal")
+        self.ai_api_model_entry.configure(state="disabled" if is_ollama else "normal")
+
+    def _config_from_form(self) -> PowerToolAIConfig:
+        return PowerToolAIConfig(
+            provider=self.ai_provider_var.get().strip() or "ollama",
+            model=self.ai_model_var.get().strip() or "qwen3.5:9b",
+            ollama_url=self.ai_ollama_url_var.get().strip() or "http://127.0.0.1:11434/api/chat",
+            api_url=self.ai_api_url_var.get().strip() or "https://api.openai.com/v1/chat/completions",
+            api_key=self.ai_api_key_var.get().strip(),
+            api_model=self.ai_api_model_var.get().strip() or "gpt-4.1-mini",
+            timeout_s=self.ai_config.timeout_s,
+            system_prompt=self.ai_system_prompt.get("1.0", tk.END).strip(),
+            temperature=self.ai_config.temperature,
+            max_tokens=self.ai_config.max_tokens,
+            extra_headers=self.ai_config.extra_headers,
+        )
+
+    def _save_ai_config_from_form(self) -> None:
+        self.ai_config = self._config_from_form()
+        path = save_ai_config(self.ai_config)
+        self.ai_status_var.set(f"配置已保存：{path.name}")
+        self._on_ai_provider_change()
+
+    def _reload_ai_config(self) -> None:
+        self.ai_config = load_ai_config()
+        self.ai_provider_var.set(self.ai_config.provider)
+        self.ai_model_var.set(self.ai_config.model)
+        self.ai_ollama_url_var.set(self.ai_config.ollama_url)
+        self.ai_api_url_var.set(self.ai_config.api_url)
+        self.ai_api_key_var.set(self.ai_config.api_key)
+        self.ai_api_model_var.set(self.ai_config.api_model)
+        self.ai_system_prompt.delete("1.0", tk.END)
+        self.ai_system_prompt.insert("1.0", self.ai_config.system_prompt)
+        self.ai_status_var.set(f"配置已重新载入：{config_path().name}")
+        self._on_ai_provider_change()
+
+    def _set_ai_answer(self, text: str) -> None:
+        self.ai_answer.configure(state="normal")
+        self.ai_answer.delete("1.0", tk.END)
+        self.ai_answer.insert(tk.END, text)
+        self.ai_answer.configure(state="disabled")
+
+    def _current_tab_name(self) -> str:
+        return self.main_notebook.tab(self.main_notebook.select(), "text")
+
+    def _tab_numeric_summary(self) -> str:
+        tab = self._current_tab_name()
+        if tab == "频率动态":
+            pairs = [("额定频率 f0 / Hz", self.freq_f0), ("功率缺额 ΔP_OL0 / pu", self.freq_dp), ("系统惯性时间常数 T_s / s", self.freq_ts),
+                     ("一次调频时间常数 T_G / s", self.freq_tg), ("负荷频率系数 k_D / pu/pu", self.freq_kd), ("一次调频系数 k_G / pu/pu", self.freq_kg),
+                     ("绘图时长 / s", self.freq_tend)]
+        elif tab == "机电振荡":
+            pairs = [("内电势 E'_q / pu", self.osc_eq), ("端电压 U / pu", self.osc_u), ("等值电抗 X_Σ / pu", self.osc_x), ("初始有功 P0 / pu", self.osc_p0),
+                     ("惯性时间常数 T_j / s", self.osc_tj), ("同步频率 f0 / Hz", self.osc_f0)]
+        elif tab == "静态电压稳定":
+            pairs = [("送端电压 U_g / pu", self.volt_ug), ("总电抗 X_Σ / pu", self.volt_x), ("功率因数 cosφ", self.volt_pf), ("容量基准 S_base / MVA", self.volt_sbase)]
+        elif tab == "线路自然功率与无功":
+            pairs = [("线路额定电压 U / kV", self.line_u), ("波阻抗 Z_c / Ω", self.line_zc), ("单位长度电感 L", self.line_l), ("单位长度电容 C", self.line_c),
+                     ("实际传输有功 P / MW", self.line_p), ("单位长度充电功率 Q_N / (Mvar/km)", self.line_qn), ("线路长度 l / km", self.line_len)]
+        elif tab == "暂稳评估":
+            pairs = [("冲击法 ΔPa / pu", self.imp_dp), ("冲击法 Δt / s", self.imp_dt), ("冲击法 f_d / Hz", self.imp_fd), ("冲击法 Pmax_post / pu", self.imp_pmax),
+                     ("冲击法 Pm / pu", self.imp_pcur), ("等面积法 Pm / pu", self.eac_pm), ("等面积法 Pmax_pre / pu", self.eac_ppre),
+                     ("等面积法 Pmax_fault / pu", self.eac_pf), ("等面积法 Pmax_post / pu", self.eac_ppost), ("等面积法 Δt / s", self.eac_dt)]
+        elif tab == "小扰动分析（SMIB）":
+            lines = [f"模型配置: {self.smib_config.get().strip()}"]
+            for key, entry in self.smib_entries.items():
+                lines.append(f"{key}: {entry.get().strip()}")
+            return "\n".join(lines)
+        elif tab == "配电网合环分析":
+            pairs = [("连接点数量 N", self.loop_n), ("U1 / kV", self.loop_u1), ("U2 / kV", self.loop_u2), ("相角 φ / °", self.loop_angle), ("系统频率 / Hz", self.loop_freq)]
+        elif tab == "参数校核与标幺值":
+            current = self.param_notebook.tab(self.param_notebook.select(), "text")
+            if current == "架空线路":
+                pairs = [("线路额定电压 U_base / kV", self.lp_ubase), ("容量基准 S_base / MVA", self.lp_sbase), ("线路长度 l / km", self.lp_len),
+                         ("R1 / Ω/km", self.lp_r1), ("X1 / Ω/km", self.lp_x1), ("C1 / μF/km", self.lp_c1)]
+            elif current == "两绕组变压器":
+                pairs = [("S_base / MVA", self.tx2_sbase), ("额定容量 SN / MVA", self.tx2_sn), ("额定电压 UN / kV", self.tx2_un),
+                         ("Uk / %", self.tx2_uk), ("Pk / kW", self.tx2_pk), ("I0 / %", self.tx2_i0), ("P0 / kW", self.tx2_p0), ("Ubase / kV", self.tx2_ubase)]
+            else:
+                pairs = [("S_base / MVA", self.tx3_sbase), ("Ubase / kV", self.tx3_ubase), ("SN_H / MVA", self.tx3_sn_h), ("UN_H / kV", self.tx3_un_h),
+                         ("SN_M / MVA", self.tx3_sn_m), ("SN_L / MVA", self.tx3_sn_l), ("Uk_HM / %", self.tx3_uk_hm), ("Uk_HL / %", self.tx3_uk_hl), ("Uk_ML / %", self.tx3_uk_ml)]
+            header = f"参数页子标签: {current}"
+            return header + "\n" + "\n".join(f"{name}: {entry.get().strip()}" for name, entry in pairs)
+        elif tab == "短路电流计算":
+            pairs = [("系统电压 / kV", self.sc_u), ("线路长度 / km", self.sc_len), ("R1 / Ω/km", self.sc_r1), ("X1 / Ω/km", self.sc_x1),
+                     ("R0 / Ω/km", self.sc_r0), ("X0 / Ω/km", self.sc_x0), ("接地电阻 / Ω", self.sc_zn), ("故障电阻 / Ω", self.sc_rf)]
+        elif tab == "录波曲线":
+            return f"当前录波文件: {getattr(self, '_comtrade_cfg_path', '') or '未载入'}\n当前时间窗: {self.comtrade_time_label.cget('text')}"
+        else:
+            return "当前页暂未定义数值摘要。"
+        return "\n".join(f"{name}: {entry.get().strip()}" for name, entry in pairs)
+
+    def _insert_current_case_summary(self) -> None:
+        summary = self._tab_numeric_summary()
+        self.ai_question.delete("1.0", tk.END)
+        self.ai_question.insert("1.0", f"请结合当前界面分析：\n\n{summary}\n")
+
+    def _capture_current_ui(self) -> tuple[Path | None, str]:
+        cache_dir = Path(__file__).resolve().with_name(".power_tool_ai_cache")
+        cache_dir.mkdir(exist_ok=True)
+        filename = cache_dir / f"ui_capture_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.png"
+        try:
+            from PIL import ImageGrab  # type: ignore
+        except Exception:
+            return None, "当前环境未安装 Pillow，未能自动截取界面截图。"
+        try:
+            self.update_idletasks()
+            x0 = self.winfo_rootx()
+            y0 = self.winfo_rooty()
+            x1 = x0 + self.winfo_width()
+            y1 = y0 + self.winfo_height()
+            image = ImageGrab.grab(bbox=(x0, y0, x1, y1))
+            image.save(filename)
+            self._latest_ai_screenshot = filename
+            return filename, f"已自动截取当前软件界面：{filename.name}"
+        except Exception as exc:
+            return None, f"自动截图失败：{exc}"
+
+    def _ask_power_tool_ai(self) -> None:
+        if self._ai_busy:
+            return
+        question = self.ai_question.get("1.0", tk.END).strip()
+        if not question:
+            messagebox.showinfo("PowerTool AI", "请输入问题后再发送。")
+            return
+        self._save_ai_config_from_form()
+        tab_name = self._current_tab_name()
+        case_text = self._tab_numeric_summary()
+        screenshot_path, screenshot_note = self._capture_current_ui()
+        self._ai_busy = True
+        self.ai_status_var.set(f"PowerTool AI 正在分析：{tab_name}")
+        self._set_ai_answer("PowerTool AI 正在处理中，请稍候…")
+
+        def worker() -> None:
+            try:
+                answer = ask_ai(self.ai_config, question, tab_name, case_text, screenshot_note, screenshot_path)
+                status = f"分析完成：{tab_name}"
+            except PowerToolAIError as exc:
+                answer = f"PowerTool AI 调用失败：\n{exc}"
+                status = "调用失败，请检查本地模型/API 配置。"
+            except Exception as exc:
+                answer = f"PowerTool AI 发生未预期异常：\n{exc}"
+                status = "调用失败，请检查日志与配置。"
+
+            def finish() -> None:
+                self._ai_busy = False
+                self.ai_status_var.set(status + f" 当前截图：{screenshot_note}")
+                self._set_ai_answer(answer)
+
+            self.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _build_frequency_tab(self) -> None:
         self.freq_tab.columnconfigure(1, weight=1)
@@ -1372,6 +1623,7 @@ class ApproximationToolGUI(tk.Tk):
 
         nb = ttk.Notebook(self.param_tab)
         nb.grid(row=0, column=0, sticky="nsew")
+        self.param_notebook = nb
 
         self._ptab_line = ttk.Frame(nb)
         self._ptab_2wt  = ttk.Frame(nb)
