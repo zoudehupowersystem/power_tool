@@ -2475,6 +2475,7 @@ class ApproximationToolGUI(tk.Tk):
         self._sequence_channel_vars: dict[str, tk.StringVar] = {}
         self._sequence_result_text = None
         self._sequence_numeric_text = None
+        self._sequence_numeric_table = None
         self._sequence_fig = None
         self._sequence_canvas = None
         self._sequence_axes = ()
@@ -3043,19 +3044,34 @@ class ApproximationToolGUI(tk.Tk):
             chart_nb.add(frame, text=tab_text)
         chart_host = ttk.Frame(self.comtrade_sequence_frame)
         chart_host.grid(row=4, column=0, sticky="nsew")
-        chart_host.columnconfigure(0, weight=1)
-        chart_host.rowconfigure(1, weight=1)
-        num_frame = ttk.LabelFrame(chart_host, text="实时数值", padding=4)
-        num_frame.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        num_frame.columnconfigure(0, weight=1)
-        self._sequence_numeric_text = tk.Text(num_frame, height=5, wrap=tk.NONE, font="TkFixedFont")
-        self._sequence_numeric_text.grid(row=0, column=0, sticky="ew")
-        self._sequence_numeric_text.configure(state="disabled")
-        self._sequence_fig = Figure(figsize=(5.2, 5.0), dpi=100, facecolor="#101418")
+        chart_host.columnconfigure(0, weight=0)
+        chart_host.columnconfigure(1, weight=1)
+        chart_host.rowconfigure(0, weight=1)
+
+        table_frame = ttk.Frame(chart_host)
+        table_frame.grid(row=0, column=0, sticky="nsw", padx=(0, 8))
+        columns = ("name", "mag", "ang", "real", "imag")
+        table = ttk.Treeview(table_frame, columns=columns, show="headings", height=7)
+        headers = {"name": "名称", "mag": "幅值", "ang": "相角/°", "real": "实部", "imag": "虚部"}
+        widths = {"name": 64, "mag": 90, "ang": 90, "real": 88, "imag": 88}
+        for key in columns:
+            table.heading(key, text=headers[key])
+            table.column(key, width=widths[key], anchor="center", stretch=False)
+        table.grid(row=0, column=0, sticky="nsew")
+        unit_label = ttk.Label(table_frame, text="单位：-", foreground="#555555")
+        unit_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self._sequence_numeric_table = table
+        self._sequence_numeric_text = unit_label
+
+        plot_frame = ttk.Frame(chart_host)
+        plot_frame.grid(row=0, column=1, sticky="nsew")
+        plot_frame.columnconfigure(0, weight=1)
+        plot_frame.rowconfigure(0, weight=1)
+        self._sequence_fig = Figure(figsize=(4.8, 4.8), dpi=100, facecolor="#101418")
         ax_seq = self._sequence_fig.add_subplot(111, projection="polar")
         self._sequence_axes = (ax_seq,)
-        self._sequence_canvas = FigureCanvasTkAgg(self._sequence_fig, master=chart_host)
-        self._sequence_canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
+        self._sequence_canvas = FigureCanvasTkAgg(self._sequence_fig, master=plot_frame)
+        self._sequence_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
         self._sequence_chart_notebook = chart_nb
         self._sequence_chart_notebook.bind("<<NotebookTabChanged>>", lambda _e: self._refresh_sequence_analysis_window())
 
@@ -3167,8 +3183,7 @@ class ApproximationToolGUI(tk.Tk):
                 xytext=(theta, 0.0),
                 arrowprops=dict(arrowstyle="-|>", color=color, linewidth=2.2, linestyle="-", shrinkA=0, shrinkB=0),
             )
-            ax.text(theta, min(radial_max * 0.97, radius + radial_max * 0.06), name, color=color, fontsize=9, fontweight="bold", ha="center", va="center")
-        ax.set_title(title, color="#f5f7fa", pad=16, fontsize=11)
+        ax.set_title("")
 
     def _active_sequence_tab_key(self) -> str:
         notebook = getattr(self, "_sequence_chart_notebook", None)
@@ -3178,15 +3193,20 @@ class ApproximationToolGUI(tk.Tk):
         current = notebook.index(notebook.select())
         return tab_defs[current][1]
 
-    @staticmethod
-    def _format_sequence_numeric_table(vectors: dict[str, complex], unit: str) -> str:
-        lines = [f"{'名称':<6}{'幅值':>12}{'相角/°':>12}{'实部':>12}{'虚部':>12}"]
+    def _update_sequence_numeric_table(self, vectors: dict[str, complex], unit: str) -> None:
+        if self._sequence_numeric_table is None or self._sequence_numeric_text is None:
+            return
+        for item in self._sequence_numeric_table.get_children():
+            self._sequence_numeric_table.delete(item)
         for name, value in vectors.items():
             mag = abs(value)
             ang = math.degrees(math.atan2(value.imag, value.real))
-            lines.append(f"{name:<6}{mag:>12.5g}{ang:>12.2f}{value.real:>12.5g}{value.imag:>12.5g}")
-        lines.append(f"单位：{unit}")
-        return "\n".join(lines)
+            self._sequence_numeric_table.insert(
+                "",
+                tk.END,
+                values=(name, f"{mag:.5g}", f"{ang:.2f}", f"{value.real:.5g}", f"{value.imag:.5g}"),
+            )
+        self._sequence_numeric_text.configure(text=f"单位：{unit or '-'}")
 
     def _refresh_sequence_analysis_window(self) -> None:
         if self._sequence_result_text is None or self._sequence_fig is None or self._sequence_canvas is None or self._sequence_numeric_text is None:
@@ -3194,7 +3214,7 @@ class ApproximationToolGUI(tk.Tk):
         record = self._comtrade_record
         if record is None:
             self._set_text(self._sequence_result_text, "未加载录波文件。")
-            self._set_text(self._sequence_numeric_text, "未加载录波文件。")
+            self._update_sequence_numeric_table({}, "-")
             for ax in self._sequence_axes:
                 ax.clear()
             self._sequence_canvas.draw()
@@ -3202,7 +3222,7 @@ class ApproximationToolGUI(tk.Tk):
         t1 = self._current_comtrade_cursor_index("T1")
         if t1 is None:
             self._set_text(self._sequence_result_text, "请先在主窗口左键设置 T1 光标，再进行序量分析。")
-            self._set_text(self._sequence_numeric_text, "等待 T1 光标。")
+            self._update_sequence_numeric_table({}, "-")
             for ax in self._sequence_axes:
                 ax.clear()
                 ax.set_title("等待 T1 光标")
@@ -3262,7 +3282,7 @@ class ApproximationToolGUI(tk.Tk):
             lines.append(f"I2: {self._format_sequence_complex(tab_vectors['current_seq']['I2'], unit)}")
         if not any(tab_vectors.values()):
             self._set_text(self._sequence_result_text, "请在序量分析窗口中至少完整设置一组三相电压或三相电流通道。")
-            self._set_text(self._sequence_numeric_text, "请先完整设置当前需要分析的三相通道。")
+            self._update_sequence_numeric_table({}, "-")
             ax = self._sequence_axes[0]
             ax.clear()
             ax.set_title(f"{titles[self._active_sequence_tab_key()]}\n（未配置）", color="#f5f7fa", pad=16, fontsize=11)
@@ -3272,13 +3292,13 @@ class ApproximationToolGUI(tk.Tk):
         ax = self._sequence_axes[0]
         if tab_vectors[active_key]:
             self._draw_sequence_phasor_axis(ax, tab_vectors[active_key], titles[active_key])
-            self._set_text(self._sequence_numeric_text, self._format_sequence_numeric_table(tab_vectors[active_key], tab_units[active_key] or "-"))
+            self._update_sequence_numeric_table(tab_vectors[active_key], tab_units[active_key] or "-")
         else:
             ax.clear()
             ax.set_title(f"{titles[active_key]}\n（未配置）", color="#f5f7fa", pad=16, fontsize=11)
-            self._set_text(self._sequence_numeric_text, f"{titles[active_key]} 当前未配置完整三相通道。")
+            self._update_sequence_numeric_table({}, "-")
         self._set_text(self._sequence_result_text, "\n".join(lines).strip())
-        self._sequence_fig.tight_layout()
+        self._sequence_fig.subplots_adjust(left=0.03, right=0.97, top=0.97, bottom=0.03)
         self._sequence_canvas.draw()
 
     def _toggle_comtrade_overlay_mode(self) -> None:
