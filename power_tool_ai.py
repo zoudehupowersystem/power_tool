@@ -237,6 +237,39 @@ def _extract_ollama_text(data: dict[str, Any]) -> str:
             return "\n".join(texts)
     return ""
 
+
+def _extract_openai_text(data: dict[str, Any]) -> str:
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise PowerToolAIError("API 未返回 choices 字段。")
+    message = choices[0].get("message", {})
+    if not isinstance(message, dict):
+        message = {}
+    content = message.get("content", "")
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            piece = str(item.get("text", "")).strip()
+            if piece:
+                text_parts.append(piece)
+        content = "\n".join(text_parts)
+    content_text = str(content).strip()
+    if content_text:
+        return content_text
+    for key in ("reasoning_content", "reasoning"):
+        value = message.get(key, "")
+        text = str(value).strip()
+        if text:
+            return text
+    delta = choices[0].get("delta", {})
+    if isinstance(delta, dict):
+        text = str(delta.get("content", "")).strip()
+        if text:
+            return text
+    return ""
+
 def _ollama_chat_once(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None, think: bool = False) -> tuple[str, dict[str, Any]]:
     user_message: dict[str, Any] = {"role": "user", "content": prompt}
     if screenshot_path:
@@ -287,15 +320,15 @@ def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | P
     raise PowerToolAIError(f"Ollama 未返回有效文本内容。原始响应字段：{sorted(data.keys())}")
 
 
-def _ask_openai_compatible(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> str:
-    env_name = config.api.env_key_name.strip() or "DASHSCOPE_API_KEY"
-    api_key = os.getenv(env_name, "").strip()
-    if not api_key:
-        raise PowerToolAIError(f"当前为 API 模式，但环境变量 {env_name} 未设置。")
-    user_content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+def _openai_payload(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> dict[str, Any]:
     if screenshot_path:
-        user_content.append({"type": "image_url", "image_url": {"url": _image_data_url(screenshot_path)}})
-    payload = {
+        user_content: str | list[dict[str, Any]] = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": _image_data_url(screenshot_path)}},
+        ]
+    else:
+        user_content = prompt
+    return {
         "model": config.api.default_model,
         "temperature": config.api.temperature,
         "max_tokens": config.max_tokens,
@@ -304,20 +337,32 @@ def _ask_openai_compatible(config: PowerToolAIConfig, prompt: str, screenshot_pa
             {"role": "user", "content": user_content},
         ],
     }
+
+
+def _ask_openai_once(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> str:
+    env_name = config.api.env_key_name.strip() or "DASHSCOPE_API_KEY"
+    api_key = os.getenv(env_name, "").strip()
+    if not api_key:
+        raise PowerToolAIError(f"当前为 API 模式，但环境变量 {env_name} 未设置。")
+    payload = _openai_payload(config, prompt, screenshot_path)
     headers = {"Authorization": f"Bearer {api_key}"}
     data = _http_json(_chat_completions_url(config.api.base_url), payload, headers, config.api.timeout)
-    choices = data.get("choices")
-    if not isinstance(choices, list) or not choices:
-        raise PowerToolAIError("API 未返回 choices 字段。")
-    message = dict(choices[0].get("message", {}))
-    content = message.get("content", "")
-    if isinstance(content, list):
-        text_parts = [str(item.get("text", "")) for item in content if isinstance(item, dict)]
-        content = "\n".join(part for part in text_parts if part)
-    content = str(content).strip()
-    if not content:
-        raise PowerToolAIError("API 未返回有效文本内容。")
-    return content
+    content = _extract_openai_text(data)
+    if content:
+        return content
+    raise PowerToolAIError("API 未返回有效文本内容。")
+
+
+def _ask_openai_compatible(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> str:
+    if screenshot_path:
+        try:
+            return _ask_openai_once(config, prompt, screenshot_path)
+        except PowerToolAIError as exc:
+            try:
+                return _ask_openai_once(config, prompt, None)
+            except PowerToolAIError:
+                raise exc
+    return _ask_openai_once(config, prompt, None)
 
 
 __all__ = [

@@ -8,6 +8,9 @@ from power_tool_ai import (
     PowerToolAIConfig,
     _ask_ollama,
     _extract_ollama_text,
+    _extract_openai_text,
+    _openai_payload,
+    _ask_openai_compatible,
     api_key_status,
     compose_prompt,
     load_ai_config,
@@ -152,3 +155,41 @@ def test_ask_ollama_can_enable_thinking_mode(monkeypatch) -> None:
 
     assert _ask_ollama(PowerToolAIConfig(), "测试", None, think=True) == "思考模式回答"
     assert seen["think"] is True
+
+
+def test_openai_payload_uses_plain_string_content_without_image() -> None:
+    payload = _openai_payload(PowerToolAIConfig(), "电力系统怎样进行调频？", None)
+    assert payload["messages"][1]["content"] == "电力系统怎样进行调频？"
+
+
+def test_extract_openai_text_supports_string_list_and_reasoning_shapes() -> None:
+    assert _extract_openai_text({"choices": [{"message": {"content": "直接回答"}}]}) == "直接回答"
+    assert _extract_openai_text(
+        {"choices": [{"message": {"content": [{"type": "output_text", "text": "列表回答"}]}}]}
+    ) == "列表回答"
+    assert _extract_openai_text({"choices": [{"message": {"content": "", "reasoning_content": "推理回答"}}]}) == "推理回答"
+
+
+def test_ask_openai_compatible_retries_without_image_when_image_request_fails(monkeypatch, tmp_path: Path) -> None:
+    import power_tool_ai
+
+    image_path = tmp_path / "capture.png"
+    image_path.write_bytes(b"fake-image")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-demo-key-1234567890")
+
+    calls: list[dict] = []
+
+    def fake_http_json(url: str, payload: dict, headers: dict, timeout: float) -> dict:
+        calls.append(payload)
+        if isinstance(payload["messages"][1]["content"], list):
+            raise power_tool_ai.PowerToolAIError("HTTP 400: image input is not supported for this model")
+        return {"choices": [{"message": {"content": "纯文本回退回答"}}]}
+
+    monkeypatch.setattr(power_tool_ai, "_http_json", fake_http_json)
+
+    content = _ask_openai_compatible(PowerToolAIConfig(), "请分析当前算例", image_path)
+
+    assert content == "纯文本回退回答"
+    assert len(calls) == 2
+    assert isinstance(calls[0]["messages"][1]["content"], list)
+    assert calls[1]["messages"][1]["content"] == "请分析当前算例"
