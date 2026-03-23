@@ -219,6 +219,7 @@ def _ollama_chat_once(config: PowerToolAIConfig, prompt: str, screenshot_path: s
     payload = {
         "model": config.ollama.default_model,
         "stream": False,
+        "think": False,
         "messages": [
             {"role": "system", "content": config.system_prompt},
             user_message,

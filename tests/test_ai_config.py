@@ -116,3 +116,18 @@ def test_ask_ollama_retries_without_image_when_first_response_is_empty(monkeypat
     assert calls[0][1] is not None
     assert calls[1][1] is None
     assert "未返回可用的图像理解文本" in calls[1][0]
+
+
+def test_ask_ollama_sends_think_false(monkeypatch) -> None:
+    import power_tool_ai
+
+    seen = {}
+
+    def fake_http_json(url: str, payload: dict, headers: dict, timeout: float) -> dict:
+        seen["think"] = payload.get("think")
+        return {"message": {"content": "正常回答"}, "done": True}
+
+    monkeypatch.setattr(power_tool_ai, "_http_json", fake_http_json)
+
+    assert _ask_ollama(PowerToolAIConfig(), "测试", None) == "正常回答"
+    assert seen["think"] is False
