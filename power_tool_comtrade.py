@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import math
+import os
+import re
+import subprocess
 import struct
 import numpy as np
 
@@ -212,6 +215,259 @@ def parse_comtrade(cfg_path: str | Path, dat_path: str | Path | None = None) -> 
         cfg_path=cfg_path,
         dat_path=dat_path,
     )
+
+
+def parse_waveform_file(path: str | Path) -> ComtradeRecord:
+    source_path = Path(path)
+    suffix = source_path.suffix.lower()
+    if suffix == '.cfg':
+        return parse_comtrade(source_path)
+    if suffix in {'.hdr', '.wvf', '.wdf'}:
+        return parse_yokogawa_waveform(source_path)
+    raise ValueError(f'暂不支持的录波文件类型：{source_path.suffix or "(无扩展名)"}')
+
+
+def parse_yokogawa_waveform(path: str | Path) -> ComtradeRecord:
+    source_path = Path(path)
+    suffix = source_path.suffix.lower()
+    if suffix == '.wdf':
+        source_path = _convert_wdf_to_wvf(source_path)
+        suffix = source_path.suffix.lower()
+    if suffix == '.wvf':
+        wvf_path = source_path
+        hdr_path = _resolve_companion_file(source_path, '.HDR')
+    elif suffix == '.hdr':
+        hdr_path = source_path
+        wvf_path = _resolve_companion_file(source_path, '.WVF')
+    else:
+        raise ValueError(f'无法解析的横河录波文件类型：{source_path.suffix}')
+    if not hdr_path.exists():
+        raise ValueError(f'缺少配套 HDR 头文件：{hdr_path.name}')
+    if not wvf_path.exists():
+        raise ValueError(f'缺少配套 WVF 波形文件：{wvf_path.name}')
+
+    header = _parse_yokogawa_hdr(hdr_path)
+    analog_values, time_s = _read_yokogawa_wvf(wvf_path, header)
+    channels = [
+        ComtradeChannel(
+            index=idx + 1,
+            name=str(trace['name']),
+            phase='',
+            unit=str(trace['y_unit']),
+            a=1.0,
+            b=0.0,
+        )
+        for idx, trace in enumerate(header['traces'])
+    ]
+    frequency_hz = _infer_nominal_frequency(time_s)
+    return ComtradeRecord(
+        station_name=source_path.stem,
+        device_id='Yokogawa',
+        revision='WVF',
+        frequency_hz=frequency_hz,
+        sample_rates=[(1.0 / max(float(np.median(np.diff(time_s))), 1e-12), len(time_s))] if time_s.size > 1 else [],
+        analog_channels=channels,
+        digital_channel_names=[],
+        time_s=time_s,
+        analog_values=analog_values,
+        digital_values=np.zeros((analog_values.shape[0], 0), dtype=int),
+        file_type='WDF' if path and Path(path).suffix.lower() == '.wdf' else 'WVF',
+        cfg_path=hdr_path,
+        dat_path=wvf_path,
+    )
+
+
+def _convert_wdf_to_wvf(path: Path) -> Path:
+    converter = os.environ.get('POWER_TOOL_WDF_CONVERTER') or os.environ.get('WDF2WVF_EXE') or os.environ.get('WDFCON_EXE')
+    if not converter:
+        raise ValueError(
+            'WDF 为横河专有格式，当前实现需要通过外部转换器先转成 WVF/HDR。'
+            '请设置环境变量 POWER_TOOL_WDF_CONVERTER 指向官方 WDF2WVF/WDFCon 可执行文件。'
+        )
+    converter_path = Path(converter)
+    if not converter_path.exists():
+        raise ValueError(f'未找到 WDF 转换器：{converter_path}')
+    try:
+        subprocess.run([str(converter_path), str(path)], check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or '').strip()
+        stdout = (exc.stdout or '').strip()
+        detail = stderr or stdout or str(exc)
+        raise ValueError(f'WDF 转换失败：{detail}') from exc
+    wvf_path = path.with_suffix('.WVF')
+    if not wvf_path.exists():
+        wvf_path = _resolve_companion_file(path, '.WVF')
+    if not wvf_path.exists():
+        raise ValueError(f'转换完成后未找到输出文件：{wvf_path.name}')
+    return wvf_path
+
+
+def _resolve_companion_file(path: Path, suffix: str) -> Path:
+    direct = path.with_suffix(suffix)
+    if direct.exists():
+        return direct
+    lower = path.with_suffix(suffix.lower())
+    if lower.exists():
+        return lower
+    upper = path.with_suffix(suffix.upper())
+    if upper.exists():
+        return upper
+    return direct
+
+
+def _parse_yokogawa_hdr(hdr_path: Path) -> dict:
+    sections: dict[str, dict[str, object]] = {}
+    current = None
+    for raw_line in hdr_path.read_text(encoding='utf-8', errors='ignore').splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith('$'):
+            current = line[1:].strip()
+            sections.setdefault(current, {})
+            continue
+        if current is None:
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        key = parts[0]
+        values = [_coerce_token(token) for token in parts[1:]]
+        sections[current][key] = values[0] if len(values) == 1 else values
+    public = sections.get('PublicInfo', {})
+    groups = [sections[name] for name in sorted(sections) if re.match(r'Group\d+', name)]
+    if not groups:
+        raise ValueError('HDR 文件中未找到 Group 段，无法解析横河录波。')
+    first_group = groups[0]
+    endian_text = str(public.get('Endian', 'Little'))
+    if endian_text.startswith('Big'):
+        endian = '>'
+    else:
+        endian = '<'
+    trace_fields = {
+        'name': [],
+        'block_size': [],
+        'x_offset': [],
+        'x_gain': [],
+        'x_unit': [],
+        'y_offset': [],
+        'y_gain': [],
+        'y_unit': [],
+        'data_type': [],
+    }
+    mapping = {
+        'TraceName': 'name',
+        'BlockSize': 'block_size',
+        'HOffset': 'x_offset',
+        'HResolution': 'x_gain',
+        'HUnit': 'x_unit',
+        'VOffset': 'y_offset',
+        'VResolution': 'y_gain',
+        'VUnit': 'y_unit',
+        'VDataType': 'data_type',
+    }
+    for group in groups:
+        for hdr_key, field_name in mapping.items():
+            value = group.get(hdr_key)
+            if value is None:
+                raise ValueError(f'HDR 缺少关键字段：{hdr_key}')
+            if isinstance(value, list):
+                trace_fields[field_name].extend(value)
+            else:
+                trace_fields[field_name].append(value)
+    traces = []
+    for idx, name in enumerate(trace_fields['name']):
+        dtype_text = str(trace_fields['data_type'][idx])
+        num_bytes, fmt_code = _decode_yokogawa_data_type(dtype_text)
+        traces.append(
+            {
+                'index': idx,
+                'name': str(name),
+                'block_size': int(trace_fields['block_size'][idx]),
+                'x_offset': float(trace_fields['x_offset'][idx]),
+                'x_gain': float(trace_fields['x_gain'][idx]),
+                'x_unit': str(trace_fields['x_unit'][idx]),
+                'y_offset': float(trace_fields['y_offset'][idx]),
+                'y_gain': float(trace_fields['y_gain'][idx]),
+                'y_unit': str(trace_fields['y_unit'][idx]),
+                'fmt': endian + fmt_code,
+                'num_bytes': num_bytes,
+            }
+        )
+    return {
+        'data_offset': int(public.get('DataOffset', 0)),
+        'number_of_blocks': int(first_group.get('BlockNumber', 1)),
+        'traces': traces,
+    }
+
+
+def _decode_yokogawa_data_type(dtype_text: str) -> tuple[int, str]:
+    kind = dtype_text[:1].upper()
+    size = dtype_text[-1]
+    table = {
+        ('I', '1'): ('b', 1),
+        ('I', '2'): ('h', 2),
+        ('I', '4'): ('i', 4),
+        ('I', '8'): ('q', 8),
+        ('F', '4'): ('f', 4),
+        ('F', '8'): ('d', 8),
+    }
+    if (kind, size) not in table:
+        raise ValueError(f'暂不支持的 Yokogawa 数据类型：{dtype_text}')
+    code, num_bytes = table[(kind, size)]
+    if dtype_text[:2].upper() == 'IU':
+        code = code.upper()
+    return num_bytes, code
+
+
+def _read_yokogawa_wvf(wvf_path: Path, header: dict) -> tuple[np.ndarray, np.ndarray]:
+    traces = header['traces']
+    block_count = header['number_of_blocks']
+    data_offset = header['data_offset']
+    if not traces:
+        return np.zeros((0, 0), dtype=float), np.zeros(0, dtype=float)
+    trace_arrays = []
+    time_s = None
+    raw = wvf_path.read_bytes()
+    for trace in traces:
+        block_size = trace['block_size']
+        dtype = np.dtype(trace['fmt'])
+        sample_bytes = trace['num_bytes'] * block_size
+        values = np.empty((block_count, block_size), dtype=float)
+        for block_number in range(block_count):
+            offset = data_offset + ((trace['index'] * block_count) + block_number) * sample_bytes
+            chunk = raw[offset:offset + sample_bytes]
+            if len(chunk) != sample_bytes:
+                raise ValueError('WVF 文件长度与 HDR 描述不匹配。')
+            values[block_number, :] = np.frombuffer(chunk, dtype=dtype, count=block_size).astype(float)
+        scaled = values * trace['y_gain'] + trace['y_offset']
+        trace_arrays.append(scaled.reshape(-1))
+        if time_s is None:
+            dt = trace['x_gain']
+            time_s = trace['x_offset'] + np.arange(block_count * block_size, dtype=float) * dt
+    analog_values = np.column_stack(trace_arrays) if trace_arrays else np.zeros((0, 0), dtype=float)
+    return analog_values, time_s if time_s is not None else np.zeros(0, dtype=float)
+
+
+def _coerce_token(token: str) -> object:
+    try:
+        return int(token)
+    except ValueError:
+        try:
+            return float(token)
+        except ValueError:
+            return token
+
+
+def _infer_nominal_frequency(time_s: np.ndarray) -> float:
+    if time_s.size < 2:
+        return 0.0
+    sample_rate = 1.0 / max(float(np.median(np.diff(time_s))), 1e-12)
+    for nominal in (50.0, 60.0):
+        ratio = sample_rate / nominal
+        if abs(ratio - round(ratio)) < 0.05:
+            return nominal
+    return 0.0
 
 
 def _read_ascii_dat(dat_path: Path, cfg: dict):

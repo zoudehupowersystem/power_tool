@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,7 +11,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from power_tool_comtrade import estimate_sampling_rate, fourier_summary, parse_comtrade, sequence_phasors, single_frequency_phasor
+from power_tool_comtrade import (
+    estimate_sampling_rate,
+    fourier_summary,
+    parse_comtrade,
+    parse_waveform_file,
+    sequence_phasors,
+    single_frequency_phasor,
+)
 
 
 def _write_cfg(path: Path, dat_type: str) -> None:
@@ -68,6 +76,80 @@ def test_parse_binary_comtrade(tmp_path: Path) -> None:
     assert record.file_type == "BINARY"
     assert record.analog_values[1, 0] == 309
     assert record.digital_values[:, 0].tolist() == [1, 0, 1, 0]
+
+
+def _write_yokogawa_pair(base: Path) -> None:
+    hdr = base.with_suffix(".HDR")
+    wvf = base.with_suffix(".WVF")
+    hdr.write_text(
+        "$PublicInfo\n"
+        "Format WVF\n"
+        "Endian Little\n"
+        "DataOffset 0\n"
+        "$Group1\n"
+        "BlockNumber 1\n"
+        "TraceName CH1 CH2\n"
+        "BlockSize 4 4\n"
+        "HOffset 0 0\n"
+        "HResolution 0.001 0.001\n"
+        "HUnit s s\n"
+        "VOffset 0 0\n"
+        "VResolution 0.1 1.0\n"
+        "VUnit V A\n"
+        "VDataType IS2 IS2\n",
+        encoding="utf-8",
+    )
+    with wvf.open("wb") as f:
+        f.write(struct.pack("<hhhh", 0, 10, 20, 30))
+        f.write(struct.pack("<hhhh", 1, 2, 3, 4))
+
+
+def test_parse_yokogawa_wvf(tmp_path: Path) -> None:
+    base = tmp_path / "capture"
+    _write_yokogawa_pair(base)
+    record = parse_waveform_file(base.with_suffix(".WVF"))
+    assert record.file_type == "WVF"
+    assert record.analog_values.shape == (4, 2)
+    assert np.allclose(record.time_s, [0.0, 0.001, 0.002, 0.003])
+    assert np.allclose(record.analog_values[:, 0], [0.0, 1.0, 2.0, 3.0])
+    assert np.allclose(record.analog_values[:, 1], [1.0, 2.0, 3.0, 4.0])
+
+
+def test_parse_yokogawa_wdf_via_converter(tmp_path: Path, monkeypatch) -> None:
+    wdf = tmp_path / "capture.WDF"
+    wdf.write_bytes(b"placeholder")
+    converter = tmp_path / "fake_wdfcon.py"
+    converter.write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "base = Path(sys.argv[1]).with_suffix('')\n"
+        "base.with_suffix('.HDR').write_text("
+        "    '$PublicInfo\\nFormat WVF\\nEndian Little\\nDataOffset 0\\n'"
+        "    '$Group1\\nBlockNumber 1\\nTraceName CH1\\nBlockSize 4\\n'"
+        "    'HOffset 0\\nHResolution 0.001\\nHUnit s\\nVOffset 0\\n'"
+        "    'VResolution 0.5\\nVUnit V\\nVDataType IS2\\n',"
+        "    encoding='utf-8'"
+        ")\n"
+        "base.with_suffix('.WVF').write_bytes((0).to_bytes(2, 'little', signed=True)"
+        " + (2).to_bytes(2, 'little', signed=True)"
+        " + (4).to_bytes(2, 'little', signed=True)"
+        " + (6).to_bytes(2, 'little', signed=True))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("POWER_TOOL_WDF_CONVERTER", sys.executable)
+    real_run = subprocess.run
+    monkeypatch.setattr(
+        "power_tool_comtrade.subprocess.run",
+        lambda cmd, check, capture_output, text: real_run(
+            [sys.executable, str(converter), cmd[1]],
+            check=check,
+            capture_output=capture_output,
+            text=text,
+        ),
+    )
+    record = parse_waveform_file(wdf)
+    assert record.file_type == "WDF"
+    assert np.allclose(record.analog_values[:, 0], [0.0, 1.0, 2.0, 3.0])
 
 
 def test_fourier_summary_extracts_fundamental() -> None:
