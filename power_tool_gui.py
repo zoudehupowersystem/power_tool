@@ -370,6 +370,8 @@ class ApproximationToolGUI(tk.Tk):
                   wraplength=360).grid(row=2, column=0, sticky="ew", pady=(0, 8))
 
         ttk.Label(panel, text="提问", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=3, column=0, sticky="w", pady=(4, 4))
+        self.ai_think_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(panel, text="启用思考模式", variable=self.ai_think_var).grid(row=3, column=0, sticky="e", pady=(4, 4))
         self.ai_question = ScrolledText(panel, width=44, height=9, wrap=tk.WORD)
         self.ai_question.grid(row=4, column=0, sticky="nsew")
         self.ai_question_placeholder = "请结合当前界面，解释这个算例的意义、关键结果和下一步建议。"
@@ -512,7 +514,7 @@ class ApproximationToolGUI(tk.Tk):
 
         def worker() -> None:
             try:
-                answer = ask_ai(self.ai_config, question, tab_name, case_text, screenshot_note, screenshot_path)
+                answer = ask_ai(self.ai_config, question, tab_name, case_text, screenshot_note, screenshot_path, think=self.ai_think_var.get())
                 status = f"分析完成：{tab_name}"
             except PowerToolAIError as exc:
                 answer = f"PowerTool AI 调用失败：\n{exc}"

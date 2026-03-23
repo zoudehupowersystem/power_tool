@@ -160,10 +160,10 @@ def compose_prompt(question: str, tab_name: str, case_text: str, screenshot_note
 
 
 def ask_ai(config: PowerToolAIConfig, question: str, tab_name: str, case_text: str,
-           screenshot_note: str, screenshot_path: str | Path | None = None) -> str:
+           screenshot_note: str, screenshot_path: str | Path | None = None, think: bool = False) -> str:
     prompt = compose_prompt(question, tab_name, case_text, screenshot_note)
     if config.provider.mode == "ollama":
-        return _ask_ollama(config, prompt, screenshot_path)
+        return _ask_ollama(config, prompt, screenshot_path, think=think)
     if config.provider.mode == "api":
         return _ask_openai_compatible(config, prompt, screenshot_path)
     raise PowerToolAIError(f"不支持的 AI 提供方式：{config.provider.mode}")
@@ -237,13 +237,14 @@ def _extract_ollama_text(data: dict[str, Any]) -> str:
             return "\n".join(texts)
     return ""
 
-def _ollama_chat_once(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> tuple[str, dict[str, Any]]:
+def _ollama_chat_once(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None, think: bool = False) -> tuple[str, dict[str, Any]]:
     user_message: dict[str, Any] = {"role": "user", "content": prompt}
     if screenshot_path:
         user_message["images"] = [encode_image_base64(screenshot_path)]
     payload = {
         "model": config.ollama.default_model,
         "stream": True,
+        "think": think,
         "messages": [
             {"role": "system", "content": config.system_prompt},
             user_message,
@@ -270,8 +271,8 @@ def _ollama_chat_once(config: PowerToolAIConfig, prompt: str, screenshot_path: s
     return "", {}
 
 
-def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> str:
-    content, data = _ollama_chat_once(config, prompt, screenshot_path)
+def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None, think: bool = False) -> str:
+    content, data = _ollama_chat_once(config, prompt, screenshot_path, think=think)
     if content:
         return content
     if screenshot_path:
@@ -279,7 +280,7 @@ def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | P
             f"{prompt}\n\n补充说明：已尝试附带当前软件界面截图，但当前本地模型未返回可用的图像理解文本。"
             "请至少基于上述数值摘要和软件上下文继续回答，并明确说明你当前无法可靠解读截图细节。"
         )
-        fallback_content, fallback_data = _ollama_chat_once(config, fallback_prompt, None)
+        fallback_content, fallback_data = _ollama_chat_once(config, fallback_prompt, None, think=think)
         if fallback_content:
             return fallback_content
         data = fallback_data

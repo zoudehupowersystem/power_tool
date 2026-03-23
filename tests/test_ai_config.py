@@ -125,6 +125,7 @@ def test_ask_ollama_aggregates_streamed_content(monkeypatch) -> None:
 
     def fake_http_json_lines(url: str, payload: dict, headers: dict, timeout: float) -> list[dict]:
         seen["stream"] = payload.get("stream")
+        seen["think"] = payload.get("think")
         return [
             {"message": {"thinking": "先思考"}, "done": False},
             {"message": {"content": "第一段"}, "done": False},
@@ -135,3 +136,19 @@ def test_ask_ollama_aggregates_streamed_content(monkeypatch) -> None:
 
     assert _ask_ollama(PowerToolAIConfig(), "测试", None) == "第一段，第二段"
     assert seen["stream"] is True
+    assert seen["think"] is False
+
+
+def test_ask_ollama_can_enable_thinking_mode(monkeypatch) -> None:
+    import power_tool_ai
+
+    seen = {}
+
+    def fake_http_json_lines(url: str, payload: dict, headers: dict, timeout: float) -> list[dict]:
+        seen["think"] = payload.get("think")
+        return [{"message": {"content": "思考模式回答"}, "done": True}]
+
+    monkeypatch.setattr(power_tool_ai, "_http_json_lines", fake_http_json_lines)
+
+    assert _ask_ollama(PowerToolAIConfig(), "测试", None, think=True) == "思考模式回答"
+    assert seen["think"] is True
