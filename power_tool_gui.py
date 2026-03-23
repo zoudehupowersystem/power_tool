@@ -275,6 +275,7 @@ class ApproximationToolGUI(tk.Tk):
         self._build_short_circuit_tab()
         self._build_comtrade_tab()
         self._build_ai_sidebar()
+        self.main_notebook.bind("<<NotebookTabChanged>>", self._on_ai_context_changed)
 
     @staticmethod
     def _add_entry(parent: ttk.Frame,
@@ -371,7 +372,8 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Label(panel, text="提问", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=3, column=0, sticky="w", pady=(4, 4))
         self.ai_question = ScrolledText(panel, width=44, height=9, wrap=tk.WORD)
         self.ai_question.grid(row=4, column=0, sticky="nsew")
-        self.ai_question.insert("1.0", "请结合当前界面，解释这个算例的意义、关键结果和下一步建议。")
+        self.ai_question_placeholder = "请结合当前界面，解释这个算例的意义、关键结果和下一步建议。"
+        self.ai_question.insert("1.0", self.ai_question_placeholder)
 
         action = ttk.Frame(panel, style="Card.TFrame")
         action.grid(row=5, column=0, sticky="ew", pady=(8, 6))
@@ -387,6 +389,18 @@ class ApproximationToolGUI(tk.Tk):
         self.ai_answer.configure(state="disabled")
 
         panel.rowconfigure(7, weight=1)
+
+
+    def _clear_ai_context(self) -> None:
+        self.ai_question.delete("1.0", tk.END)
+        self.ai_answer.configure(state="normal")
+        self.ai_answer.delete("1.0", tk.END)
+        self.ai_answer.insert("1.0", "")
+        self.ai_answer.configure(state="disabled")
+
+    def _on_ai_context_changed(self, _event: object | None = None) -> None:
+        self._clear_ai_context()
+        self.ai_status_var.set(self._ai_status_summary())
 
     def _ai_status_summary(self) -> str:
         return (
@@ -1547,6 +1561,7 @@ class ApproximationToolGUI(tk.Tk):
         nb = ttk.Notebook(self.param_tab)
         nb.grid(row=0, column=0, sticky="nsew")
         self.param_notebook = nb
+        self.param_notebook.bind("<<NotebookTabChanged>>", self._on_ai_context_changed)
 
         self._ptab_line = ttk.Frame(nb)
         self._ptab_2wt  = ttk.Frame(nb)
