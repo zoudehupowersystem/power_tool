@@ -2368,6 +2368,8 @@ class ApproximationToolGUI(tk.Tk):
         self._sequence_fig = None
         self._sequence_canvas = None
         self._sequence_axes = ()
+        self._sequence_chart_notebook = None
+        self._sequence_tab_defs = ()
         self._sequence_cache: dict[tuple[str, tuple[int, int, int], float], dict[str, np.ndarray]] = {}
         self._comtrade_overlay_mode = tk.StringVar(value="stacked")
         self._comtrade_default_window_s = 0.12
@@ -2444,7 +2446,7 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_sequence_frame = ttk.Frame(self.comtrade_analysis_host)
         self.comtrade_sequence_frame.columnconfigure(0, weight=1)
         self.comtrade_sequence_frame.rowconfigure(2, weight=1)
-        self.comtrade_sequence_frame.rowconfigure(3, weight=1)
+        self.comtrade_sequence_frame.rowconfigure(4, weight=1)
         self.comtrade_sequence_frame.grid(row=0, column=0, sticky="nsew")
         self.comtrade_sequence_frame.grid_remove()
         self._build_embedded_sequence_panel()
@@ -2908,11 +2910,28 @@ class ApproximationToolGUI(tk.Tk):
         self._sequence_result_text.grid(row=2, column=0, sticky="nsew")
         self._sequence_result_text.configure(state="disabled")
 
-        self._sequence_fig = Figure(figsize=(4.8, 4.6), dpi=100)
-        ax_seq = self._sequence_fig.add_subplot(111)
+        chart_nb = ttk.Notebook(self.comtrade_sequence_frame)
+        chart_nb.grid(row=3, column=0, sticky="ew", pady=(6, 0))
+        self._sequence_tab_defs = (
+            ("电压相量", "voltage_phase"),
+            ("电流相量", "current_phase"),
+            ("V 序分量", "voltage_seq"),
+            ("I 序分量", "current_seq"),
+        )
+        for tab_text, key in self._sequence_tab_defs:
+            frame = ttk.Frame(chart_nb)
+            chart_nb.add(frame, text=tab_text)
+        chart_host = ttk.Frame(self.comtrade_sequence_frame)
+        chart_host.grid(row=4, column=0, sticky="nsew")
+        chart_host.columnconfigure(0, weight=1)
+        chart_host.rowconfigure(0, weight=1)
+        self._sequence_fig = Figure(figsize=(5.2, 5.0), dpi=100, facecolor="#101418")
+        ax_seq = self._sequence_fig.add_subplot(111, projection="polar")
         self._sequence_axes = (ax_seq,)
-        self._sequence_canvas = FigureCanvasTkAgg(self._sequence_fig, master=self.comtrade_sequence_frame)
-        self._sequence_canvas.get_tk_widget().grid(row=3, column=0, sticky="nsew", pady=(6, 0))
+        self._sequence_canvas = FigureCanvasTkAgg(self._sequence_fig, master=chart_host)
+        self._sequence_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self._sequence_chart_notebook = chart_nb
+        self._sequence_chart_notebook.bind("<<NotebookTabChanged>>", lambda _e: self._refresh_sequence_analysis_window())
 
     def _show_comtrade_overview_panel(self) -> None:
         self.comtrade_sequence_frame.grid_remove()
@@ -2974,27 +2993,64 @@ class ApproximationToolGUI(tk.Tk):
         zero = (pa + pb + pc) / 3.0
         positive = (pa + alpha * pb + (alpha ** 2) * pc) / 3.0
         negative = (pa + (alpha ** 2) * pb + alpha * pc) / 3.0
-        result = {"zero": zero, "positive": positive, "negative": negative}
+        result = {
+            "a": pa,
+            "b": pb,
+            "c": pc,
+            "zero": zero,
+            "positive": positive,
+            "negative": negative,
+        }
         self._sequence_cache[cache_key] = result
         return result
 
-    def _draw_sequence_phasor_axis(self, ax, vectors: dict[str, complex]) -> None:
+    def _draw_sequence_phasor_axis(self, ax, vectors: dict[str, complex], title: str) -> None:
         ax.clear()
-        ax.axhline(0.0, color="#cccccc", linewidth=0.8)
-        ax.axvline(0.0, color="#cccccc", linewidth=0.8)
-        colors = {"V0": "#d62728", "V1": "#2ca02c", "V2": "#1f77b4", "I0": "#ff00aa", "I1": "#00aaaa", "I2": "#ff7f0e"}
+        ax.set_theta_zero_location("E")
+        ax.set_theta_direction(1)
+        ax.set_facecolor("#11161d")
+        colors = {
+            "Ua": "#7ec8ff", "Ub": "#ffe082", "Uc": "#ff8a80",
+            "Ia": "#4dd0e1", "Ib": "#ffd54f", "Ic": "#ffab91",
+            "V0": "#b388ff", "V1": "#66bb6a", "V2": "#42a5f5",
+            "I0": "#f06292", "I1": "#26c6da", "I2": "#ffb74d",
+        }
         max_mag = max(1.0, max(abs(v) for v in vectors.values())) if vectors else 1.0
+        radial_max = max_mag * 1.15
+        rings = np.linspace(radial_max / 4.0, radial_max, 4)
+        ax.set_ylim(0.0, radial_max)
+        ax.set_yticks(rings)
+        ax.set_yticklabels([f"{tick:.3g}" for tick in rings], color="#aeb8c2", fontsize=8)
+        ax.set_rlabel_position(22.5)
+        ax.set_thetagrids(
+            np.arange(0, 360, 45),
+            labels=["0°", "45°", "90°", "135°", "180°", "-135°", "-90°", "-45°"],
+            fontsize=8,
+            color="#8ea1b4",
+        )
+        ax.grid(color="#5f6f7e", linestyle="-", linewidth=0.8, alpha=0.45)
+        ax.spines["polar"].set_color("#7c8794")
+        ax.spines["polar"].set_linewidth(1.0)
         for name, val in vectors.items():
-            ax.arrow(0.0, 0.0, val.real, val.imag, color=colors.get(name, "black"), width=0.0, head_width=max_mag * 0.05, length_includes_head=True)
-            ax.text(val.real, val.imag, f" {name}", color=colors.get(name, "black"), fontsize=9, ha="left", va="bottom")
-        lim = max_mag * 1.25
-        ax.set_xlim(-lim, lim)
-        ax.set_ylim(-lim, lim)
-        ax.set_aspect("equal", adjustable="box")
-        ax.grid(True, linestyle="--", alpha=0.35)
-        ax.set_title("")
-        ax.set_xlabel("")
-        ax.set_ylabel("")
+            theta = math.atan2(val.imag, val.real)
+            radius = abs(val)
+            color = colors.get(name, "#ffffff")
+            ax.annotate(
+                "",
+                xy=(theta, radius),
+                xytext=(theta, 0.0),
+                arrowprops=dict(arrowstyle="-|>", color=color, linewidth=2.2, linestyle="-", shrinkA=0, shrinkB=0),
+            )
+            ax.text(theta, min(radial_max * 0.97, radius + radial_max * 0.06), name, color=color, fontsize=9, fontweight="bold", ha="center", va="center")
+        ax.set_title(title, color="#f5f7fa", pad=16, fontsize=11)
+
+    def _active_sequence_tab_key(self) -> str:
+        notebook = getattr(self, "_sequence_chart_notebook", None)
+        tab_defs = getattr(self, "_sequence_tab_defs", ())
+        if notebook is None or not tab_defs:
+            return "voltage_phase"
+        current = notebook.index(notebook.select())
+        return tab_defs[current][1]
 
     def _refresh_sequence_analysis_window(self) -> None:
         if self._sequence_result_text is None or self._sequence_fig is None or self._sequence_canvas is None:
@@ -3019,34 +3075,62 @@ class ApproximationToolGUI(tk.Tk):
         lines = [f"T1 点号 = {t1 + 1}", f"T1 时间 = {record.time_s[t1]:.6f} s", ""]
         voltage_group = self._read_sequence_group(("Ua", "Ub", "Uc"))
         current_group = self._read_sequence_group(("Ia", "Ib", "Ic"))
-        vectors: dict[str, complex] = {}
+        tab_vectors = {"voltage_phase": {}, "current_phase": {}, "voltage_seq": {}, "current_seq": {}}
+        titles = {
+            "voltage_phase": "电压相量",
+            "current_phase": "电流相量",
+            "voltage_seq": "V 序分量",
+            "current_seq": "I 序分量",
+        }
         if voltage_group is not None:
             vcache = self._build_sequence_cache("V", voltage_group, sample_rate, fundamental)
-            vectors["V0"] = complex(vcache["zero"][t1])
-            vectors["V1"] = complex(vcache["positive"][t1])
-            vectors["V2"] = complex(vcache["negative"][t1])
+            tab_vectors["voltage_phase"] = {
+                "Ua": complex(vcache["a"][t1]),
+                "Ub": complex(vcache["b"][t1]),
+                "Uc": complex(vcache["c"][t1]),
+            }
+            tab_vectors["voltage_seq"] = {
+                "V0": complex(vcache["zero"][t1]),
+                "V1": complex(vcache["positive"][t1]),
+                "V2": complex(vcache["negative"][t1]),
+            }
             unit = record.analog_channels[voltage_group[0]].unit or "pu"
-            lines.append(f"V0: {self._format_sequence_complex(vectors['V0'], unit)}")
-            lines.append(f"V1: {self._format_sequence_complex(vectors['V1'], unit)}")
-            lines.append(f"V2: {self._format_sequence_complex(vectors['V2'], unit)}")
+            lines.append("【电压序分量】")
+            lines.append(f"V0: {self._format_sequence_complex(tab_vectors['voltage_seq']['V0'], unit)}")
+            lines.append(f"V1: {self._format_sequence_complex(tab_vectors['voltage_seq']['V1'], unit)}")
+            lines.append(f"V2: {self._format_sequence_complex(tab_vectors['voltage_seq']['V2'], unit)}")
             lines.append("")
         if current_group is not None:
             icache = self._build_sequence_cache("I", current_group, sample_rate, fundamental)
-            vectors["I0"] = complex(icache["zero"][t1])
-            vectors["I1"] = complex(icache["positive"][t1])
-            vectors["I2"] = complex(icache["negative"][t1])
+            tab_vectors["current_phase"] = {
+                "Ia": complex(icache["a"][t1]),
+                "Ib": complex(icache["b"][t1]),
+                "Ic": complex(icache["c"][t1]),
+            }
+            tab_vectors["current_seq"] = {
+                "I0": complex(icache["zero"][t1]),
+                "I1": complex(icache["positive"][t1]),
+                "I2": complex(icache["negative"][t1]),
+            }
             unit = record.analog_channels[current_group[0]].unit or "A"
-            lines.append(f"I0: {self._format_sequence_complex(vectors['I0'], unit)}")
-            lines.append(f"I1: {self._format_sequence_complex(vectors['I1'], unit)}")
-            lines.append(f"I2: {self._format_sequence_complex(vectors['I2'], unit)}")
-        if not vectors:
+            lines.append("【电流序分量】")
+            lines.append(f"I0: {self._format_sequence_complex(tab_vectors['current_seq']['I0'], unit)}")
+            lines.append(f"I1: {self._format_sequence_complex(tab_vectors['current_seq']['I1'], unit)}")
+            lines.append(f"I2: {self._format_sequence_complex(tab_vectors['current_seq']['I2'], unit)}")
+        if not any(tab_vectors.values()):
             self._set_text(self._sequence_result_text, "请在序量分析窗口中至少完整设置一组三相电压或三相电流通道。")
             ax = self._sequence_axes[0]
             ax.clear()
-            ax.set_title("")
+            ax.set_title(f"{titles[self._active_sequence_tab_key()]}\n（未配置）", color="#f5f7fa", pad=16, fontsize=11)
             self._sequence_canvas.draw()
             return
-        self._draw_sequence_phasor_axis(self._sequence_axes[0], vectors)
+        active_key = self._active_sequence_tab_key()
+        ax = self._sequence_axes[0]
+        if tab_vectors[active_key]:
+            self._draw_sequence_phasor_axis(ax, tab_vectors[active_key], titles[active_key])
+        else:
+            ax.clear()
+            ax.set_title(f"{titles[active_key]}\n（未配置）", color="#f5f7fa", pad=16, fontsize=11)
         self._set_text(self._sequence_result_text, "\n".join(lines).strip())
         self._sequence_fig.tight_layout()
         self._sequence_canvas.draw()
