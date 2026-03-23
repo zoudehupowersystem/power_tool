@@ -97,17 +97,17 @@ def test_ask_ollama_retries_without_image_when_first_response_is_empty(monkeypat
 
     calls: list[tuple[str, str | None]] = []
 
-    def fake_http_json(url: str, payload: dict, headers: dict, timeout: float) -> dict:
+    def fake_http_json_lines(url: str, payload: dict, headers: dict, timeout: float) -> list[dict]:
         user_message = payload["messages"][1]
         images = user_message.get("images")
         calls.append((user_message["content"], images[0] if images else None))
         if images:
-            return {"message": {"content": ""}, "done": True}
-        return {"message": {"content": "回退后已有文本回答"}, "done": True}
+            return [{"message": {"content": ""}, "done": True}]
+        return [{"message": {"content": "回退后已有文本回答"}, "done": True}]
 
     image_path = tmp_path / "capture.png"
     image_path.write_bytes(b"fake-image")
-    monkeypatch.setattr(power_tool_ai, "_http_json", fake_http_json)
+    monkeypatch.setattr(power_tool_ai, "_http_json_lines", fake_http_json_lines)
 
     content = _ask_ollama(PowerToolAIConfig(), "请分析当前算例", image_path)
 
@@ -118,16 +118,20 @@ def test_ask_ollama_retries_without_image_when_first_response_is_empty(monkeypat
     assert "未返回可用的图像理解文本" in calls[1][0]
 
 
-def test_ask_ollama_sends_think_false(monkeypatch) -> None:
+def test_ask_ollama_aggregates_streamed_content(monkeypatch) -> None:
     import power_tool_ai
 
     seen = {}
 
-    def fake_http_json(url: str, payload: dict, headers: dict, timeout: float) -> dict:
-        seen["think"] = payload.get("think")
-        return {"message": {"content": "正常回答"}, "done": True}
+    def fake_http_json_lines(url: str, payload: dict, headers: dict, timeout: float) -> list[dict]:
+        seen["stream"] = payload.get("stream")
+        return [
+            {"message": {"thinking": "先思考"}, "done": False},
+            {"message": {"content": "第一段"}, "done": False},
+            {"message": {"content": "，第二段"}, "done": True},
+        ]
 
-    monkeypatch.setattr(power_tool_ai, "_http_json", fake_http_json)
+    monkeypatch.setattr(power_tool_ai, "_http_json_lines", fake_http_json_lines)
 
-    assert _ask_ollama(PowerToolAIConfig(), "测试", None) == "正常回答"
-    assert seen["think"] is False
+    assert _ask_ollama(PowerToolAIConfig(), "测试", None) == "第一段，第二段"
+    assert seen["stream"] is True

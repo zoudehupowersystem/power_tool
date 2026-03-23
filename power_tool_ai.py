@@ -192,6 +192,31 @@ def _http_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeo
 
 
 
+
+
+def _http_json_lines(url: str, payload: dict[str, Any], headers: dict[str, str], timeout_s: float) -> list[dict[str, Any]]:
+    req = request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", **headers},
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=timeout_s) as resp:
+            raw_lines = [line.decode("utf-8").strip() for line in resp if line.strip()]
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise PowerToolAIError(f"HTTP {exc.code}: {detail}") from exc
+    except error.URLError as exc:
+        raise PowerToolAIError(f"网络请求失败：{exc.reason}") from exc
+    chunks: list[dict[str, Any]] = []
+    for line in raw_lines:
+        try:
+            chunks.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise PowerToolAIError(f"AI 返回了非 JSON 流内容：{line[:300]}") from exc
+    return chunks
+
 def _extract_ollama_text(data: dict[str, Any]) -> str:
     message = data.get("message")
     if isinstance(message, dict):
@@ -218,8 +243,7 @@ def _ollama_chat_once(config: PowerToolAIConfig, prompt: str, screenshot_path: s
         user_message["images"] = [encode_image_base64(screenshot_path)]
     payload = {
         "model": config.ollama.default_model,
-        "stream": False,
-        "think": False,
+        "stream": True,
         "messages": [
             {"role": "system", "content": config.system_prompt},
             user_message,
@@ -229,8 +253,21 @@ def _ollama_chat_once(config: PowerToolAIConfig, prompt: str, screenshot_path: s
             "num_predict": config.max_tokens,
         },
     }
-    data = _http_json(_ollama_chat_url(config.ollama.host), payload, {}, config.ollama.timeout)
-    return _extract_ollama_text(data), data
+    chunks = _http_json_lines(_ollama_chat_url(config.ollama.host), payload, {}, config.ollama.timeout)
+    content_parts: list[str] = []
+    last_chunk: dict[str, Any] = {}
+    for chunk in chunks:
+        last_chunk = chunk
+        message = chunk.get("message")
+        if isinstance(message, dict):
+            piece = str(message.get("content", ""))
+            if piece:
+                content_parts.append(piece)
+    if content_parts:
+        return "".join(content_parts).strip(), last_chunk
+    if last_chunk:
+        return _extract_ollama_text(last_chunk), last_chunk
+    return "", {}
 
 
 def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> str:
