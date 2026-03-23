@@ -212,7 +212,7 @@ def _extract_ollama_text(data: dict[str, Any]) -> str:
             return "\n".join(texts)
     return ""
 
-def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> str:
+def _ollama_chat_once(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> tuple[str, dict[str, Any]]:
     user_message: dict[str, Any] = {"role": "user", "content": prompt}
     if screenshot_path:
         user_message["images"] = [encode_image_base64(screenshot_path)]
@@ -229,10 +229,23 @@ def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | P
         },
     }
     data = _http_json(_ollama_chat_url(config.ollama.host), payload, {}, config.ollama.timeout)
-    content = _extract_ollama_text(data)
-    if not content:
-        raise PowerToolAIError(f"Ollama 未返回有效文本内容。原始响应字段：{sorted(data.keys())}")
-    return content
+    return _extract_ollama_text(data), data
+
+
+def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> str:
+    content, data = _ollama_chat_once(config, prompt, screenshot_path)
+    if content:
+        return content
+    if screenshot_path:
+        fallback_prompt = (
+            f"{prompt}\n\n补充说明：已尝试附带当前软件界面截图，但当前本地模型未返回可用的图像理解文本。"
+            "请至少基于上述数值摘要和软件上下文继续回答，并明确说明你当前无法可靠解读截图细节。"
+        )
+        fallback_content, fallback_data = _ollama_chat_once(config, fallback_prompt, None)
+        if fallback_content:
+            return fallback_content
+        data = fallback_data
+    raise PowerToolAIError(f"Ollama 未返回有效文本内容。原始响应字段：{sorted(data.keys())}")
 
 
 def _ask_openai_compatible(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> str:

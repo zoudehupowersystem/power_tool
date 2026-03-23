@@ -6,6 +6,7 @@ from pathlib import Path
 from power_tool_ai import (
     DEFAULT_OVERVIEW_PROMPT,
     PowerToolAIConfig,
+    _ask_ollama,
     _extract_ollama_text,
     api_key_status,
     compose_prompt,
@@ -89,3 +90,29 @@ def test_api_key_status_reads_environment_variable(monkeypatch) -> None:
 def test_extract_ollama_text_supports_message_and_response_shapes() -> None:
     assert _extract_ollama_text({"message": {"content": "本地回答"}}) == "本地回答"
     assert _extract_ollama_text({"response": "兼容回答"}) == "兼容回答"
+
+
+def test_ask_ollama_retries_without_image_when_first_response_is_empty(monkeypatch, tmp_path: Path) -> None:
+    import power_tool_ai
+
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_http_json(url: str, payload: dict, headers: dict, timeout: float) -> dict:
+        user_message = payload["messages"][1]
+        images = user_message.get("images")
+        calls.append((user_message["content"], images[0] if images else None))
+        if images:
+            return {"message": {"content": ""}, "done": True}
+        return {"message": {"content": "回退后已有文本回答"}, "done": True}
+
+    image_path = tmp_path / "capture.png"
+    image_path.write_bytes(b"fake-image")
+    monkeypatch.setattr(power_tool_ai, "_http_json", fake_http_json)
+
+    content = _ask_ollama(PowerToolAIConfig(), "请分析当前算例", image_path)
+
+    assert content == "回退后已有文本回答"
+    assert len(calls) == 2
+    assert calls[0][1] is not None
+    assert calls[1][1] is None
+    assert "未返回可用的图像理解文本" in calls[1][0]
