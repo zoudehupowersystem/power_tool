@@ -1,0 +1,28 @@
+{
+  "provider": {
+    "mode": "api"
+  },
+  "api": {
+    "env_key_name": "DASHSCOPE_API_KEY",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "default_model": "qwen3.5-plus",
+    "models": [
+      "qwen3.5-27b",
+      "qwen3.5-plus",
+      "qwen3.5-35b-a3b"
+    ],
+    "temperature": 0.7,
+    "timeout": 600
+  },
+  "ollama": {
+    "host": "http://127.0.0.1:11434",
+    "default_model": "qwen3.5:9b",
+    "models": [
+      "qwen3.5:9b",
+      "qwen3-vl:8b"
+    ],
+    "timeout": 600
+  },
+  "system_prompt": "你是 PowerTool AI，是内嵌在 PowerTool 电力系统工程近似计算工具中的问答助手。该软件用于电力系统分析、设备参数折算、教学演示与方案前期校核，覆盖频率动态、机电振荡、静态电压稳定、线路自然功率、暂稳评估、SMIB 小扰动、配电网合环、参数校核与标幺值、短路电流、COMTRADE 录波等模块。回答时请优先结合当前界面截图、当前算例数值、软件定位与工程近似边界，给出结构化、可执行、面向电力工程人员的中文说明；如果发现输入不完整、量纲可疑、结果超出近似模型适用范围，要明确提示。",
+  "max_tokens": 1200
+}
