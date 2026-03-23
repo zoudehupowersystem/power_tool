@@ -28,6 +28,7 @@ import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 
+from matplotlib.lines import Line2D
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle, Rectangle
 
@@ -69,7 +70,7 @@ from power_tool_loop_closure import loop_closure_analysis
 from power_tool_comtrade import (
     estimate_sampling_rate,
     fourier_summary,
-    parse_comtrade,
+    parse_waveform_file,
     prony_like_summary,
     sequence_components,
     sequence_phasors,
@@ -252,6 +253,9 @@ class ApproximationToolGUI(tk.Tk):
         self._line_geometry_bundle_var: tk.StringVar | None = None
         self._line_geometry_result: ScrolledText | None = None
         self._line_geometry_last_result = None
+        self._line_geometry_fig = None
+        self._line_geometry_canvas = None
+        self._line_geometry_ax = None
 
         self._build_frequency_tab()
         self._build_oscillation_tab()
@@ -1595,6 +1599,9 @@ class ApproximationToolGUI(tk.Tk):
             self._line_geometry_has_gw_var = None
             self._line_geometry_bundle_var = None
             self._line_geometry_result = None
+            self._line_geometry_fig = None
+            self._line_geometry_canvas = None
+            self._line_geometry_ax = None
             win.destroy()
 
         win.protocol("WM_DELETE_WINDOW", _on_close)
@@ -1611,6 +1618,7 @@ class ApproximationToolGUI(tk.Tk):
         right.grid(row=0, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
         right.rowconfigure(1, weight=1)
+        right.rowconfigure(2, weight=2)
 
         ttk.Label(left, text="线路参数计算（由几何数据反算序参数）",
                   font=("TkDefaultFont", 11, "bold")).grid(
@@ -1713,8 +1721,17 @@ class ApproximationToolGUI(tk.Tk):
             row=0, column=3, padx=(4, 0)
         )
 
-        self._line_geometry_result = ScrolledText(right, width=78, height=30, wrap=tk.WORD, font="TkFixedFont")
-        self._line_geometry_result.grid(row=1, column=0, sticky="nsew")
+        plot_frame = ttk.LabelFrame(right, text="导线横截面示意图", padding=4)
+        plot_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
+        plot_frame.columnconfigure(0, weight=1)
+        plot_frame.rowconfigure(0, weight=1)
+        self._line_geometry_fig = Figure(figsize=(7.2, 4.1), dpi=100)
+        self._line_geometry_ax = self._line_geometry_fig.add_subplot(111)
+        self._line_geometry_canvas = FigureCanvasTkAgg(self._line_geometry_fig, master=plot_frame)
+        self._line_geometry_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+
+        self._line_geometry_result = ScrolledText(right, width=78, height=22, wrap=tk.WORD, font="TkFixedFont")
+        self._line_geometry_result.grid(row=2, column=0, sticky="nsew")
         self._line_geometry_result.configure(state="disabled")
 
         self.calculate_line_geometry_popup()
@@ -1789,7 +1806,8 @@ class ApproximationToolGUI(tk.Tk):
         try:
             if self._line_geometry_result is None:
                 raise InputError("线路参数计算结果窗口未初始化。")
-            result = calculate_overhead_line_sequence(**self._read_line_geometry_inputs())
+            inputs = self._read_line_geometry_inputs()
+            result = calculate_overhead_line_sequence(**inputs)
             self._line_geometry_last_result = result
 
             def fmt_complex(z: complex, unit: str, digits: int = 6) -> str:
@@ -1820,8 +1838,99 @@ class ApproximationToolGUI(tk.Tk):
                 f"\n说明：\n{result.notes}"
             )
             self._set_text(self._line_geometry_result, text)
+            self._draw_line_geometry_schematic(inputs, result)
         except Exception as exc:
             messagebox.showerror("计算错误", str(exc))
+
+    def _draw_line_geometry_schematic(self, inputs: dict[str, object], result) -> None:
+        if self._line_geometry_ax is None or self._line_geometry_canvas is None:
+            return
+        ax = self._line_geometry_ax
+        ax.clear()
+        ax.set_facecolor("#f8fafc")
+        ax.set_title("按输入几何尺寸等比例绘制", fontsize=11, pad=10)
+
+        phase_positions = list(inputs["phase_positions"])
+        has_ground = bool(inputs["has_ground_wire"])
+        ground_position = inputs["ground_wire_position"] if has_ground else None
+        radius = max(float(inputs["phase_radius_m"]), float(inputs.get("ground_wire_radius_m", 0.0) or 0.0), 0.12)
+        all_points = phase_positions + ([ground_position] if ground_position is not None else [])
+        xs = [pt[0] for pt in all_points]
+        ys = [pt[1] for pt in all_points]
+        x_min, x_max = min(xs), max(xs)
+        y_max = max(ys)
+        x_pad = max(2.0, 0.15 * max(1.0, x_max - x_min), radius * 6.0)
+        y_pad = max(2.0, 0.15 * max(1.0, y_max), radius * 8.0)
+
+        ax.axhline(0.0, color="#5b6470", linewidth=2.0, linestyle="-")
+        ax.fill_between([x_min - x_pad, x_max + x_pad], -y_pad * 0.22, 0.0, color="#dde6ef", alpha=0.85)
+        ax.text(x_min - x_pad * 0.95, 0.35, "地平面", color="#3a4756", fontsize=9, ha="left", va="bottom")
+
+        phase_colors = [("A相导线", "#4f8ef7"), ("B相导线", "#ffb020"), ("C相导线", "#ff6b6b")]
+        legend_handles = []
+        for (label, color), (x, y) in zip(phase_colors, phase_positions):
+            circle = Circle((x, y), radius=radius, facecolor=color, edgecolor="#1f2933", linewidth=1.2, zorder=3)
+            ax.add_patch(circle)
+            ax.text(x, y + radius * 1.7, label.replace("导线", ""), ha="center", va="bottom", fontsize=9, color=color, fontweight="bold")
+            legend_handles.append(Line2D([0], [0], marker="o", linestyle="", markerfacecolor=color, markeredgecolor="#1f2933", markersize=8, label=label))
+            self._draw_vertical_dimension(ax, x, y, f"h={y:.2f} m", color=color)
+
+        if ground_position is not None:
+            gx, gy = ground_position
+            g_radius = max(float(inputs.get("ground_wire_radius_m", 0.0) or 0.0), radius * 0.7)
+            circle = Circle((gx, gy), radius=g_radius, facecolor="#6b7280", edgecolor="#1f2933", linewidth=1.2, zorder=3)
+            ax.add_patch(circle)
+            ax.text(gx, gy + g_radius * 1.7, "地线", ha="center", va="bottom", fontsize=9, color="#374151", fontweight="bold")
+            legend_handles.append(Line2D([0], [0], marker="o", linestyle="", markerfacecolor="#6b7280", markeredgecolor="#1f2933", markersize=8, label="地线"))
+            self._draw_vertical_dimension(ax, gx, gy, f"h={gy:.2f} m", color="#4b5563", x_offset=max(radius * 2.0, 0.8))
+
+        xa, ya = phase_positions[0]
+        xb, yb = phase_positions[1]
+        xc, yc = phase_positions[2]
+        self._draw_dimension_line(ax, (xa, ya), (xb, yb), f"AB={result.D_ab_m:.2f} m", "#2563eb")
+        self._draw_dimension_line(ax, (xb, yb), (xc, yc), f"BC={result.D_bc_m:.2f} m", "#d97706")
+        self._draw_dimension_line(ax, (xa, ya), (xc, yc), f"CA={result.D_ca_m:.2f} m", "#dc2626", text_offset=1.2)
+
+        ax.set_xlim(x_min - x_pad, x_max + x_pad)
+        ax.set_ylim(-y_pad * 0.22, y_max + y_pad)
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.35)
+        ax.set_xlabel("横坐标 x / m")
+        ax.set_ylabel("高度 h / m")
+        ax.legend(handles=legend_handles, loc="upper right", frameon=True, fontsize=9)
+        self._line_geometry_fig.tight_layout()
+        self._line_geometry_canvas.draw()
+
+    @staticmethod
+    def _draw_vertical_dimension(ax, x: float, y: float, label: str, color: str, x_offset: float = 0.0) -> None:
+        x_dim = x + x_offset
+        ax.annotate("", xy=(x_dim, y), xytext=(x_dim, 0.0), arrowprops=dict(arrowstyle="<->", color=color, linewidth=1.1))
+        ax.plot([x, x_dim], [y, y], color=color, linewidth=0.9, linestyle=":")
+        ax.text(x_dim + 0.18, y / 2.0, label, color=color, fontsize=8.5, va="center", ha="left",
+                bbox=dict(boxstyle="round,pad=0.18", facecolor="white", edgecolor="none", alpha=0.75))
+
+    @staticmethod
+    def _draw_dimension_line(ax, p1: tuple[float, float], p2: tuple[float, float], label: str, color: str, text_offset: float = 0.7) -> None:
+        x1, y1 = p1
+        x2, y2 = p2
+        ax.annotate("", xy=(x2, y2), xytext=(x1, y1), arrowprops=dict(arrowstyle="<->", color=color, linewidth=1.2))
+        mx = (x1 + x2) / 2.0
+        my = (y1 + y2) / 2.0
+        dx = x2 - x1
+        dy = y2 - y1
+        length = max((dx ** 2 + dy ** 2) ** 0.5, 1e-9)
+        nx = -dy / length
+        ny = dx / length
+        ax.text(
+            mx + nx * text_offset,
+            my + ny * text_offset,
+            label,
+            color=color,
+            fontsize=8.5,
+            ha="center",
+            va="center",
+            bbox=dict(boxstyle="round,pad=0.18", facecolor="white", edgecolor="none", alpha=0.8),
+        )
 
     @staticmethod
     def _replace_entry(entry: ttk.Entry, value: float, fmt: str = ".6g") -> None:
@@ -2365,9 +2474,12 @@ class ApproximationToolGUI(tk.Tk):
         self._comtrade_popup_fig = None
         self._sequence_channel_vars: dict[str, tk.StringVar] = {}
         self._sequence_result_text = None
+        self._sequence_numeric_text = None
         self._sequence_fig = None
         self._sequence_canvas = None
         self._sequence_axes = ()
+        self._sequence_chart_notebook = None
+        self._sequence_tab_defs = ()
         self._sequence_cache: dict[tuple[str, tuple[int, int, int], float], dict[str, np.ndarray]] = {}
         self._comtrade_overlay_mode = tk.StringVar(value="stacked")
         self._comtrade_default_window_s = 0.12
@@ -2393,11 +2505,11 @@ class ApproximationToolGUI(tk.Tk):
         right.columnconfigure(0, weight=1)
         right.rowconfigure(3, weight=1)
 
-        ttk.Label(left, text="录波曲线（COMTRADE 文本/二进制）", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 6))
+        ttk.Label(left, text="录波曲线（COMTRADE / Yokogawa WVF/WDF）", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 6))
 
         self.comtrade_path_var = tk.StringVar(value="")
         ttk.Entry(left, textvariable=self.comtrade_path_var, width=42).grid(row=2, column=0, columnspan=3, sticky="ew", padx=(0, 4), pady=2)
-        ttk.Button(left, text="选择 CFG", command=self._browse_comtrade_cfg).grid(row=2, column=3, sticky="ew", pady=2)
+        ttk.Button(left, text="选择录波", command=self._browse_comtrade_cfg).grid(row=2, column=3, sticky="ew", pady=2)
         ttk.Button(left, text="加载录波", command=self._load_comtrade_file).grid(row=3, column=0, sticky="ew", pady=(4, 4), padx=(0, 4))
         ttk.Button(left, text="序量分析", command=self._open_sequence_analysis_window).grid(row=3, column=1, sticky="ew", pady=(4, 4), padx=(0, 4))
         ttk.Button(left, text="多通道同图", command=self._open_comtrade_overlay_window).grid(row=3, column=2, columnspan=2, sticky="ew", pady=(4, 4))
@@ -2444,7 +2556,7 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_sequence_frame = ttk.Frame(self.comtrade_analysis_host)
         self.comtrade_sequence_frame.columnconfigure(0, weight=1)
         self.comtrade_sequence_frame.rowconfigure(2, weight=1)
-        self.comtrade_sequence_frame.rowconfigure(3, weight=1)
+        self.comtrade_sequence_frame.rowconfigure(4, weight=1)
         self.comtrade_sequence_frame.grid(row=0, column=0, sticky="nsew")
         self.comtrade_sequence_frame.grid_remove()
         self._build_embedded_sequence_panel()
@@ -2502,7 +2614,17 @@ class ApproximationToolGUI(tk.Tk):
         ax.title.set_color("#f0f0f0")
 
     def _browse_comtrade_cfg(self) -> None:
-        filename = filedialog.askopenfilename(title="选择 COMTRADE CFG 文件", filetypes=[("COMTRADE CFG", "*.cfg"), ("All files", "*.*")])
+        filename = filedialog.askopenfilename(
+            title="选择录波文件",
+            filetypes=[
+                ("录波文件", "*.cfg *.wdf *.wvf *.hdr"),
+                ("COMTRADE CFG", "*.cfg"),
+                ("Yokogawa WDF", "*.wdf"),
+                ("Yokogawa WVF", "*.wvf"),
+                ("Yokogawa HDR", "*.hdr"),
+                ("All files", "*.*"),
+            ],
+        )
         if filename:
             self.comtrade_path_var.set(filename)
 
@@ -2523,8 +2645,8 @@ class ApproximationToolGUI(tk.Tk):
         try:
             cfg_path = self.comtrade_path_var.get().strip()
             if not cfg_path:
-                raise InputError("请先选择 COMTRADE 的 CFG 文件。")
-            self._comtrade_record = parse_comtrade(cfg_path)
+                raise InputError("请先选择录波文件。")
+            self._comtrade_record = parse_waveform_file(cfg_path)
             self._populate_comtrade_channels()
             self._reset_comtrade_view()
             self._set_text(self.comtrade_info, self._format_comtrade_overview())
@@ -2571,9 +2693,9 @@ class ApproximationToolGUI(tk.Tk):
             return "未加载录波文件。"
         sample_rate = estimate_sampling_rate(record)
         text = (
-            f"══ COMTRADE 概览 ═══════════════════════\n"
+            f"══ 录波概览 ═══════════════════════\n"
             f"站名：{record.station_name or '-'}\n设备：{record.device_id or '-'}\n版本：{record.revision}\n"
-            f"DAT 类型：{record.file_type}\n模拟量通道：{len(record.analog_channels)}\n数字量通道：{len(record.digital_channel_names)}\n"
+            f"文件类型：{record.file_type}\n模拟量通道：{len(record.analog_channels)}\n数字量通道：{len(record.digital_channel_names)}\n"
             f"采样率：{sample_rate:.3f} Hz\n工频：{record.frequency_hz:.3f} Hz\n时长：{record.duration_s:.6f} s\n"
             f"文件：{record.cfg_path.name} / {record.dat_path.name}"
         )
@@ -2908,11 +3030,34 @@ class ApproximationToolGUI(tk.Tk):
         self._sequence_result_text.grid(row=2, column=0, sticky="nsew")
         self._sequence_result_text.configure(state="disabled")
 
-        self._sequence_fig = Figure(figsize=(4.8, 4.6), dpi=100)
-        ax_seq = self._sequence_fig.add_subplot(111)
+        chart_nb = ttk.Notebook(self.comtrade_sequence_frame)
+        chart_nb.grid(row=3, column=0, sticky="ew", pady=(6, 0))
+        self._sequence_tab_defs = (
+            ("电压相量", "voltage_phase"),
+            ("电流相量", "current_phase"),
+            ("V 序分量", "voltage_seq"),
+            ("I 序分量", "current_seq"),
+        )
+        for tab_text, key in self._sequence_tab_defs:
+            frame = ttk.Frame(chart_nb)
+            chart_nb.add(frame, text=tab_text)
+        chart_host = ttk.Frame(self.comtrade_sequence_frame)
+        chart_host.grid(row=4, column=0, sticky="nsew")
+        chart_host.columnconfigure(0, weight=1)
+        chart_host.rowconfigure(1, weight=1)
+        num_frame = ttk.LabelFrame(chart_host, text="实时数值", padding=4)
+        num_frame.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        num_frame.columnconfigure(0, weight=1)
+        self._sequence_numeric_text = tk.Text(num_frame, height=5, wrap=tk.NONE, font="TkFixedFont")
+        self._sequence_numeric_text.grid(row=0, column=0, sticky="ew")
+        self._sequence_numeric_text.configure(state="disabled")
+        self._sequence_fig = Figure(figsize=(5.2, 5.0), dpi=100, facecolor="#101418")
+        ax_seq = self._sequence_fig.add_subplot(111, projection="polar")
         self._sequence_axes = (ax_seq,)
-        self._sequence_canvas = FigureCanvasTkAgg(self._sequence_fig, master=self.comtrade_sequence_frame)
-        self._sequence_canvas.get_tk_widget().grid(row=3, column=0, sticky="nsew", pady=(6, 0))
+        self._sequence_canvas = FigureCanvasTkAgg(self._sequence_fig, master=chart_host)
+        self._sequence_canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
+        self._sequence_chart_notebook = chart_nb
+        self._sequence_chart_notebook.bind("<<NotebookTabChanged>>", lambda _e: self._refresh_sequence_analysis_window())
 
     def _show_comtrade_overview_panel(self) -> None:
         self.comtrade_sequence_frame.grid_remove()
@@ -2974,34 +3119,82 @@ class ApproximationToolGUI(tk.Tk):
         zero = (pa + pb + pc) / 3.0
         positive = (pa + alpha * pb + (alpha ** 2) * pc) / 3.0
         negative = (pa + (alpha ** 2) * pb + alpha * pc) / 3.0
-        result = {"zero": zero, "positive": positive, "negative": negative}
+        result = {
+            "a": pa,
+            "b": pb,
+            "c": pc,
+            "zero": zero,
+            "positive": positive,
+            "negative": negative,
+        }
         self._sequence_cache[cache_key] = result
         return result
 
-    def _draw_sequence_phasor_axis(self, ax, vectors: dict[str, complex]) -> None:
+    def _draw_sequence_phasor_axis(self, ax, vectors: dict[str, complex], title: str) -> None:
         ax.clear()
-        ax.axhline(0.0, color="#cccccc", linewidth=0.8)
-        ax.axvline(0.0, color="#cccccc", linewidth=0.8)
-        colors = {"V0": "#d62728", "V1": "#2ca02c", "V2": "#1f77b4", "I0": "#ff00aa", "I1": "#00aaaa", "I2": "#ff7f0e"}
+        ax.set_theta_zero_location("E")
+        ax.set_theta_direction(1)
+        ax.set_facecolor("#11161d")
+        colors = {
+            "Ua": "#7ec8ff", "Ub": "#ffe082", "Uc": "#ff8a80",
+            "Ia": "#4dd0e1", "Ib": "#ffd54f", "Ic": "#ffab91",
+            "V0": "#b388ff", "V1": "#66bb6a", "V2": "#42a5f5",
+            "I0": "#f06292", "I1": "#26c6da", "I2": "#ffb74d",
+        }
         max_mag = max(1.0, max(abs(v) for v in vectors.values())) if vectors else 1.0
+        radial_max = max_mag * 1.15
+        rings = np.linspace(radial_max / 4.0, radial_max, 4)
+        ax.set_ylim(0.0, radial_max)
+        ax.set_yticks(rings)
+        ax.set_yticklabels([f"{tick:.3g}" for tick in rings], color="#aeb8c2", fontsize=8)
+        ax.set_rlabel_position(22.5)
+        ax.set_thetagrids(
+            np.arange(0, 360, 45),
+            labels=["0°", "45°", "90°", "135°", "180°", "-135°", "-90°", "-45°"],
+            fontsize=8,
+            color="#8ea1b4",
+        )
+        ax.grid(color="#5f6f7e", linestyle="-", linewidth=0.8, alpha=0.45)
+        ax.spines["polar"].set_color("#7c8794")
+        ax.spines["polar"].set_linewidth(1.0)
         for name, val in vectors.items():
-            ax.arrow(0.0, 0.0, val.real, val.imag, color=colors.get(name, "black"), width=0.0, head_width=max_mag * 0.05, length_includes_head=True)
-            ax.text(val.real, val.imag, f" {name}", color=colors.get(name, "black"), fontsize=9, ha="left", va="bottom")
-        lim = max_mag * 1.25
-        ax.set_xlim(-lim, lim)
-        ax.set_ylim(-lim, lim)
-        ax.set_aspect("equal", adjustable="box")
-        ax.grid(True, linestyle="--", alpha=0.35)
-        ax.set_title("")
-        ax.set_xlabel("")
-        ax.set_ylabel("")
+            theta = math.atan2(val.imag, val.real)
+            radius = abs(val)
+            color = colors.get(name, "#ffffff")
+            ax.annotate(
+                "",
+                xy=(theta, radius),
+                xytext=(theta, 0.0),
+                arrowprops=dict(arrowstyle="-|>", color=color, linewidth=2.2, linestyle="-", shrinkA=0, shrinkB=0),
+            )
+            ax.text(theta, min(radial_max * 0.97, radius + radial_max * 0.06), name, color=color, fontsize=9, fontweight="bold", ha="center", va="center")
+        ax.set_title(title, color="#f5f7fa", pad=16, fontsize=11)
+
+    def _active_sequence_tab_key(self) -> str:
+        notebook = getattr(self, "_sequence_chart_notebook", None)
+        tab_defs = getattr(self, "_sequence_tab_defs", ())
+        if notebook is None or not tab_defs:
+            return "voltage_phase"
+        current = notebook.index(notebook.select())
+        return tab_defs[current][1]
+
+    @staticmethod
+    def _format_sequence_numeric_table(vectors: dict[str, complex], unit: str) -> str:
+        lines = [f"{'名称':<6}{'幅值':>12}{'相角/°':>12}{'实部':>12}{'虚部':>12}"]
+        for name, value in vectors.items():
+            mag = abs(value)
+            ang = math.degrees(math.atan2(value.imag, value.real))
+            lines.append(f"{name:<6}{mag:>12.5g}{ang:>12.2f}{value.real:>12.5g}{value.imag:>12.5g}")
+        lines.append(f"单位：{unit}")
+        return "\n".join(lines)
 
     def _refresh_sequence_analysis_window(self) -> None:
-        if self._sequence_result_text is None or self._sequence_fig is None or self._sequence_canvas is None:
+        if self._sequence_result_text is None or self._sequence_fig is None or self._sequence_canvas is None or self._sequence_numeric_text is None:
             return
         record = self._comtrade_record
         if record is None:
             self._set_text(self._sequence_result_text, "未加载录波文件。")
+            self._set_text(self._sequence_numeric_text, "未加载录波文件。")
             for ax in self._sequence_axes:
                 ax.clear()
             self._sequence_canvas.draw()
@@ -3009,6 +3202,7 @@ class ApproximationToolGUI(tk.Tk):
         t1 = self._current_comtrade_cursor_index("T1")
         if t1 is None:
             self._set_text(self._sequence_result_text, "请先在主窗口左键设置 T1 光标，再进行序量分析。")
+            self._set_text(self._sequence_numeric_text, "等待 T1 光标。")
             for ax in self._sequence_axes:
                 ax.clear()
                 ax.set_title("等待 T1 光标")
@@ -3019,34 +3213,70 @@ class ApproximationToolGUI(tk.Tk):
         lines = [f"T1 点号 = {t1 + 1}", f"T1 时间 = {record.time_s[t1]:.6f} s", ""]
         voltage_group = self._read_sequence_group(("Ua", "Ub", "Uc"))
         current_group = self._read_sequence_group(("Ia", "Ib", "Ic"))
-        vectors: dict[str, complex] = {}
+        tab_vectors = {"voltage_phase": {}, "current_phase": {}, "voltage_seq": {}, "current_seq": {}}
+        titles = {
+            "voltage_phase": "电压相量",
+            "current_phase": "电流相量",
+            "voltage_seq": "V 序分量",
+            "current_seq": "I 序分量",
+        }
+        tab_units = {"voltage_phase": "", "current_phase": "", "voltage_seq": "", "current_seq": ""}
         if voltage_group is not None:
             vcache = self._build_sequence_cache("V", voltage_group, sample_rate, fundamental)
-            vectors["V0"] = complex(vcache["zero"][t1])
-            vectors["V1"] = complex(vcache["positive"][t1])
-            vectors["V2"] = complex(vcache["negative"][t1])
+            tab_vectors["voltage_phase"] = {
+                "Ua": complex(vcache["a"][t1]),
+                "Ub": complex(vcache["b"][t1]),
+                "Uc": complex(vcache["c"][t1]),
+            }
+            tab_vectors["voltage_seq"] = {
+                "V0": complex(vcache["zero"][t1]),
+                "V1": complex(vcache["positive"][t1]),
+                "V2": complex(vcache["negative"][t1]),
+            }
             unit = record.analog_channels[voltage_group[0]].unit or "pu"
-            lines.append(f"V0: {self._format_sequence_complex(vectors['V0'], unit)}")
-            lines.append(f"V1: {self._format_sequence_complex(vectors['V1'], unit)}")
-            lines.append(f"V2: {self._format_sequence_complex(vectors['V2'], unit)}")
+            tab_units["voltage_phase"] = unit
+            tab_units["voltage_seq"] = unit
+            lines.append("【电压序分量】")
+            lines.append(f"V0: {self._format_sequence_complex(tab_vectors['voltage_seq']['V0'], unit)}")
+            lines.append(f"V1: {self._format_sequence_complex(tab_vectors['voltage_seq']['V1'], unit)}")
+            lines.append(f"V2: {self._format_sequence_complex(tab_vectors['voltage_seq']['V2'], unit)}")
             lines.append("")
         if current_group is not None:
             icache = self._build_sequence_cache("I", current_group, sample_rate, fundamental)
-            vectors["I0"] = complex(icache["zero"][t1])
-            vectors["I1"] = complex(icache["positive"][t1])
-            vectors["I2"] = complex(icache["negative"][t1])
+            tab_vectors["current_phase"] = {
+                "Ia": complex(icache["a"][t1]),
+                "Ib": complex(icache["b"][t1]),
+                "Ic": complex(icache["c"][t1]),
+            }
+            tab_vectors["current_seq"] = {
+                "I0": complex(icache["zero"][t1]),
+                "I1": complex(icache["positive"][t1]),
+                "I2": complex(icache["negative"][t1]),
+            }
             unit = record.analog_channels[current_group[0]].unit or "A"
-            lines.append(f"I0: {self._format_sequence_complex(vectors['I0'], unit)}")
-            lines.append(f"I1: {self._format_sequence_complex(vectors['I1'], unit)}")
-            lines.append(f"I2: {self._format_sequence_complex(vectors['I2'], unit)}")
-        if not vectors:
+            tab_units["current_phase"] = unit
+            tab_units["current_seq"] = unit
+            lines.append("【电流序分量】")
+            lines.append(f"I0: {self._format_sequence_complex(tab_vectors['current_seq']['I0'], unit)}")
+            lines.append(f"I1: {self._format_sequence_complex(tab_vectors['current_seq']['I1'], unit)}")
+            lines.append(f"I2: {self._format_sequence_complex(tab_vectors['current_seq']['I2'], unit)}")
+        if not any(tab_vectors.values()):
             self._set_text(self._sequence_result_text, "请在序量分析窗口中至少完整设置一组三相电压或三相电流通道。")
+            self._set_text(self._sequence_numeric_text, "请先完整设置当前需要分析的三相通道。")
             ax = self._sequence_axes[0]
             ax.clear()
-            ax.set_title("")
+            ax.set_title(f"{titles[self._active_sequence_tab_key()]}\n（未配置）", color="#f5f7fa", pad=16, fontsize=11)
             self._sequence_canvas.draw()
             return
-        self._draw_sequence_phasor_axis(self._sequence_axes[0], vectors)
+        active_key = self._active_sequence_tab_key()
+        ax = self._sequence_axes[0]
+        if tab_vectors[active_key]:
+            self._draw_sequence_phasor_axis(ax, tab_vectors[active_key], titles[active_key])
+            self._set_text(self._sequence_numeric_text, self._format_sequence_numeric_table(tab_vectors[active_key], tab_units[active_key] or "-"))
+        else:
+            ax.clear()
+            ax.set_title(f"{titles[active_key]}\n（未配置）", color="#f5f7fa", pad=16, fontsize=11)
+            self._set_text(self._sequence_numeric_text, f"{titles[active_key]} 当前未配置完整三相通道。")
         self._set_text(self._sequence_result_text, "\n".join(lines).strip())
         self._sequence_fig.tight_layout()
         self._sequence_canvas.draw()
