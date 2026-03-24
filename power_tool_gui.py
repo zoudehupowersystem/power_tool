@@ -2116,28 +2116,17 @@ class ApproximationToolGUI(tk.Tk):
             self.sc_v_ax_seq.grid(True, alpha=0.35)
             self.sc_v_ax_seq.legend(loc="upper right", ncol=3, fontsize=8)
 
-            asym_faults = {"A相接地", "B相接地", "C相接地", "AB两相接地", "BC两相接地", "CA两相接地", "AB两相短路", "BC两相短路", "CA两相短路"}
             show_labels = bool(self.sc_vector_labels_var.get())
-            if r.fault_type in asym_faults:
-                i_vectors = {"A": r.Ia_A, "B": r.Ib_A, "C": r.Ic_A, "1": r.I1_A, "2": r.I2_A, "0": r.I0_A}
-                v_vectors = {"A": r.Va_V, "B": r.Vb_V, "C": r.Vc_V, "1": r.V1_V, "2": r.V2_V, "0": r.V0_V}
-                self._draw_short_circuit_vector_axis(
-                    self.sc_ax_i_vector, i_vectors, "故障点电流向量图（ABC+012）",
-                    show_labels=show_labels, table_ax=self.sc_ax_i_table
-                )
-                self._draw_short_circuit_vector_axis(
-                    self.sc_v_ax_vector, v_vectors, "故障点电压向量图（ABC+012）",
-                    show_labels=show_labels, table_ax=self.sc_v_ax_table
-                )
-            else:
-                self._draw_short_circuit_vector_axis(
-                    self.sc_ax_i_vector, {}, "故障点电流向量图（仅不对称故障绘制）",
-                    show_labels=show_labels, table_ax=self.sc_ax_i_table
-                )
-                self._draw_short_circuit_vector_axis(
-                    self.sc_v_ax_vector, {}, "故障点电压向量图（仅不对称故障绘制）",
-                    show_labels=show_labels, table_ax=self.sc_v_ax_table
-                )
+            i_vectors = {"A": r.Ia_A, "B": r.Ib_A, "C": r.Ic_A, "1": r.I1_A, "2": r.I2_A, "0": r.I0_A}
+            v_vectors = {"A": r.Va_V, "B": r.Vb_V, "C": r.Vc_V, "1": r.V1_V, "2": r.V2_V, "0": r.V0_V}
+            self._draw_short_circuit_vector_axis(
+                self.sc_ax_i_vector, i_vectors, "故障点电流向量图（ABC+012）",
+                show_labels=show_labels, table_ax=self.sc_ax_i_table
+            )
+            self._draw_short_circuit_vector_axis(
+                self.sc_v_ax_vector, v_vectors, "故障点电压向量图（ABC+012）",
+                show_labels=show_labels, table_ax=self.sc_v_ax_table
+            )
 
             self.sc_fig.tight_layout()
             self.sc_canvas.draw()
