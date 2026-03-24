@@ -231,6 +231,78 @@ def _draw_pss_transfer_diagram(ax) -> None:
     ax.text(0.2, 0.22, "当前内核模型含两级超前-滞后补偿与输出限幅；其输出 V_s 叠加到 AVR 求和点。", fontsize=9, ha="left")
 
 
+def _draw_type1_pss_diagram(ax) -> None:
+    ax.clear()
+    ax.set_xlim(0, 13.8)
+    ax.set_ylim(0, 4.2)
+    ax.axis("off")
+    ax.text(0.2, 3.85, "1型 PSS 传递函数框图", fontsize=11, fontweight="bold", ha="left")
+
+    _draw_block(ax, 1.4, 2.7, 1.0, 0.8, "Kq1")
+    _draw_block(ax, 1.4, 1.7, 1.0, 0.8, "Kq2")
+    _draw_block(ax, 1.4, 0.7, 1.0, 0.8, "Kq3")
+    _draw_sum_node(ax, 3.6, 2.0, r=0.28)
+    _draw_block(ax, 4.8, 1.55, 2.0, 0.9, "K + s\n──────\n1+sT_q")
+    _draw_block(ax, 7.4, 1.55, 2.1, 0.9, "1+sT_1e\n────────\n1+sT_2e")
+    _draw_block(ax, 10.1, 1.55, 2.1, 0.9, "1+sT_3e\n────────\n1+sT_4e")
+
+    _draw_signal_arrow(ax, 0.2, 3.1, 1.4, 3.1, "ω−ω0")
+    _draw_signal_arrow(ax, 0.2, 2.1, 1.4, 2.1, "Pe−Pe0")
+    _draw_signal_arrow(ax, 0.2, 1.1, 1.4, 1.1, "Vt−Vt0")
+    _draw_signal_arrow(ax, 2.4, 3.1, 3.35, 2.2)
+    _draw_signal_arrow(ax, 2.4, 2.1, 3.32, 2.0)
+    _draw_signal_arrow(ax, 2.4, 1.1, 3.35, 1.8)
+    _draw_signal_arrow(ax, 3.88, 2.0, 4.8, 2.0)
+    _draw_signal_arrow(ax, 6.8, 2.0, 7.4, 2.0)
+    _draw_signal_arrow(ax, 9.5, 2.0, 10.1, 2.0)
+    _draw_signal_arrow(ax, 12.2, 2.0, 13.5, 2.0, "V_s")
+    ax.text(12.55, 2.58, "V_smax", fontsize=9)
+    ax.text(12.55, 1.38, "V_smin", fontsize=9)
+
+
+def _draw_type1_avr_diagram(ax) -> None:
+    ax.clear()
+    ax.set_xlim(0, 15.0)
+    ax.set_ylim(0, 4.6)
+    ax.axis("off")
+    ax.text(0.2, 4.15, "1型 AVR 传递函数框图", fontsize=11, fontweight="bold", ha="left")
+
+    _draw_sum_node(ax, 1.2, 2.7, r=0.26)
+    _draw_block(ax, 2.1, 2.2, 1.6, 1.0, "K_r\n──────\n1+sT_r")
+    _draw_sum_node(ax, 4.6, 2.7, r=0.26)
+    _draw_block(ax, 5.5, 2.2, 1.8, 1.0, "K_a\n──────\n1+sT_a")
+    _draw_sum_node(ax, 8.2, 2.7, r=0.26)
+    _draw_block(ax, 9.0, 2.2, 1.5, 1.0, "1\n──────\n1+sT_e")
+    _draw_block(ax, 6.3, 0.45, 1.8, 1.0, "sK_f\n──────\n1+sT_f")
+
+    _draw_signal_arrow(ax, 0.2, 2.7, 0.95, 2.7, "V_t")
+    _draw_signal_arrow(ax, 1.46, 2.7, 2.1, 2.7)
+    _draw_signal_arrow(ax, 3.7, 2.7, 4.35, 2.7)
+    _draw_signal_arrow(ax, 4.86, 2.7, 5.5, 2.7)
+    _draw_signal_arrow(ax, 7.3, 2.7, 7.95, 2.7)
+    _draw_signal_arrow(ax, 8.46, 2.7, 9.0, 2.7)
+    _draw_signal_arrow(ax, 10.5, 2.7, 12.0, 2.7, "E_fd")
+    _draw_signal_arrow(ax, 12.0, 2.7, 12.0, 0.95)
+    _draw_signal_arrow(ax, 12.0, 0.95, 8.1, 0.95)
+    _draw_signal_arrow(ax, 8.1, 0.95, 8.1, 2.44, "V_F", dy=0.14)
+
+    ax.annotate("", xy=(1.2, 2.96), xytext=(1.2, 3.7), arrowprops=dict(arrowstyle="->", linewidth=1.0))
+    ax.text(1.35, 3.46, "V_t0", fontsize=9, va="center")
+    ax.text(0.86, 2.66, "−", fontsize=12)
+
+    ax.annotate("", xy=(4.6, 2.96), xytext=(4.6, 3.7), arrowprops=dict(arrowstyle="->", linewidth=1.0))
+    ax.text(4.72, 3.46, "V_s", fontsize=9, va="center")
+    ax.annotate("", xy=(4.6, 2.44), xytext=(4.6, 1.75), arrowprops=dict(arrowstyle="->", linewidth=1.0))
+    ax.text(4.72, 1.9, "V_F", fontsize=9, va="center")
+    ax.text(4.2, 2.83, "+", fontsize=12)
+    ax.text(4.2, 2.36, "−", fontsize=12)
+
+    ax.annotate("", xy=(8.2, 2.96), xytext=(8.2, 3.7), arrowprops=dict(arrowstyle="->", linewidth=1.0))
+    ax.text(8.35, 3.46, "E_fd0", fontsize=9, va="center")
+    ax.text(7.85, 2.66, "+", fontsize=12)
+    ax.text(11.05, 3.0, "E_fdmax", fontsize=9)
+    ax.text(11.05, 2.35, "E_fdmin", fontsize=9)
+
 class ApproximationToolGUI(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
@@ -1280,11 +1352,33 @@ class ApproximationToolGUI(tk.Tk):
         add_type1("T2e", 8, "T2e / s", "0.03", 0); add_type1("T3e", 8, "T3e / s", "0.15", 2)
         add_type1("T4e", 9, "T4e / s", "0.03", 0); add_type1("Vsmax", 9, "Vsmax / pu", "0.2", 2)
         add_type1("Vsmin", 10, "Vsmin / pu", "-0.2", 0); add_type1("f_eval", 10, "评估频率 / Hz", "1.0", 2)
+
+        ttk.Label(
+            page_type1,
+            text="传递函数框图（参考教材 1型 AVR/PSS）：",
+            style="Muted.TLabel",
+        ).grid(row=11, column=0, columnspan=4, sticky="w", padx=4, pady=(8, 2))
+
+        page_type1.rowconfigure(14, weight=1)
+        self.smib_type1_pss_fig = Figure(figsize=(6.4, 2.6), dpi=100)
+        self.smib_type1_pss_ax = self.smib_type1_pss_fig.add_subplot(111)
+        _draw_type1_pss_diagram(self.smib_type1_pss_ax)
+        self.smib_type1_pss_canvas = FigureCanvasTkAgg(self.smib_type1_pss_fig, master=page_type1)
+        self.smib_type1_pss_canvas.get_tk_widget().grid(row=12, column=0, columnspan=4, sticky="nsew", padx=4, pady=(0, 2))
+        self.smib_type1_pss_canvas.draw()
+
+        self.smib_type1_avr_fig = Figure(figsize=(6.4, 2.8), dpi=100)
+        self.smib_type1_avr_ax = self.smib_type1_avr_fig.add_subplot(111)
+        _draw_type1_avr_diagram(self.smib_type1_avr_ax)
+        self.smib_type1_avr_canvas = FigureCanvasTkAgg(self.smib_type1_avr_fig, master=page_type1)
+        self.smib_type1_avr_canvas.get_tk_widget().grid(row=13, column=0, columnspan=4, sticky="nsew", padx=4, pady=(0, 4))
+        self.smib_type1_avr_canvas.draw()
+
         ttk.Button(page_type1, text="计算1型 AVR/PSS 指标", command=self.calculate_type1_avr_pss).grid(
-            row=11, column=0, columnspan=4, sticky="ew", padx=4, pady=(8, 4)
+            row=14, column=0, columnspan=4, sticky="ew", padx=4, pady=(4, 4)
         )
         self.smib_type1_result = ScrolledText(page_type1, width=56, height=8, wrap=tk.WORD)
-        self.smib_type1_result.grid(row=12, column=0, columnspan=4, sticky="nsew", padx=4, pady=(2, 2))
+        self.smib_type1_result.grid(row=15, column=0, columnspan=4, sticky="nsew", padx=4, pady=(2, 2))
         self.smib_type1_result.configure(state="disabled")
 
         ttk.Label(right, text="模态结果", style="Card.TLabel",
