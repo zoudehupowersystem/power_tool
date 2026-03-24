@@ -35,7 +35,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle, Rectangle
 
 
-from power_tool_common import InputError, _safe_float, _validate_positive, load_line_params_reference
+from power_tool_common import InputError, _safe_float, _validate_positive, _validate_nonnegative, load_line_params_reference
 
 
 from power_tool_params import _format_warnings, convert_2wt_to_pu, convert_3wt_to_pu, convert_line_to_pu
