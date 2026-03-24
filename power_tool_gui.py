@@ -1925,10 +1925,10 @@ class ApproximationToolGUI(tk.Tk):
                 ha="left",
                 va="bottom",
                 fontsize=8.2,
-                color="#e6edf5",
+                color="#1f2933",
                 family="monospace",
                 clip_on=False,
-                bbox=dict(boxstyle="round,pad=0.28", facecolor="#0f1722", edgecolor="#7c8794", alpha=0.92),
+                bbox=dict(boxstyle="round,pad=0.28", facecolor="#ffffff", edgecolor="#9aa5b1", alpha=0.96),
             )
             handles = [
                 Line2D([0], [0], color=colors[k], linestyle=linestyles[k], linewidth=2.2, label=k)
