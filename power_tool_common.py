@@ -140,10 +140,12 @@ class EACResult:
 
 @dataclass
 class ShortCircuitSummary:
+    network_mode: str
     fault_type: str
     neutral_mode: str
     U_kV: float
     line_len_km: float
+    fault_pos_from_left_pct: float
     Z1_ohm: complex
     Z2_ohm: complex
     Z0_ohm: complex
@@ -155,6 +157,12 @@ class ShortCircuitSummary:
     Ia_A: complex
     Ib_A: complex
     Ic_A: complex
+    V0_V: complex
+    V1_V: complex
+    V2_V: complex
+    Va_V: complex
+    Vb_V: complex
+    Vc_V: complex
     I_break_kA: float
     tau_dc_s: float
     breaker_ok: Optional[bool]

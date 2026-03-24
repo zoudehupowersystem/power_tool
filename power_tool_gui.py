@@ -464,7 +464,7 @@ class ApproximationToolGUI(tk.Tk):
             return header + "\n" + "\n".join(f"{name}: {entry.get().strip()}" for name, entry in pairs)
         elif tab == "短路电流计算":
             pairs = [("系统电压 / kV", self.sc_u), ("线路长度 / km", self.sc_len), ("R1 / Ω/km", self.sc_r1), ("X1 / Ω/km", self.sc_x1),
-                     ("R0 / Ω/km", self.sc_r0), ("X0 / Ω/km", self.sc_x0), ("接地电阻 / Ω", self.sc_zn), ("故障电阻 / Ω", self.sc_rf)]
+                     ("R0 / Ω/km", self.sc_r0), ("X0 / Ω/km", self.sc_x0), ("中性点电阻 / Ω", self.sc_rn), ("故障电阻 / Ω", self.sc_rf)]
         elif tab == "录波曲线":
             return f"当前录波文件: {getattr(self, '_comtrade_cfg_path', '') or '未载入'}\n当前时间窗: {self.comtrade_time_label.cget('text')}"
         else:
@@ -1363,63 +1363,77 @@ class ApproximationToolGUI(tk.Tk):
         right.columnconfigure(0, weight=1)
         right.rowconfigure(1, weight=1)
 
-        ttk.Label(left, text="短路电流计算（系统+线路串联，故障在线路末端）", font=("TkDefaultFont", 11, "bold")).grid(
+        ttk.Label(left, text="短路电流计算（支持单电源/双电源+线路故障点）", font=("TkDefaultFont", 11, "bold")).grid(
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
 
+        self.sc_mode = ttk.Combobox(left, state="readonly", width=18, values=["单电源", "双电源"])
+        ttk.Label(left, text="网络模式").grid(row=1, column=0, sticky="w", padx=4, pady=4)
+        self.sc_mode.grid(row=1, column=1, sticky="ew", padx=4, pady=4)
+        self.sc_mode.set("单电源")
+
         self.sc_fault_type = ttk.Combobox(left, state="readonly", width=18,
                                           values=["A相接地", "B相接地", "C相接地", "AB两相接地", "BC两相接地", "CA两相接地", "AB两相短路", "BC两相短路", "CA两相短路", "三相接地"])
-        ttk.Label(left, text="故障类型").grid(row=1, column=0, sticky="w", padx=4, pady=4)
-        self.sc_fault_type.grid(row=1, column=1, sticky="ew", padx=4, pady=4)
+        ttk.Label(left, text="故障类型").grid(row=2, column=0, sticky="w", padx=4, pady=4)
+        self.sc_fault_type.grid(row=2, column=1, sticky="ew", padx=4, pady=4)
         self.sc_fault_type.set("A相接地")
 
-        self.sc_u = self._add_entry(left, 2, "系统电压 U / kV（线电压）", "110")
-        self.sc_ssc = self._add_entry(left, 3, "系统短路容量 S_sc / MVA", "2000")
-        self.sc_xr = self._add_entry(left, 4, "系统 X/R 比", "10")
-        self.sc_len = self._add_entry(left, 5, "线路长度 / km", "30")
-        self.sc_r1 = self._add_entry(left, 6, "线路正序电阻 R1 / (Ω/km)", "0.05")
-        self.sc_x1 = self._add_entry(left, 7, "线路正序电抗 X1 / (Ω/km)", "0.40")
-        self.sc_r0 = self._add_entry(left, 8, "线路零序电阻 R0 / (Ω/km)", "0.15")
-        self.sc_x0 = self._add_entry(left, 9, "线路零序电抗 X0 / (Ω/km)", "1.20")
-        self.sc_rf = self._add_entry(left, 10, "过渡电阻 Rf / Ω", "0.0")
+        self.sc_u = self._add_entry(left, 3, "系统电压 U / kV（线电压）", "110")
+        self.sc_ssc = self._add_entry(left, 4, "左侧系统短路容量 S_sc / MVA", "2000")
+        self.sc_xr = self._add_entry(left, 5, "左侧系统 X/R 比", "10")
+        self.sc_ssc_r = self._add_entry(left, 6, "右侧系统短路容量 S_sc,R / MVA", "2000")
+        self.sc_xr_r = self._add_entry(left, 7, "右侧系统 X/R 比", "10")
+        self.sc_fault_pos = self._add_entry(left, 8, "故障点距左侧百分比 / %", "50")
+        self.sc_len = self._add_entry(left, 9, "线路长度 / km", "30")
+        self.sc_r1 = self._add_entry(left, 10, "线路正序电阻 R1 / (Ω/km)", "0.05")
+        self.sc_x1 = self._add_entry(left, 11, "线路正序电抗 X1 / (Ω/km)", "0.40")
+        self.sc_r0 = self._add_entry(left, 12, "线路零序电阻 R0 / (Ω/km)", "0.15")
+        self.sc_x0 = self._add_entry(left, 13, "线路零序电抗 X0 / (Ω/km)", "1.20")
+        self.sc_rf = self._add_entry(left, 14, "过渡电阻 Rf / Ω", "0.0")
 
         self.sc_neutral_mode = ttk.Combobox(left, state="readonly", width=18,
                                             values=["直接接地", "中性点不接地", "经消弧线圈接地", "经电阻接地"])
-        ttk.Label(left, text="系统中性点方式").grid(row=11, column=0, sticky="w", padx=4, pady=4)
-        self.sc_neutral_mode.grid(row=11, column=1, sticky="ew", padx=4, pady=4)
+        ttk.Label(left, text="系统中性点方式").grid(row=15, column=0, sticky="w", padx=4, pady=4)
+        self.sc_neutral_mode.grid(row=15, column=1, sticky="ew", padx=4, pady=4)
         self.sc_neutral_mode.set("直接接地")
 
-        self.sc_rn = self._add_entry(left, 12, "中性点电阻 Rn / Ω", "1.5")
-        self.sc_xn = self._add_entry(left, 13, "中性点电抗 Xn / Ω（消弧线圈）", "12.0")
+        self.sc_rn = self._add_entry(left, 16, "中性点电阻 Rn / Ω", "1.5")
+        self.sc_xn = self._add_entry(left, 17, "中性点电抗 Xn / Ω（消弧线圈）", "12.0")
 
+        self.sc_mode.bind("<<ComboboxSelected>>", self._on_sc_mode_change)
         self.sc_neutral_mode.bind("<<ComboboxSelected>>", self._on_sc_neutral_mode_change)
         self.sc_len.bind("<FocusOut>", self._on_sc_neutral_mode_change)
         self.sc_r0.bind("<FocusOut>", self._on_sc_neutral_mode_change)
         self.sc_x0.bind("<FocusOut>", self._on_sc_neutral_mode_change)
         self._on_sc_neutral_mode_change()
-        self.sc_brk = self._add_entry(left, 14, "断路器额定开断电流 Ik / kA（可留空）", "31.5")
-        self.sc_cycles = self._add_entry(left, 15, "仿真周波数（波形）", "10")
+        self.sc_brk = self._add_entry(left, 18, "断路器额定开断电流 Ik / kA（可留空）", "31.5")
+        self.sc_cycles = self._add_entry(left, 19, "仿真周波数（波形）", "10")
 
         ttk.Button(left, text="计算并绘图", command=self.calculate_short_circuit).grid(
-            row=16, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
+            row=20, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
         )
 
         self.sc_result = ScrolledText(left, width=58, height=20, wrap=tk.WORD)
-        self.sc_result.grid(row=17, column=0, columnspan=2, sticky="nsew", padx=4, pady=4)
+        self.sc_result.grid(row=21, column=0, columnspan=2, sticky="nsew", padx=4, pady=4)
         self.sc_result.configure(state="disabled")
 
         ttk.Label(right, text="短路点电流波形", font=("TkDefaultFont", 11, "bold")).grid(
             row=0, column=0, sticky="w", pady=(0, 8)
         )
 
-        self.sc_fig = Figure(figsize=(8.4, 5.4), dpi=100)
-        self.sc_ax_phase = self.sc_fig.add_subplot(211)
-        self.sc_ax_seq = self.sc_fig.add_subplot(212)
+        self.sc_fig = Figure(figsize=(10.8, 7.0), dpi=100)
+        gs = self.sc_fig.add_gridspec(2, 2, width_ratios=[1.7, 1.0], hspace=0.26, wspace=0.18)
+        self.sc_ax_phase = self.sc_fig.add_subplot(gs[0, 0])
+        self.sc_ax_seq = self.sc_fig.add_subplot(gs[1, 0])
+        self.sc_ax_i_vector = self.sc_fig.add_subplot(gs[0, 1], projection="polar")
+        self.sc_ax_v_vector = self.sc_fig.add_subplot(gs[1, 1], projection="polar")
         self.sc_ax_phase.set_ylabel("i_abc / A")
         self.sc_ax_seq.set_ylabel("i_012 / A")
         self.sc_ax_seq.set_xlabel("t / s")
         self.sc_ax_phase.grid(True, alpha=0.4)
         self.sc_ax_seq.grid(True, alpha=0.4)
+        self._draw_short_circuit_vector_axis(self.sc_ax_i_vector, {}, "故障点电流向量图")
+        self._draw_short_circuit_vector_axis(self.sc_ax_v_vector, {}, "故障点电压向量图")
 
         self.sc_canvas = FigureCanvasTkAgg(self.sc_fig, master=right)
         self.sc_canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
@@ -1427,6 +1441,7 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_toolbar.update()
         self.sc_toolbar.grid(row=2, column=0, sticky="ew")
 
+        self._on_sc_mode_change()
         self.calculate_short_circuit()
 
     def _on_sc_neutral_mode_change(self, _event: object | None = None) -> None:
@@ -1457,13 +1472,67 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_xn.delete(0, tk.END)
         self.sc_xn.insert(0, f"{xn:.6g}")
 
+    def _on_sc_mode_change(self, _event: object | None = None) -> None:
+        is_dual = self.sc_mode.get().strip() == "双电源"
+        state = "normal" if is_dual else "disabled"
+        for entry in (self.sc_ssc_r, self.sc_xr_r, self.sc_fault_pos):
+            entry.configure(state=state)
+        if not is_dual:
+            self.sc_fault_pos.configure(state="normal")
+            self.sc_fault_pos.delete(0, tk.END)
+            self.sc_fault_pos.insert(0, "100")
+            self.sc_fault_pos.configure(state="disabled")
+
+    def _draw_short_circuit_vector_axis(self, ax, vectors: dict[str, complex], title: str) -> None:
+        ax.clear()
+        ax.set_theta_zero_location("E")
+        ax.set_theta_direction(1)
+        ax.set_facecolor("#11161d")
+        ax.set_title(title, color="#f5f7fa", fontsize=10, pad=10)
+        colors = {
+            "A": "#7ec8ff", "B": "#ffe082", "C": "#ff8a80",
+            "1": "#66bb6a", "2": "#42a5f5", "0": "#b388ff",
+        }
+        if not vectors:
+            ax.set_ylim(0.0, 1.0)
+            ax.grid(color="#5f6f7e", linestyle="-", linewidth=0.8, alpha=0.45)
+            ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+            ax.set_yticklabels(["0.25", "0.50", "0.75", "1.00"], color="#aeb8c2", fontsize=8)
+            ax.set_thetagrids(np.arange(0, 360, 45), color="#8ea1b4", fontsize=8)
+            return
+        max_mag = max(1e-6, max(abs(v) for v in vectors.values()))
+        radial_max = max_mag * 1.15
+        ax.set_ylim(0.0, radial_max)
+        rings = np.linspace(radial_max / 4.0, radial_max, 4)
+        ax.set_yticks(rings)
+        ax.set_yticklabels([f"{tick:.3g}" for tick in rings], color="#aeb8c2", fontsize=8)
+        ax.set_thetagrids(np.arange(0, 360, 45), color="#8ea1b4", fontsize=8)
+        ax.grid(color="#5f6f7e", linestyle="-", linewidth=0.8, alpha=0.45)
+        ax.spines["polar"].set_color("#7c8794")
+        ax.spines["polar"].set_linewidth(1.0)
+        for name, val in vectors.items():
+            theta = math.atan2(val.imag, val.real)
+            radius = abs(val)
+            color = colors.get(name, "#ffffff")
+            ax.annotate(
+                "",
+                xy=(theta, radius),
+                xytext=(theta, 0.0),
+                arrowprops=dict(arrowstyle="-|>", color=color, linewidth=2.2, linestyle="-", shrinkA=0, shrinkB=0),
+            )
+            ax.text(theta, min(radial_max, radius * 1.06), name, color=color, fontsize=8, ha="center", va="center")
+
     def calculate_short_circuit(self) -> None:
         try:
+            mode = self.sc_mode.get().strip()
             fault_type = self.sc_fault_type.get().strip()
             neutral_mode = self.sc_neutral_mode.get().strip()
             U = _safe_float(self.sc_u.get(), "U")
             Ssc = _safe_float(self.sc_ssc.get(), "S_sc")
             xr = _safe_float(self.sc_xr.get(), "X/R")
+            Ssc_r = _safe_float(self.sc_ssc_r.get(), "S_sc,R")
+            xr_r = _safe_float(self.sc_xr_r.get(), "X/R,R")
+            fault_pos_pct = _safe_float(self.sc_fault_pos.get(), "故障点百分比")
             length = _safe_float(self.sc_len.get(), "线路长度")
             R1 = _safe_float(self.sc_r1.get(), "R1")
             X1 = _safe_float(self.sc_x1.get(), "X1")
@@ -1477,7 +1546,9 @@ class ApproximationToolGUI(tk.Tk):
             brk = _safe_float(brk_txt, "Ik") if brk_txt else None
 
             r = short_circuit_capacity(U, fault_type, Ssc, xr, length, R1, X1, R0, X0,
-                                       neutral_mode, Rn, Xn, Rf, brk)
+                                       neutral_mode, Rn, Xn, Rf, brk,
+                                       network_mode=mode, s_sc_right_mva=Ssc_r, xr_sys_right=xr_r,
+                                       fault_pos_from_left_pct=fault_pos_pct)
 
             def _pa(z: complex) -> str:
                 return f"{abs(z):.2f}∠{math.degrees(math.atan2(z.imag, z.real)):.1f}°"
@@ -1489,8 +1560,10 @@ class ApproximationToolGUI(tk.Tk):
 
             text = (
                 f"══ 复合序网计算结果 ═════════════════════════════\n"
+                f"  网络模式：{r.network_mode}\n"
                 f"  故障类型：{r.fault_type}，中性点：{r.neutral_mode}\n"
                 f"  U = {r.U_kV:.4g} kV，线路长度 = {r.line_len_km:.4g} km，Rf = {r.Rf_ohm:.4g} Ω\n"
+                f"  故障点位置（距左侧）= {r.fault_pos_from_left_pct:.3g}%\n"
                 f"  Z1 = {r.Z1_ohm.real:.4f}+j{r.Z1_ohm.imag:.4f} Ω\n"
                 f"  Z2 = {r.Z2_ohm.real:.4f}+j{r.Z2_ohm.imag:.4f} Ω\n"
                 f"  Z0 = {r.Z0_ohm.real:.4f}+j{r.Z0_ohm.imag:.4f} Ω\n"
@@ -1501,6 +1574,12 @@ class ApproximationToolGUI(tk.Tk):
                 f"  Ia = {_pa(r.Ia_A)} A\n"
                 f"  Ib = {_pa(r.Ib_A)} A\n"
                 f"  Ic = {_pa(r.Ic_A)} A\n"
+                f"  V1 = {_pa(r.V1_V)} V\n"
+                f"  V2 = {_pa(r.V2_V)} V\n"
+                f"  V0 = {_pa(r.V0_V)} V\n"
+                f"  Va = {_pa(r.Va_V)} V\n"
+                f"  Vb = {_pa(r.Vb_V)} V\n"
+                f"  Vc = {_pa(r.Vc_V)} V\n"
                 f"  开断校核电流 Ibreak = {r.I_break_kA:.4f} kA\n"
                 f"  直流偏置时间常数 τ = {r.tau_dc_s:.6f} s\n"
                 f"\n══ 断路器匹配 ═════════════════════════════════════\n"
@@ -1544,6 +1623,16 @@ class ApproximationToolGUI(tk.Tk):
             self.sc_ax_seq.set_xlabel("t / s")
             self.sc_ax_seq.grid(True, alpha=0.35)
             self.sc_ax_seq.legend(loc="upper right", ncol=3, fontsize=8)
+
+            asym_faults = {"A相接地", "B相接地", "C相接地", "AB两相接地", "BC两相接地", "CA两相接地", "AB两相短路", "BC两相短路", "CA两相短路"}
+            if r.fault_type in asym_faults:
+                i_vectors = {"A": r.Ia_A, "B": r.Ib_A, "C": r.Ic_A, "1": r.I1_A, "2": r.I2_A, "0": r.I0_A}
+                v_vectors = {"A": r.Va_V, "B": r.Vb_V, "C": r.Vc_V, "1": r.V1_V, "2": r.V2_V, "0": r.V0_V}
+                self._draw_short_circuit_vector_axis(self.sc_ax_i_vector, i_vectors, "故障点电流向量图（ABC+012）")
+                self._draw_short_circuit_vector_axis(self.sc_ax_v_vector, v_vectors, "故障点电压向量图（ABC+012）")
+            else:
+                self._draw_short_circuit_vector_axis(self.sc_ax_i_vector, {}, "故障点电流向量图（仅不对称故障绘制）")
+                self._draw_short_circuit_vector_axis(self.sc_ax_v_vector, {}, "故障点电压向量图（仅不对称故障绘制）")
 
             self.sc_fig.tight_layout()
             self.sc_canvas.draw()

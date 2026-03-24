@@ -105,7 +105,7 @@ class _SummaryDummy:
             "lp_ubase": "110", "lp_sbase": "100", "lp_len": "30", "lp_r1": "0.05", "lp_x1": "0.40", "lp_c1": "0.012",
             "tx2_sbase": "100", "tx2_sn": "63", "tx2_un": "110", "tx2_uk": "10.5", "tx2_pk": "180", "tx2_i0": "0.8", "tx2_p0": "45", "tx2_ubase": "110",
             "tx3_sbase": "100", "tx3_ubase": "220", "tx3_sn_h": "180", "tx3_un_h": "220", "tx3_sn_m": "180", "tx3_sn_l": "90", "tx3_uk_hm": "12", "tx3_uk_hl": "18", "tx3_uk_ml": "7",
-            "sc_u": "110", "sc_len": "30", "sc_r1": "0.05", "sc_x1": "0.40", "sc_r0": "0.15", "sc_x0": "1.20", "sc_zn": "0", "sc_rf": "0.0",
+            "sc_u": "110", "sc_len": "30", "sc_r1": "0.05", "sc_x1": "0.40", "sc_r0": "0.15", "sc_x0": "1.20", "sc_rn": "0", "sc_rf": "0.0",
         }
         for name, value in entries.items():
             setattr(self, name, _FakeEntry(value))
