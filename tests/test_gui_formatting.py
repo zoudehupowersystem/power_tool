@@ -91,6 +91,8 @@ class _SummaryDummy:
         self.current_tab = "频率动态"
         self.current_param_tab = "架空线路"
         self.param_notebook = _FakeNotebook(self.current_param_tab)
+        self.current_vr_tab = "静态电压稳定"
+        self._vr_notebook = _FakeNotebook(self.current_vr_tab)
         self.smib_config = _FakeEntry("Kundur")
         self.smib_entries = {"Xd'": _FakeEntry("0.3"), "H": _FakeEntry("6")}
         self.comtrade_time_label = _FakeLabel("-0.1 s ~ 0.2 s")
@@ -100,6 +102,7 @@ class _SummaryDummy:
             "osc_eq": "1.12", "osc_u": "1.0", "osc_x": "0.55", "osc_p0": "0.8", "osc_tj": "9", "osc_f0": "50",
             "volt_ug": "1.0", "volt_x": "0.32", "volt_pf": "0.95", "volt_sbase": "100",
             "line_u": "500", "line_zc": "250", "line_l": "", "line_c": "", "line_p": "900", "line_qn": "1.1", "line_len": "300",
+            "avc_vh": "226", "avc_p": "160", "avc_q": "45", "avc_tap_now": "0",
             "imp_dp": "0.2", "imp_dt": "0.1", "imp_fd": "2.0", "imp_pmax": "1.8", "imp_pcur": "0.9", "eac_pm": "0.85", "eac_ppre": "2.1", "eac_pf": "0.7", "eac_ppost": "1.9", "eac_dt": "0.12",
             "loop_n": "7", "loop_u1": "10", "loop_u2": "10", "loop_angle": "14", "loop_freq": "50",
             "lp_ubase": "110", "lp_sbase": "100", "lp_len": "30", "lp_r1": "0.05", "lp_x1": "0.40", "lp_c1": "0.012",
@@ -120,8 +123,7 @@ def test_tab_numeric_summary_covers_every_main_tab_and_param_subtab() -> None:
     cases = {
         "频率动态": "额定频率 f0 / Hz: 50",
         "机电振荡": "内电势 E'_q / pu: 1.12",
-        "静态电压稳定": "送端电压 U_g / pu: 1.0",
-        "线路自然功率与无功": "线路额定电压 U / kV: 500",
+        "电压无功分析": "送端电压 U_g / pu: 1.0",
         "暂稳评估": "冲击法 ΔPa / pu: 0.2",
         "小扰动分析（SMIB）": "模型配置: Kundur",
         "配电网合环分析": "连接点数量 N: 7",
@@ -132,6 +134,12 @@ def test_tab_numeric_summary_covers_every_main_tab_and_param_subtab() -> None:
         dummy.current_tab = tab_name
         summary = ApproximationToolGUI._tab_numeric_summary(dummy)
         assert expected in summary
+
+    dummy.current_tab = "电压无功分析"
+    dummy._vr_notebook.current = "线路自然功率与无功"
+    assert "线路额定电压 U / kV: 500" in ApproximationToolGUI._tab_numeric_summary(dummy)
+    dummy._vr_notebook.current = "AVC策略模拟"
+    assert "高压侧当前电压 / kV: 226" in ApproximationToolGUI._tab_numeric_summary(dummy)
 
     dummy.current_tab = "参数校核与标幺值"
     for subtab, expected in {

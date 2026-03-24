@@ -234,7 +234,6 @@ class ApproximationToolGUI(tk.Tk):
         self.freq_tab = ttk.Frame(notebook)
         self.osc_tab = ttk.Frame(notebook)
         self.volt_tab = ttk.Frame(notebook)
-        self.line_tab = ttk.Frame(notebook)
         self.impact_tab = ttk.Frame(notebook)
         self.smib_tab = ttk.Frame(notebook)
         self.loop_tab = ttk.Frame(notebook)
@@ -244,8 +243,7 @@ class ApproximationToolGUI(tk.Tk):
 
         notebook.add(self.freq_tab, text="频率动态")
         notebook.add(self.osc_tab, text="机电振荡")
-        notebook.add(self.volt_tab, text="静态电压稳定")
-        notebook.add(self.line_tab, text="线路自然功率与无功")
+        notebook.add(self.volt_tab, text="电压无功分析")
         notebook.add(self.impact_tab, text="暂稳评估")
         notebook.add(self.smib_tab, text="小扰动分析（SMIB）")
         notebook.add(self.loop_tab, text="配电网合环分析")
@@ -267,7 +265,6 @@ class ApproximationToolGUI(tk.Tk):
         self._build_frequency_tab()
         self._build_oscillation_tab()
         self._build_voltage_tab()
-        self._build_line_tab()
         self._build_impact_tab()
         self._build_smib_tab()
         self._build_loop_closure_tab()
@@ -433,11 +430,17 @@ class ApproximationToolGUI(tk.Tk):
         elif tab == "机电振荡":
             pairs = [("内电势 E'_q / pu", self.osc_eq), ("端电压 U / pu", self.osc_u), ("等值电抗 X_Σ / pu", self.osc_x), ("初始有功 P0 / pu", self.osc_p0),
                      ("惯性时间常数 T_j / s", self.osc_tj), ("同步频率 f0 / Hz", self.osc_f0)]
-        elif tab == "静态电压稳定":
-            pairs = [("送端电压 U_g / pu", self.volt_ug), ("总电抗 X_Σ / pu", self.volt_x), ("功率因数 cosφ", self.volt_pf), ("容量基准 S_base / MVA", self.volt_sbase)]
-        elif tab == "线路自然功率与无功":
-            pairs = [("线路额定电压 U / kV", self.line_u), ("波阻抗 Z_c / Ω", self.line_zc), ("单位长度电感 L", self.line_l), ("单位长度电容 C", self.line_c),
-                     ("实际传输有功 P / MW", self.line_p), ("单位长度充电功率 Q_N / (Mvar/km)", self.line_qn), ("线路长度 l / km", self.line_len)]
+        elif tab == "电压无功分析":
+            current = self._vr_notebook.tab(self._vr_notebook.select(), "text")
+            if current == "静态电压稳定":
+                pairs = [("送端电压 U_g / pu", self.volt_ug), ("总电抗 X_Σ / pu", self.volt_x), ("功率因数 cosφ", self.volt_pf), ("容量基准 S_base / MVA", self.volt_sbase)]
+            elif current == "线路自然功率与无功":
+                pairs = [("线路额定电压 U / kV", self.line_u), ("波阻抗 Z_c / Ω", self.line_zc), ("单位长度电感 L", self.line_l), ("单位长度电容 C", self.line_c),
+                         ("实际传输有功 P / MW", self.line_p), ("单位长度充电功率 Q_N / (Mvar/km)", self.line_qn), ("线路长度 l / km", self.line_len)]
+            else:
+                pairs = [("高压侧当前电压 / kV", self.avc_vh), ("有功潮流 P / MW", self.avc_p), ("无功潮流 Q / Mvar", self.avc_q), ("当前档位", self.avc_tap_now)]
+            header = f"电压无功子标签: {current}"
+            return header + "\n" + "\n".join(f"{name}: {entry.get().strip()}" for name, entry in pairs)
         elif tab == "暂稳评估":
             pairs = [("冲击法 ΔPa / pu", self.imp_dp), ("冲击法 Δt / s", self.imp_dt), ("冲击法 f_d / Hz", self.imp_fd), ("冲击法 Pmax_post / pu", self.imp_pmax),
                      ("冲击法 Pm / pu", self.imp_pcur), ("等面积法 Pm / pu", self.eac_pm), ("等面积法 Pmax_pre / pu", self.eac_ppre),
@@ -617,57 +620,82 @@ class ApproximationToolGUI(tk.Tk):
         self.calculate_oscillation()
 
     def _build_voltage_tab(self) -> None:
-        frame = ttk.Frame(self.volt_tab, padding=12)
+        self.volt_tab.columnconfigure(0, weight=1)
+        self.volt_tab.rowconfigure(0, weight=1)
+        nb = ttk.Notebook(self.volt_tab)
+        nb.grid(row=0, column=0, sticky="nsew")
+        self._vr_notebook = nb
+        self._vr_notebook.bind("<<NotebookTabChanged>>", self._on_ai_context_changed)
+
+        self._vr_static_tab = ttk.Frame(nb)
+        self._vr_line_tab = ttk.Frame(nb)
+        self._vr_avc_tab = ttk.Frame(nb)
+        nb.add(self._vr_static_tab, text="静态电压稳定")
+        nb.add(self._vr_line_tab, text="线路自然功率与无功")
+        nb.add(self._vr_avc_tab, text="AVC策略模拟")
+
+        # 子页1：静态电压稳定
+        frame = ttk.Frame(self._vr_static_tab, padding=12)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(0, weight=0)
         frame.columnconfigure(1, weight=1)
-
-        ttk.Label(frame, text="静态电压稳定极限快估", font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
-        )
-
+        ttk.Label(frame, text="静态电压稳定极限快估", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
         self.volt_ug = self._add_entry(frame, 1, "送端电压 U_g / pu", "1.0")
         self.volt_x = self._add_entry(frame, 2, "总电抗 X_Σ / pu", "0.32")
         self.volt_pf = self._add_entry(frame, 3, "功率因数 cosφ（默认滞后）", "0.95")
         self.volt_sbase = self._add_entry(frame, 4, "容量基准 S_base / MVA（可改）", "100")
-
-        ttk.Button(frame, text="计算", command=self.calculate_voltage).grid(
-            row=5, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
-        )
-
-        self.volt_result = ScrolledText(frame, width=85, height=24, wrap=tk.WORD)
+        ttk.Button(frame, text="计算", command=self.calculate_voltage).grid(row=5, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4))
+        self.volt_result = ScrolledText(frame, width=85, height=20, wrap=tk.WORD)
         self.volt_result.grid(row=6, column=0, columnspan=2, sticky="nsew", padx=4, pady=8)
         self.volt_result.configure(state="disabled")
 
-        self.calculate_voltage()
-
-    def _build_line_tab(self) -> None:
-        frame = ttk.Frame(self.line_tab, padding=12)
-        frame.pack(fill="both", expand=True)
-        frame.columnconfigure(0, weight=0)
-        frame.columnconfigure(1, weight=1)
-
-        ttk.Label(frame, text="长线路自然功率与无功行为快估", font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
-        )
-
-        self.line_u = self._add_entry(frame, 1, "线路额定电压 U / kV（线电压）", "500")
-        self.line_zc = self._add_entry(frame, 2, "波阻抗 Z_c / Ω（优先）", "250")
-        self.line_l = self._add_entry(frame, 3, "单位长度电感 L（可留空）", "")
-        self.line_c = self._add_entry(frame, 4, "单位长度电容 C（可留空）", "")
-        self.line_p = self._add_entry(frame, 5, "实际传输有功 P / MW", "700")
-        self.line_qn = self._add_entry(frame, 6, "单位长度充电功率 Q_N / (Mvar/km)", "1.2")
-        self.line_len = self._add_entry(frame, 7, "线路长度 l / km", "200")
-
-        ttk.Button(frame, text="计算", command=self.calculate_line).grid(
-            row=8, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
-        )
-
-        self.line_result = ScrolledText(frame, width=85, height=24, wrap=tk.WORD)
+        # 子页2：线路自然功率与无功
+        frame2 = ttk.Frame(self._vr_line_tab, padding=12)
+        frame2.pack(fill="both", expand=True)
+        frame2.columnconfigure(0, weight=0)
+        frame2.columnconfigure(1, weight=1)
+        ttk.Label(frame2, text="长线路自然功率与无功行为快估", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        self.line_u = self._add_entry(frame2, 1, "线路额定电压 U / kV（线电压）", "500")
+        self.line_zc = self._add_entry(frame2, 2, "波阻抗 Z_c / Ω（优先）", "250")
+        self.line_l = self._add_entry(frame2, 3, "单位长度电感 L（可留空）", "")
+        self.line_c = self._add_entry(frame2, 4, "单位长度电容 C（可留空）", "")
+        self.line_p = self._add_entry(frame2, 5, "实际传输有功 P / MW", "700")
+        self.line_qn = self._add_entry(frame2, 6, "单位长度充电功率 Q_N / (Mvar/km)", "1.2")
+        self.line_len = self._add_entry(frame2, 7, "线路长度 l / km", "200")
+        ttk.Button(frame2, text="计算", command=self.calculate_line).grid(row=8, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4))
+        self.line_result = ScrolledText(frame2, width=85, height=20, wrap=tk.WORD)
         self.line_result.grid(row=9, column=0, columnspan=2, sticky="nsew", padx=4, pady=8)
         self.line_result.configure(state="disabled")
 
+        # 子页3：AVC策略模拟
+        frame3 = ttk.Frame(self._vr_avc_tab, padding=12)
+        frame3.pack(fill="both", expand=True)
+        frame3.columnconfigure(0, weight=0)
+        frame3.columnconfigure(1, weight=1)
+        ttk.Label(frame3, text="AVC策略模拟（降压变压器+无功补偿）", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        self.avc_hv_kv = self._add_entry(frame3, 1, "高压侧额定电压 / kV", "220")
+        self.avc_lv_kv = self._add_entry(frame3, 2, "低压侧额定电压 / kV", "110")
+        self.avc_vh = self._add_entry(frame3, 3, "高压侧当前电压 / kV", "226")
+        self.avc_lv_min = self._add_entry(frame3, 4, "低压侧电压下限 / kV", "108")
+        self.avc_lv_max = self._add_entry(frame3, 5, "低压侧电压上限 / kV", "116")
+        self.avc_tap_min = self._add_entry(frame3, 6, "变压器最小档位", "-8")
+        self.avc_tap_max = self._add_entry(frame3, 7, "变压器最大档位", "8")
+        self.avc_tap_now = self._add_entry(frame3, 8, "变压器当前档位", "0")
+        self.avc_tap_step = self._add_entry(frame3, 9, "单档电压调节率 / %", "1.25")
+        self.avc_cap_num = self._add_entry(frame3, 10, "低压侧电容器组数量", "2")
+        self.avc_cap_each = self._add_entry(frame3, 11, "每组电容器容量 / Mvar", "10")
+        self.avc_rea_num = self._add_entry(frame3, 12, "低压侧电抗器组数量", "1")
+        self.avc_rea_each = self._add_entry(frame3, 13, "每组电抗器容量 / Mvar", "10")
+        self.avc_p = self._add_entry(frame3, 14, "高压侧有功潮流 P / MW", "160")
+        self.avc_q = self._add_entry(frame3, 15, "高压侧无功潮流 Q / Mvar（感性为正）", "45")
+        ttk.Button(frame3, text="执行9区策略模拟", command=self.calculate_avc_strategy).grid(row=16, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4))
+        self.avc_result = ScrolledText(frame3, width=85, height=16, wrap=tk.WORD)
+        self.avc_result.grid(row=17, column=0, columnspan=2, sticky="nsew", padx=4, pady=8)
+        self.avc_result.configure(state="disabled")
+
+        self.calculate_voltage()
         self.calculate_line()
+        self.calculate_avc_strategy()
 
     def _build_impact_tab(self) -> None:
         # ── 顶层布局：左侧两个输入框（上下排列）+ 右侧 P-δ 图 ──────────────
@@ -1174,6 +1202,122 @@ class ApproximationToolGUI(tk.Tk):
             )
             self._set_text(self.line_result, text)
 
+        except Exception as exc:
+            messagebox.showerror("计算错误", str(exc))
+
+    def calculate_avc_strategy(self) -> None:
+        """按简化9区策略给出档位+无功补偿调控建议与调后结果。"""
+        try:
+            hv_base = _safe_float(self.avc_hv_kv.get(), "高压额定电压")
+            lv_base = _safe_float(self.avc_lv_kv.get(), "低压额定电压")
+            vh = _safe_float(self.avc_vh.get(), "高压侧电压")
+            lv_min = _safe_float(self.avc_lv_min.get(), "低压侧下限")
+            lv_max = _safe_float(self.avc_lv_max.get(), "低压侧上限")
+            tap_min = int(round(_safe_float(self.avc_tap_min.get(), "最小档位")))
+            tap_max = int(round(_safe_float(self.avc_tap_max.get(), "最大档位")))
+            tap_now = int(round(_safe_float(self.avc_tap_now.get(), "当前档位")))
+            tap_step_pct = _safe_float(self.avc_tap_step.get(), "单档调节率")
+            cap_num = max(0, int(round(_safe_float(self.avc_cap_num.get(), "电容器组数量"))))
+            cap_each = max(0.0, _safe_float(self.avc_cap_each.get(), "每组电容容量"))
+            rea_num = max(0, int(round(_safe_float(self.avc_rea_num.get(), "电抗器组数量"))))
+            rea_each = max(0.0, _safe_float(self.avc_rea_each.get(), "每组电抗容量"))
+            p_mw = _safe_float(self.avc_p.get(), "有功潮流")
+            q_mvar = _safe_float(self.avc_q.get(), "无功潮流")
+
+            if tap_min > tap_max:
+                raise InputError("最小档位不能大于最大档位。")
+            tap_now = min(max(tap_now, tap_min), tap_max)
+            _validate_positive("高压侧额定电压", hv_base)
+            _validate_positive("低压侧额定电压", lv_base)
+            _validate_positive("单档调节率", tap_step_pct)
+
+            # 当前低压估算：基于变比与当前档位（正档升压）
+            ratio = lv_base / hv_base
+            tap_gain = 1.0 + tap_now * tap_step_pct / 100.0
+            lv_est = vh * ratio * tap_gain
+            lv_mid = 0.5 * (lv_min + lv_max)
+
+            q_cap_total = cap_num * cap_each
+            q_rea_total = rea_num * rea_each
+            q_after = q_mvar
+            tap_target = tap_now
+            action_steps: list[str] = []
+
+            # 9区策略（简化）：电压3区×无功3区
+            if lv_est < lv_min:
+                v_zone = "低压区"
+            elif lv_est > lv_max:
+                v_zone = "高压区"
+            else:
+                v_zone = "正常电压区"
+
+            q_abs_ref = max(10.0, 0.2 * max(abs(p_mw), 1.0))
+            if q_mvar > q_abs_ref:
+                q_zone = "感性无功偏大"
+            elif q_mvar < -q_abs_ref:
+                q_zone = "容性无功偏大"
+            else:
+                q_zone = "无功正常区"
+
+            if v_zone == "低压区":
+                if tap_target < tap_max:
+                    tap_target += 1
+                    action_steps.append("升高变压器档位 +1")
+                if q_after > 0 and q_cap_total > 0:
+                    dq = min(q_after, q_cap_total)
+                    q_after -= dq
+                    action_steps.append(f"投入电容器（最多 {q_cap_total:.2f} Mvar，实际补偿 {dq:.2f} Mvar）")
+            elif v_zone == "高压区":
+                if tap_target > tap_min:
+                    tap_target -= 1
+                    action_steps.append("降低变压器档位 -1")
+                if q_after < 0 and q_rea_total > 0:
+                    dq = min(-q_after, q_rea_total)
+                    q_after += dq
+                    action_steps.append(f"投入电抗器（最多 {q_rea_total:.2f} Mvar，实际吸收 {dq:.2f} Mvar）")
+            else:
+                if q_zone == "感性无功偏大" and q_cap_total > 0:
+                    dq = min(q_after, q_cap_total)
+                    q_after -= dq
+                    action_steps.append(f"正常电压下优先投电容器，补偿 {dq:.2f} Mvar")
+                elif q_zone == "容性无功偏大" and q_rea_total > 0:
+                    dq = min(-q_after, q_rea_total)
+                    q_after += dq
+                    action_steps.append(f"正常电压下优先投电抗器，吸收 {dq:.2f} Mvar")
+                else:
+                    action_steps.append("保持当前档位与无功补偿状态")
+
+            # 调后电压估算（简单线性灵敏度）
+            tap_delta = tap_target - tap_now
+            lv_after = vh * ratio * (1.0 + tap_target * tap_step_pct / 100.0)
+            q_comp = q_mvar - q_after
+            lv_after += 0.015 * q_comp
+
+            zone_map = {
+                ("低压区", "感性无功偏大"): "Ⅰ区（低压+感性）",
+                ("低压区", "无功正常区"): "Ⅱ区（低压+无功正常）",
+                ("低压区", "容性无功偏大"): "Ⅲ区（低压+容性）",
+                ("正常电压区", "感性无功偏大"): "Ⅳ区（电压正常+感性）",
+                ("正常电压区", "无功正常区"): "Ⅴ区（目标区）",
+                ("正常电压区", "容性无功偏大"): "Ⅵ区（电压正常+容性）",
+                ("高压区", "感性无功偏大"): "Ⅶ区（高压+感性）",
+                ("高压区", "无功正常区"): "Ⅷ区（高压+无功正常）",
+                ("高压区", "容性无功偏大"): "Ⅸ区（高压+容性）",
+            }
+            zone_name = zone_map[(v_zone, q_zone)]
+            result_text = (
+                f"══ AVC 9区策略模拟结果 ═══════════════════════\n"
+                f"当前分区：{zone_name}\n"
+                f"电压判据：{v_zone}（估算低压侧 Vlv={lv_est:.3f} kV，限值[{lv_min:.3f}, {lv_max:.3f}]）\n"
+                f"无功判据：{q_zone}（Q={q_mvar:.3f} Mvar，阈值±{q_abs_ref:.3f} Mvar）\n\n"
+                f"建议策略：\n  - " + "\n  - ".join(action_steps) + "\n\n"
+                f"调控后估算：\n"
+                f"  档位 {tap_now} → {tap_target}\n"
+                f"  无功 {q_mvar:.3f} → {q_after:.3f} Mvar\n"
+                f"  低压侧电压 {lv_est:.3f} → {lv_after:.3f} kV\n"
+                f"  无功补偿总动作量 = {q_comp:+.3f} Mvar\n"
+            )
+            self._set_text(self.avc_result, result_text)
         except Exception as exc:
             messagebox.showerror("计算错误", str(exc))
 
