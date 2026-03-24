@@ -1245,17 +1245,25 @@ class ApproximationToolGUI(tk.Tk):
         self.smib_config.grid(row=0, column=1, sticky="ew", padx=(0, 6))
         self.smib_config.bind("<<ComboboxSelected>>", self._on_smib_config_change)
         ttk.Button(topbar, text="恢复 Kundur 默认值", command=self._apply_smib_defaults).grid(row=0, column=2, padx=(0, 6))
-        ttk.Button(topbar, text="计算并绘图", command=self.calculate_smib).grid(row=0, column=3)
+        ttk.Button(topbar, text="切换到1型 AVR/PSS", command=self._goto_type1_avr_pss_page).grid(row=0, column=3, padx=(0, 6))
+        ttk.Button(topbar, text="计算并绘图", command=self.calculate_smib).grid(row=0, column=4)
+
+        self.smib_mode_hint_var = tk.StringVar(value="提示：主分析采用 Kundur 六阶小扰动模型；1型 AVR/PSS 用于参数校核。")
+        ttk.Label(left, textvariable=self.smib_mode_hint_var, style="Muted.TLabel", wraplength=560, justify="left").grid(
+            row=2, column=0, sticky="ew", pady=(0, 6)
+        )
 
         nb = ttk.Notebook(left)
         nb.grid(row=3, column=0, sticky="nsew")
         left.rowconfigure(3, weight=1)
+        self.smib_sub_notebook = nb
 
         page_case = ttk.Frame(nb, padding=8)
         page_machine = ttk.Frame(nb, padding=8)
         page_avr = ttk.Frame(nb, padding=8)
         page_pss = ttk.Frame(nb, padding=8)
         page_type1 = ttk.Frame(nb, padding=8)
+        self.smib_page_type1 = page_type1
         nb.add(page_case, text="工况与网络")
         nb.add(page_machine, text="六阶机组")
         nb.add(page_avr, text="AVR III")
@@ -1471,6 +1479,17 @@ class ApproximationToolGUI(tk.Tk):
         config_key = _SMIB_CONFIG_KEY.get(self.smib_config.get().strip(), "avr_pss")
         self._set_enabled(self.smib_avr_widgets, config_key in {"avr", "avr_pss"})
         self._set_enabled(self.smib_pss_widgets, config_key == "avr_pss")
+        label = self.smib_config.get().strip() or "未选择"
+        if hasattr(self, "smib_mode_hint_var"):
+            self.smib_mode_hint_var.set(
+                f"提示：当前主分析模型为「{label}」（Kundur 六阶线化）；如需 1型 AVR/PSS 请点击上方按钮切换到参数校核页。"
+            )
+
+    def _goto_type1_avr_pss_page(self) -> None:
+        if hasattr(self, "smib_sub_notebook") and hasattr(self, "smib_page_type1"):
+            self.smib_sub_notebook.select(self.smib_page_type1)
+        if hasattr(self, "smib_mode_hint_var"):
+            self.smib_mode_hint_var.set("提示：已切换到 1型 AVR/PSS 参数页，可直接输入参数并点击“计算1型 AVR/PSS 指标”。")
 
     def _read_smib_inputs(self) -> tuple[str, dict[str, float]]:
         label = self.smib_config.get().strip() or "六阶机组 + AVR + PSS"
