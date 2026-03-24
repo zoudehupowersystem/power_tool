@@ -1757,17 +1757,18 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_plot_voltage_tab.rowconfigure(0, weight=1)
 
         self.sc_fig = Figure(figsize=(10.6, 6.8), dpi=100)
-        self.sc_fig.subplots_adjust(top=0.84)
         gs = self.sc_fig.add_gridspec(2, 2, width_ratios=[1.7, 1.0], hspace=0.26, wspace=0.18)
         self.sc_ax_phase = self.sc_fig.add_subplot(gs[0, 0])
         self.sc_ax_seq = self.sc_fig.add_subplot(gs[1, 0])
-        self.sc_ax_i_vector = self.sc_fig.add_subplot(gs[:, 1], projection="polar")
+        gs_i_right = gs[:, 1].subgridspec(2, 1, height_ratios=[0.35, 1.0], hspace=0.04)
+        self.sc_ax_i_table = self.sc_fig.add_subplot(gs_i_right[0, 0])
+        self.sc_ax_i_vector = self.sc_fig.add_subplot(gs_i_right[1, 0], projection="polar")
         self.sc_ax_phase.set_ylabel("i_abc / A")
         self.sc_ax_seq.set_ylabel("i_012 / A")
         self.sc_ax_seq.set_xlabel("t / s")
         self.sc_ax_phase.grid(True, alpha=0.4)
         self.sc_ax_seq.grid(True, alpha=0.4)
-        self._draw_short_circuit_vector_axis(self.sc_ax_i_vector, {}, "故障点电流向量图")
+        self._draw_short_circuit_vector_axis(self.sc_ax_i_vector, {}, "故障点电流向量图", table_ax=self.sc_ax_i_table)
 
         self.sc_canvas = FigureCanvasTkAgg(self.sc_fig, master=self.sc_plot_current_tab)
         self.sc_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
@@ -1776,17 +1777,18 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_toolbar.grid(row=1, column=0, sticky="ew")
 
         self.sc_v_fig = Figure(figsize=(10.6, 6.8), dpi=100)
-        self.sc_v_fig.subplots_adjust(top=0.84)
         gs_v = self.sc_v_fig.add_gridspec(2, 2, width_ratios=[1.7, 1.0], hspace=0.26, wspace=0.18)
         self.sc_v_ax_phase = self.sc_v_fig.add_subplot(gs_v[0, 0])
         self.sc_v_ax_seq = self.sc_v_fig.add_subplot(gs_v[1, 0])
-        self.sc_v_ax_vector = self.sc_v_fig.add_subplot(gs_v[:, 1], projection="polar")
+        gs_v_right = gs_v[:, 1].subgridspec(2, 1, height_ratios=[0.35, 1.0], hspace=0.04)
+        self.sc_v_ax_table = self.sc_v_fig.add_subplot(gs_v_right[0, 0])
+        self.sc_v_ax_vector = self.sc_v_fig.add_subplot(gs_v_right[1, 0], projection="polar")
         self.sc_v_ax_phase.set_ylabel("u_abc / V")
         self.sc_v_ax_seq.set_ylabel("u_012 / V")
         self.sc_v_ax_seq.set_xlabel("t / s")
         self.sc_v_ax_phase.grid(True, alpha=0.4)
         self.sc_v_ax_seq.grid(True, alpha=0.4)
-        self._draw_short_circuit_vector_axis(self.sc_v_ax_vector, {}, "故障点电压向量图")
+        self._draw_short_circuit_vector_axis(self.sc_v_ax_vector, {}, "故障点电压向量图", table_ax=self.sc_v_ax_table)
         self.sc_v_canvas = FigureCanvasTkAgg(self.sc_v_fig, master=self.sc_plot_voltage_tab)
         self.sc_v_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
         self.sc_v_toolbar = NavigationToolbar2Tk(self.sc_v_canvas, self.sc_plot_voltage_tab, pack_toolbar=False)
@@ -1864,12 +1866,22 @@ class ApproximationToolGUI(tk.Tk):
             self.sc_fault_pos.configure(state="disabled")
             self.sc_fault_slider.set(100.0)
 
-    def _draw_short_circuit_vector_axis(self, ax, vectors: dict[str, complex], title: str, show_labels: bool = True) -> None:
+    def _draw_short_circuit_vector_axis(
+        self,
+        ax,
+        vectors: dict[str, complex],
+        title: str,
+        show_labels: bool = True,
+        table_ax=None,
+    ) -> None:
         ax.clear()
         ax.set_theta_zero_location("E")
         ax.set_theta_direction(1)
         ax.set_facecolor("#11161d")
-        ax.set_title(title, color="#f5f7fa", fontsize=10, pad=28)
+        ax.set_title(title, color="#f5f7fa", fontsize=10, pad=10)
+        if table_ax is not None:
+            table_ax.clear()
+            table_ax.axis("off")
         colors = {
             "A": "#7ec8ff", "B": "#ffe082", "C": "#ff8a80",
             "1": "#66bb6a", "2": "#42a5f5", "0": "#b388ff",
@@ -1912,24 +1924,39 @@ class ApproximationToolGUI(tk.Tk):
                         color=color, fontsize=7, ha="center", va="center")
         legend_order = [k for k in ("A", "B", "C", "1", "2", "0") if k in vectors]
         if legend_order:
-            info_lines = []
+            table_rows = []
             for k in legend_order:
                 val = vectors[k]
                 angle = math.degrees(math.atan2(val.imag, val.real))
-                info_lines.append(f"{k:>2}: {abs(val):>10.4g}  ∠ {angle:+7.2f}°")
-            ax.text(
-                0.02,
-                1.02,
-                "\n".join(info_lines),
-                transform=ax.transAxes,
-                ha="left",
-                va="bottom",
-                fontsize=8.2,
-                color="#1f2933",
-                family="monospace",
-                clip_on=False,
-                bbox=dict(boxstyle="round,pad=0.28", facecolor="#ffffff", edgecolor="#9aa5b1", alpha=0.96),
-            )
+                table_rows.append(
+                    [
+                        k,
+                        f"{abs(val):.4g}",
+                        f"{angle:+.2f}",
+                        f"{val.real:.4g}",
+                        f"{val.imag:.4g}",
+                    ]
+                )
+            if table_ax is not None:
+                table = table_ax.table(
+                    cellText=table_rows,
+                    colLabels=["名称", "幅值", "相角/°", "实部", "虚部"],
+                    loc="center",
+                    cellLoc="center",
+                )
+                table.auto_set_font_size(False)
+                table.set_fontsize(8.0)
+                table.scale(1.0, 1.16)
+                for (row, _col), cell in table.get_celld().items():
+                    cell.set_linewidth(0.8)
+                    cell.set_edgecolor("#aab4bf")
+                    if row == 0:
+                        cell.set_facecolor("#f3f6f9")
+                        cell.get_text().set_color("#1f2933")
+                        cell.get_text().set_fontweight("bold")
+                    else:
+                        cell.set_facecolor("#ffffff")
+                        cell.get_text().set_color("#1f2933")
             handles = [
                 Line2D([0], [0], color=colors[k], linestyle=linestyles[k], linewidth=2.2, label=k)
                 for k in legend_order
@@ -1937,9 +1964,9 @@ class ApproximationToolGUI(tk.Tk):
             ax.legend(
                 handles=handles,
                 loc="upper center",
-                bbox_to_anchor=(0.5, 1.17),
+                bbox_to_anchor=(0.5, 1.11),
                 ncol=min(3, len(handles)),
-                fontsize=8.5,
+                fontsize=8.0,
                 framealpha=0.45,
                 labelcolor="#d7dfe7",
             )
@@ -2094,11 +2121,23 @@ class ApproximationToolGUI(tk.Tk):
             if r.fault_type in asym_faults:
                 i_vectors = {"A": r.Ia_A, "B": r.Ib_A, "C": r.Ic_A, "1": r.I1_A, "2": r.I2_A, "0": r.I0_A}
                 v_vectors = {"A": r.Va_V, "B": r.Vb_V, "C": r.Vc_V, "1": r.V1_V, "2": r.V2_V, "0": r.V0_V}
-                self._draw_short_circuit_vector_axis(self.sc_ax_i_vector, i_vectors, "故障点电流向量图（ABC+012）", show_labels=show_labels)
-                self._draw_short_circuit_vector_axis(self.sc_v_ax_vector, v_vectors, "故障点电压向量图（ABC+012）", show_labels=show_labels)
+                self._draw_short_circuit_vector_axis(
+                    self.sc_ax_i_vector, i_vectors, "故障点电流向量图（ABC+012）",
+                    show_labels=show_labels, table_ax=self.sc_ax_i_table
+                )
+                self._draw_short_circuit_vector_axis(
+                    self.sc_v_ax_vector, v_vectors, "故障点电压向量图（ABC+012）",
+                    show_labels=show_labels, table_ax=self.sc_v_ax_table
+                )
             else:
-                self._draw_short_circuit_vector_axis(self.sc_ax_i_vector, {}, "故障点电流向量图（仅不对称故障绘制）", show_labels=show_labels)
-                self._draw_short_circuit_vector_axis(self.sc_v_ax_vector, {}, "故障点电压向量图（仅不对称故障绘制）", show_labels=show_labels)
+                self._draw_short_circuit_vector_axis(
+                    self.sc_ax_i_vector, {}, "故障点电流向量图（仅不对称故障绘制）",
+                    show_labels=show_labels, table_ax=self.sc_ax_i_table
+                )
+                self._draw_short_circuit_vector_axis(
+                    self.sc_v_ax_vector, {}, "故障点电压向量图（仅不对称故障绘制）",
+                    show_labels=show_labels, table_ax=self.sc_v_ax_table
+                )
 
             self.sc_fig.tight_layout()
             self.sc_canvas.draw()
