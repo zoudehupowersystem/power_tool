@@ -54,7 +54,7 @@ from power_tool_approximations import (
 from power_tool_faults import short_circuit_capacity
 
 
-from power_tool_stability import critical_cut_angle_approx, equal_area_criterion, impact_method
+from power_tool_stability import equal_area_criterion, impact_method
 
 
 from power_tool_smib import (
@@ -230,6 +230,78 @@ def _draw_pss_transfer_diagram(ax) -> None:
     _draw_signal_arrow(ax, 10.0, 1.45, 11.0, 1.45, "V_s")
     ax.text(0.2, 0.22, "当前内核模型含两级超前-滞后补偿与输出限幅；其输出 V_s 叠加到 AVR 求和点。", fontsize=9, ha="left")
 
+
+def _draw_type1_pss_diagram(ax) -> None:
+    ax.clear()
+    ax.set_xlim(0, 13.8)
+    ax.set_ylim(0, 4.2)
+    ax.axis("off")
+    ax.text(0.2, 3.85, "1型 PSS 传递函数框图", fontsize=11, fontweight="bold", ha="left")
+
+    _draw_block(ax, 1.4, 2.7, 1.0, 0.8, "Kq1")
+    _draw_block(ax, 1.4, 1.7, 1.0, 0.8, "Kq2")
+    _draw_block(ax, 1.4, 0.7, 1.0, 0.8, "Kq3")
+    _draw_sum_node(ax, 3.6, 2.0, r=0.28)
+    _draw_block(ax, 4.8, 1.55, 2.0, 0.9, "K + s\n──────\n1+sT_q")
+    _draw_block(ax, 7.4, 1.55, 2.1, 0.9, "1+sT_1e\n────────\n1+sT_2e")
+    _draw_block(ax, 10.1, 1.55, 2.1, 0.9, "1+sT_3e\n────────\n1+sT_4e")
+
+    _draw_signal_arrow(ax, 0.2, 3.1, 1.4, 3.1, "ω−ω0")
+    _draw_signal_arrow(ax, 0.2, 2.1, 1.4, 2.1, "Pe−Pe0")
+    _draw_signal_arrow(ax, 0.2, 1.1, 1.4, 1.1, "Vt−Vt0")
+    _draw_signal_arrow(ax, 2.4, 3.1, 3.35, 2.2)
+    _draw_signal_arrow(ax, 2.4, 2.1, 3.32, 2.0)
+    _draw_signal_arrow(ax, 2.4, 1.1, 3.35, 1.8)
+    _draw_signal_arrow(ax, 3.88, 2.0, 4.8, 2.0)
+    _draw_signal_arrow(ax, 6.8, 2.0, 7.4, 2.0)
+    _draw_signal_arrow(ax, 9.5, 2.0, 10.1, 2.0)
+    _draw_signal_arrow(ax, 12.2, 2.0, 13.5, 2.0, "V_s")
+    ax.text(12.55, 2.58, "V_smax", fontsize=9)
+    ax.text(12.55, 1.38, "V_smin", fontsize=9)
+
+
+def _draw_type1_avr_diagram(ax) -> None:
+    ax.clear()
+    ax.set_xlim(0, 15.0)
+    ax.set_ylim(0, 4.6)
+    ax.axis("off")
+    ax.text(0.2, 4.15, "1型 AVR 传递函数框图", fontsize=11, fontweight="bold", ha="left")
+
+    _draw_sum_node(ax, 1.2, 2.7, r=0.26)
+    _draw_block(ax, 2.1, 2.2, 1.6, 1.0, "K_r\n──────\n1+sT_r")
+    _draw_sum_node(ax, 4.6, 2.7, r=0.26)
+    _draw_block(ax, 5.5, 2.2, 1.8, 1.0, "K_a\n──────\n1+sT_a")
+    _draw_sum_node(ax, 8.2, 2.7, r=0.26)
+    _draw_block(ax, 9.0, 2.2, 1.5, 1.0, "1\n──────\n1+sT_e")
+    _draw_block(ax, 6.3, 0.45, 1.8, 1.0, "sK_f\n──────\n1+sT_f")
+
+    _draw_signal_arrow(ax, 0.2, 2.7, 0.95, 2.7, "V_t")
+    _draw_signal_arrow(ax, 1.46, 2.7, 2.1, 2.7)
+    _draw_signal_arrow(ax, 3.7, 2.7, 4.35, 2.7)
+    _draw_signal_arrow(ax, 4.86, 2.7, 5.5, 2.7)
+    _draw_signal_arrow(ax, 7.3, 2.7, 7.95, 2.7)
+    _draw_signal_arrow(ax, 8.46, 2.7, 9.0, 2.7)
+    _draw_signal_arrow(ax, 10.5, 2.7, 12.0, 2.7, "E_fd")
+    _draw_signal_arrow(ax, 12.0, 2.7, 12.0, 0.95)
+    _draw_signal_arrow(ax, 12.0, 0.95, 8.1, 0.95)
+    _draw_signal_arrow(ax, 8.1, 0.95, 8.1, 2.44, "V_F", dy=0.14)
+
+    ax.annotate("", xy=(1.2, 2.96), xytext=(1.2, 3.7), arrowprops=dict(arrowstyle="->", linewidth=1.0))
+    ax.text(1.35, 3.46, "V_t0", fontsize=9, va="center")
+    ax.text(0.86, 2.66, "−", fontsize=12)
+
+    ax.annotate("", xy=(4.6, 2.96), xytext=(4.6, 3.7), arrowprops=dict(arrowstyle="->", linewidth=1.0))
+    ax.text(4.72, 3.46, "V_s", fontsize=9, va="center")
+    ax.annotate("", xy=(4.6, 2.44), xytext=(4.6, 1.75), arrowprops=dict(arrowstyle="->", linewidth=1.0))
+    ax.text(4.72, 1.9, "V_F", fontsize=9, va="center")
+    ax.text(4.2, 2.83, "+", fontsize=12)
+    ax.text(4.2, 2.36, "−", fontsize=12)
+
+    ax.annotate("", xy=(8.2, 2.96), xytext=(8.2, 3.7), arrowprops=dict(arrowstyle="->", linewidth=1.0))
+    ax.text(8.35, 3.46, "E_fd0", fontsize=9, va="center")
+    ax.text(7.85, 2.66, "+", fontsize=12)
+    ax.text(11.05, 3.0, "E_fdmax", fontsize=9)
+    ax.text(11.05, 2.35, "E_fdmin", fontsize=9)
 
 class ApproximationToolGUI(tk.Tk):
     def __init__(self) -> None:
@@ -637,7 +709,7 @@ class ApproximationToolGUI(tk.Tk):
             return header + "\n" + "\n".join(f"{name}: {entry.get().strip()}" for name, entry in pairs)
         elif tab == "暂稳评估":
             pairs = [("冲击法 ΔPa / pu", self.imp_dp), ("冲击法 Δt / s", self.imp_dt), ("冲击法 f_d / Hz", self.imp_fd),
-                     ("冲击法 Pm / pu", self.imp_pcur), ("等面积法 Pm / pu", self.eac_pm), ("等面积法 Pmax_pre / pu", self.eac_ppre),
+                     ("等面积法 Pm / pu", self.eac_pm), ("等面积法 Pmax_pre / pu", self.eac_ppre),
                      ("等面积法 Pmax_fault / pu", self.eac_pf), ("等面积法 Pmax_post / pu", self.eac_ppost), ("等面积法 Δt / s", self.eac_dt)]
         elif tab == "小扰动分析":
             lines = [f"模型配置: {self.smib_config.get().strip()}"]
@@ -825,14 +897,6 @@ class ApproximationToolGUI(tk.Tk):
         state = "normal" if agc_on else "disabled"
         for ent in (self.freq_beta, self.freq_kp_agc, self.freq_ki_agc, self.freq_tace, self.freq_tcmd, self.freq_p2max, self.freq_deadband):
             ent.configure(state=state)
-        if agc_on:
-            try:
-                t_val = float(self.freq_tend.get().strip() or "0")
-            except Exception:
-                t_val = 0.0
-            if t_val < 120.0:
-                self.freq_tend.delete(0, tk.END)
-                self.freq_tend.insert(0, "300")
 
     def _build_oscillation_tab(self) -> None:
         self.osc_tab.columnconfigure(0, weight=1)
@@ -1081,28 +1145,12 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Label(left, text="暂稳评估", style="PageTitle.TLabel").pack(anchor="w")
         ttk.Label(
             left,
-            text="左侧统一收纳冲击法与等面积法。上框侧重切除时间与振荡指标，下框侧重 P-δ 曲线及临界清除判断。",
+            text="左侧统一收纳等面积法与冲击法。上框侧重 P-δ 曲线及临界清除判断，下框用于快估功率振荡幅度。",
             style="Muted.TLabel", justify="left", wraplength=430,
         ).pack(fill="x", pady=(4, 10))
 
-        imp_frame = ttk.LabelFrame(left, text="冲击法快估", style="Card.TLabelframe", padding=10)
-        imp_frame.pack(fill="x", expand=False, pady=(0, 10))
-        imp_frame.columnconfigure(1, weight=1)
-        self.imp_dp   = self._add_entry(imp_frame, 0, "故障加速功率 ΔPa / pu", "0.9")
-        self.imp_dt   = self._add_entry(imp_frame, 1, "故障切除时间 Δt / s", "0.12")
-        self.imp_fd   = self._add_entry(imp_frame, 2, "故障后振荡频率 f_d / Hz", "1.106")
-        self.imp_pcur = self._add_entry(imp_frame, 3, "当前传输功率 Pm / pu（用于振幅对比 & 临界切除）", "0.90")
-        self.imp_tj   = self._add_entry(imp_frame, 4, "惯性时间常数 T_j / s（临界切除用）", "9")
-        self.imp_f0   = self._add_entry(imp_frame, 5, "额定频率 f0 / Hz（临界切除用）", "50")
-        ttk.Button(imp_frame, text="计算冲击法", command=self.calculate_impact, style="Accent.TButton").grid(
-            row=6, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
-        )
-        self.imp_result = ScrolledText(imp_frame, width=50, height=11, wrap=tk.WORD)
-        self.imp_result.grid(row=7, column=0, columnspan=2, sticky="nsew", padx=2, pady=4)
-        self.imp_result.configure(state="disabled")
-
         eac_frame = ttk.LabelFrame(left, text="等面积法（单机无穷大）", style="Card.TLabelframe", padding=10)
-        eac_frame.pack(fill="both", expand=True)
+        eac_frame.pack(fill="both", expand=True, pady=(0, 10))
         eac_frame.columnconfigure(1, weight=1)
         eac_frame.rowconfigure(8, weight=1)
         self.eac_pm    = self._add_entry(eac_frame, 0, "机械功率 Pm / pu", "0.90")
@@ -1118,6 +1166,19 @@ class ApproximationToolGUI(tk.Tk):
         self.eac_result = ScrolledText(eac_frame, width=50, height=13, wrap=tk.WORD)
         self.eac_result.grid(row=8, column=0, columnspan=2, sticky="nsew", padx=2, pady=4)
         self.eac_result.configure(state="disabled")
+
+        imp_frame = ttk.LabelFrame(left, text="冲击法快估", style="Card.TLabelframe", padding=10)
+        imp_frame.pack(fill="x", expand=False)
+        imp_frame.columnconfigure(1, weight=1)
+        self.imp_dp   = self._add_entry(imp_frame, 0, "故障加速功率 ΔPa / pu", "0.9")
+        self.imp_dt   = self._add_entry(imp_frame, 1, "故障切除时间 Δt / s", "0.12")
+        self.imp_fd   = self._add_entry(imp_frame, 2, "故障后振荡频率 f_d / Hz", "1.106")
+        ttk.Button(imp_frame, text="计算冲击法", command=self.calculate_impact, style="Accent.TButton").grid(
+            row=3, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
+        )
+        self.imp_result = ScrolledText(imp_frame, width=50, height=8, wrap=tk.WORD)
+        self.imp_result.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=2, pady=4)
+        self.imp_result.configure(state="disabled")
 
         ttk.Label(right, text="功角曲线（等面积法）", style="PageTitle.TLabel").grid(
             row=0, column=0, sticky="w"
@@ -1176,26 +1237,48 @@ class ApproximationToolGUI(tk.Tk):
         self.smib_config.grid(row=0, column=1, sticky="ew", padx=(0, 6))
         self.smib_config.bind("<<ComboboxSelected>>", self._on_smib_config_change)
         ttk.Button(topbar, text="恢复 Kundur 默认值", command=self._apply_smib_defaults).grid(row=0, column=2, padx=(0, 6))
-        ttk.Button(topbar, text="计算并绘图", command=self.calculate_smib).grid(row=0, column=3)
+        ttk.Button(topbar, text="切换到1型 AVR/PSS", command=self._goto_type1_avr_pss_page).grid(row=0, column=3, padx=(0, 6))
+        ttk.Button(topbar, text="计算并绘图", command=self.calculate_smib).grid(row=0, column=4)
+
+        self.smib_mode_hint_var = tk.StringVar(value="提示：主分析采用 Kundur 六阶小扰动模型；1型 AVR/PSS 用于参数校核。")
+        ttk.Label(left, textvariable=self.smib_mode_hint_var, style="Muted.TLabel", wraplength=560, justify="left").grid(
+            row=3, column=0, sticky="ew", pady=(0, 6)
+        )
 
         nb = ttk.Notebook(left)
-        nb.grid(row=3, column=0, sticky="nsew")
-        left.rowconfigure(3, weight=1)
+        nb.grid(row=4, column=0, sticky="nsew")
+        left.rowconfigure(4, weight=1)
+        self.smib_sub_notebook = nb
 
         page_case = ttk.Frame(nb, padding=8)
         page_machine = ttk.Frame(nb, padding=8)
         page_avr = ttk.Frame(nb, padding=8)
         page_pss = ttk.Frame(nb, padding=8)
-        page_type1 = ttk.Frame(nb, padding=8)
+        page_type1 = ttk.Frame(nb, padding=0)
+        page_type1.columnconfigure(0, weight=1)
+        page_type1.rowconfigure(0, weight=1)
+        self.smib_page_type1 = page_type1
         nb.add(page_case, text="工况与网络")
         nb.add(page_machine, text="六阶机组")
         nb.add(page_avr, text="AVR III")
         nb.add(page_pss, text="PSS II")
         nb.add(page_type1, text="1型 AVR/PSS")
 
-        for page in (page_case, page_machine, page_avr, page_pss, page_type1):
+        for page in (page_case, page_machine, page_avr, page_pss):
             page.columnconfigure(1, weight=1)
             page.columnconfigure(3, weight=1)
+
+        page_type1_canvas = tk.Canvas(page_type1, highlightthickness=0)
+        page_type1_scroll = ttk.Scrollbar(page_type1, orient="vertical", command=page_type1_canvas.yview)
+        page_type1_body = ttk.Frame(page_type1_canvas, padding=8)
+        page_type1_body.columnconfigure(1, weight=1)
+        page_type1_body.columnconfigure(3, weight=1)
+        page_type1_canvas.configure(yscrollcommand=page_type1_scroll.set)
+        page_type1_canvas.grid(row=0, column=0, sticky="nsew")
+        page_type1_scroll.grid(row=0, column=1, sticky="ns")
+        page_type1_window = page_type1_canvas.create_window((0, 0), window=page_type1_body, anchor="nw")
+        page_type1_body.bind("<Configure>", lambda _e: page_type1_canvas.configure(scrollregion=page_type1_canvas.bbox("all")))
+        page_type1_canvas.bind("<Configure>", lambda e: page_type1_canvas.itemconfigure(page_type1_window, width=e.width))
 
         self.smib_entries: dict[str, ttk.Entry] = {}
         self.smib_avr_widgets: list[tk.Widget] = []
@@ -1270,7 +1353,7 @@ class ApproximationToolGUI(tk.Tk):
 
         self.smib_type1_entries: dict[str, ttk.Entry] = {}
         def add_type1(key: str, row: int, label: str, default: str, column: int = 0) -> None:
-            self.smib_type1_entries[key] = self._add_entry(page_type1, row, label, default, column=column, width=11)
+            self.smib_type1_entries[key] = self._add_entry(page_type1_body, row, label, default, column=column, width=11)
 
         add_type1("Kr", 0, "Kr", "1.0", 0); add_type1("Tr", 0, "Tr / s", "0.02", 2)
         add_type1("Ka", 1, "Ka", "200", 0); add_type1("Ta", 1, "Ta / s", "0.05", 2)
@@ -1283,11 +1366,32 @@ class ApproximationToolGUI(tk.Tk):
         add_type1("T2e", 8, "T2e / s", "0.03", 0); add_type1("T3e", 8, "T3e / s", "0.15", 2)
         add_type1("T4e", 9, "T4e / s", "0.03", 0); add_type1("Vsmax", 9, "Vsmax / pu", "0.2", 2)
         add_type1("Vsmin", 10, "Vsmin / pu", "-0.2", 0); add_type1("f_eval", 10, "评估频率 / Hz", "1.0", 2)
-        ttk.Button(page_type1, text="计算1型 AVR/PSS 指标", command=self.calculate_type1_avr_pss).grid(
-            row=11, column=0, columnspan=4, sticky="ew", padx=4, pady=(8, 4)
+
+        ttk.Label(
+            page_type1_body,
+            text="传递函数框图（参考教材 1型 AVR/PSS）：",
+            style="Muted.TLabel",
+        ).grid(row=11, column=0, columnspan=4, sticky="w", padx=4, pady=(8, 2))
+
+        self.smib_type1_pss_fig = Figure(figsize=(6.4, 2.6), dpi=100)
+        self.smib_type1_pss_ax = self.smib_type1_pss_fig.add_subplot(111)
+        _draw_type1_pss_diagram(self.smib_type1_pss_ax)
+        self.smib_type1_pss_canvas = FigureCanvasTkAgg(self.smib_type1_pss_fig, master=page_type1_body)
+        self.smib_type1_pss_canvas.get_tk_widget().grid(row=12, column=0, columnspan=4, sticky="nsew", padx=4, pady=(0, 2))
+        self.smib_type1_pss_canvas.draw()
+
+        self.smib_type1_avr_fig = Figure(figsize=(6.4, 2.8), dpi=100)
+        self.smib_type1_avr_ax = self.smib_type1_avr_fig.add_subplot(111)
+        _draw_type1_avr_diagram(self.smib_type1_avr_ax)
+        self.smib_type1_avr_canvas = FigureCanvasTkAgg(self.smib_type1_avr_fig, master=page_type1_body)
+        self.smib_type1_avr_canvas.get_tk_widget().grid(row=13, column=0, columnspan=4, sticky="nsew", padx=4, pady=(0, 4))
+        self.smib_type1_avr_canvas.draw()
+
+        ttk.Button(page_type1_body, text="计算1型 AVR/PSS 指标", command=self.calculate_type1_avr_pss).grid(
+            row=14, column=0, columnspan=4, sticky="ew", padx=4, pady=(4, 4)
         )
-        self.smib_type1_result = ScrolledText(page_type1, width=56, height=8, wrap=tk.WORD)
-        self.smib_type1_result.grid(row=12, column=0, columnspan=4, sticky="nsew", padx=4, pady=(2, 2))
+        self.smib_type1_result = ScrolledText(page_type1_body, width=56, height=8, wrap=tk.WORD)
+        self.smib_type1_result.grid(row=15, column=0, columnspan=4, sticky="nsew", padx=4, pady=(2, 2))
         self.smib_type1_result.configure(state="disabled")
 
         ttk.Label(right, text="模态结果", style="Card.TLabel",
@@ -1380,6 +1484,17 @@ class ApproximationToolGUI(tk.Tk):
         config_key = _SMIB_CONFIG_KEY.get(self.smib_config.get().strip(), "avr_pss")
         self._set_enabled(self.smib_avr_widgets, config_key in {"avr", "avr_pss"})
         self._set_enabled(self.smib_pss_widgets, config_key == "avr_pss")
+        label = self.smib_config.get().strip() or "未选择"
+        if hasattr(self, "smib_mode_hint_var"):
+            self.smib_mode_hint_var.set(
+                f"提示：当前主分析模型为「{label}」（Kundur 六阶线化）；如需 1型 AVR/PSS 请点击上方按钮切换到参数校核页。"
+            )
+
+    def _goto_type1_avr_pss_page(self) -> None:
+        if hasattr(self, "smib_sub_notebook") and hasattr(self, "smib_page_type1"):
+            self.smib_sub_notebook.select(self.smib_page_type1)
+        if hasattr(self, "smib_mode_hint_var"):
+            self.smib_mode_hint_var.set("提示：已切换到 1型 AVR/PSS 参数页，可直接输入参数并点击“计算1型 AVR/PSS 指标”。")
 
     def _read_smib_inputs(self) -> tuple[str, dict[str, float]]:
         label = self.smib_config.get().strip() or "六阶机组 + AVR + PSS"
@@ -1820,51 +1935,15 @@ class ApproximationToolGUI(tk.Tk):
             delta_p = _safe_float(self.imp_dp.get(), "ΔPa")
             delta_t = _safe_float(self.imp_dt.get(), "Δt")
             f_d     = _safe_float(self.imp_fd.get(), "f_d")
-            pcur_text = self.imp_pcur.get().strip()
-            pcur = _safe_float(pcur_text, "Pm") if pcur_text else None
-            tj_text = self.imp_tj.get().strip()
-            f0_text = self.imp_f0.get().strip()
 
-            summary = impact_method(delta_p, delta_t, f_d, pcur)
+            summary = impact_method(delta_p, delta_t, f_d)
 
             text = (
                 f"══ 冲击法：功率振荡幅度快估 ═════════════\n"
                 f"冲击量 Dp = {summary.Dp_pu:.6f} pu\n"
                 f"估算第一摆功率振荡幅值 ΔP_osc ≈ {summary.osc_amp_pu:.6f} pu\n"
+                f"\n说明：\n{summary.notes}"
             )
-            if summary.margin_pu is not None:
-                text += f"与当前功率幅值对比量 = {summary.margin_pu:.6f} pu\n"
-            text += f"结论：{summary.status}\n"
-
-            # ── 临界切除角快速估算 ────────────────────────────────────────
-            if pcur_text and tj_text and f0_text:
-                try:
-                    Pm_val  = _safe_float(pcur_text, "Pm")
-                    Tj_val  = _safe_float(tj_text,   "T_j")
-                    f0_val  = _safe_float(f0_text,   "f0")
-                    pmax_post = _safe_float(self.eac_ppost.get(), "Pmax_post")
-                    ccs = critical_cut_angle_approx(Pm_val, pmax_post, Tj_val, f0_val, delta_t)
-                    text += (
-                        f"\n══ 临界切除角快速估算（§7.6） ══════\n"
-                        f"初始平衡角   δ0  = {ccs.delta0_deg:.3f}°\n"
-                        f"临界切除角   δcr = {ccs.delta_cr_deg:.3f}°\n"
-                        f"临界切除时间 tcr = {ccs.t_cr_s:.4f} s\n"
-                        f"当前切除时间 Δt  = {delta_t:.4f} s  "
-                        f"({'< tcr OK' if delta_t < ccs.t_cr_s else '>= tcr NG'})\n"
-                    )
-                    if ccs.margin_pct is not None:
-                        text += f"时间裕量 = {ccs.margin_pct:+.1f} %\n"
-                    text += f"结论：{ccs.status}\n"
-                    text += f"\n说明（冲击法）：\n{summary.notes}\n"
-                    text += f"\n说明（临界切除）：\n{ccs.notes}"
-                except InputError as ie:
-                    text += f"\n临界切除角估算：{ie}\n"
-                    text += f"\n说明：\n{summary.notes}"
-            else:
-                text += (
-                    "\n（如需临界切除角快速估算，请同时填写 Pm、T_j 和 f0）\n"
-                    f"\n说明：\n{summary.notes}"
-                )
 
             self._set_text(self.imp_result, text)
 
