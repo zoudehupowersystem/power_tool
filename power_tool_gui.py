@@ -1872,6 +1872,10 @@ class ApproximationToolGUI(tk.Tk):
             "A": "#7ec8ff", "B": "#ffe082", "C": "#ff8a80",
             "1": "#66bb6a", "2": "#42a5f5", "0": "#b388ff",
         }
+        linestyles = {
+            "A": "-", "B": "-", "C": "-",
+            "1": "--", "2": "--", "0": "--",
+        }
         if not vectors:
             ax.set_ylim(0.0, 1.0)
             ax.grid(color="#5f6f7e", linestyle="-", linewidth=0.8, alpha=0.45)
@@ -1893,16 +1897,32 @@ class ApproximationToolGUI(tk.Tk):
             theta = math.atan2(val.imag, val.real)
             radius = abs(val)
             color = colors.get(name, "#ffffff")
+            linestyle = linestyles.get(name, "-")
             ax.annotate(
                 "",
                 xy=(theta, radius),
                 xytext=(theta, 0.0),
-                arrowprops=dict(arrowstyle="-|>", color=color, linewidth=2.2, linestyle="-", shrinkA=0, shrinkB=0),
+                arrowprops=dict(arrowstyle="-|>", color=color, linewidth=2.2, linestyle=linestyle, shrinkA=0, shrinkB=0),
             )
             if show_labels:
                 ang = math.degrees(theta)
                 ax.text(theta, min(radial_max, radius * 1.07), f"{name}\n{radius:.3g}∠{ang:.1f}°",
                         color=color, fontsize=7, ha="center", va="center")
+        legend_order = [k for k in ("A", "B", "C", "1", "2", "0") if k in vectors]
+        if legend_order:
+            handles = [
+                Line2D([0], [0], color=colors[k], linestyle=linestyles[k], linewidth=2.2, label=k)
+                for k in legend_order
+            ]
+            ax.legend(
+                handles=handles,
+                loc="upper center",
+                bbox_to_anchor=(0.5, 1.22),
+                ncol=min(3, len(handles)),
+                fontsize=8,
+                framealpha=0.35,
+                labelcolor="#d7dfe7",
+            )
 
     def calculate_short_circuit(self) -> None:
         try:
