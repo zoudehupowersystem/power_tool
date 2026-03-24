@@ -1910,6 +1910,26 @@ class ApproximationToolGUI(tk.Tk):
                         color=color, fontsize=7, ha="center", va="center")
         legend_order = [k for k in ("A", "B", "C", "1", "2", "0") if k in vectors]
         if legend_order:
+            table_rows = []
+            for k in legend_order:
+                val = vectors[k]
+                table_rows.append([k, f"{abs(val):.4g}", f"{math.degrees(math.atan2(val.imag, val.real)):+.2f}"])
+            table_ax = ax.inset_axes([0.01, 1.23, 0.98, 0.28], transform=ax.transAxes)
+            table_ax.axis("off")
+            table = table_ax.table(
+                cellText=table_rows,
+                colLabels=["向量", "幅值", "角度(°)"],
+                loc="center",
+                cellLoc="center",
+            )
+            table.auto_set_font_size(False)
+            table.set_fontsize(7)
+            table.scale(1.0, 0.9)
+            for (_row, _col), cell in table.get_celld().items():
+                cell.set_edgecolor("#7c8794")
+                cell.set_linewidth(0.6)
+                cell.set_facecolor("#11161d")
+                cell.get_text().set_color("#d7dfe7")
             handles = [
                 Line2D([0], [0], color=colors[k], linestyle=linestyles[k], linewidth=2.2, label=k)
                 for k in legend_order
@@ -1917,7 +1937,7 @@ class ApproximationToolGUI(tk.Tk):
             ax.legend(
                 handles=handles,
                 loc="upper center",
-                bbox_to_anchor=(0.5, 1.22),
+                bbox_to_anchor=(0.5, 1.10),
                 ncol=min(3, len(handles)),
                 fontsize=8,
                 framealpha=0.35,
