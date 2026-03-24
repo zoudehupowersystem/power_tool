@@ -897,14 +897,6 @@ class ApproximationToolGUI(tk.Tk):
         state = "normal" if agc_on else "disabled"
         for ent in (self.freq_beta, self.freq_kp_agc, self.freq_ki_agc, self.freq_tace, self.freq_tcmd, self.freq_p2max, self.freq_deadband):
             ent.configure(state=state)
-        if agc_on:
-            try:
-                t_val = float(self.freq_tend.get().strip() or "0")
-            except Exception:
-                t_val = 0.0
-            if t_val < 120.0:
-                self.freq_tend.delete(0, tk.END)
-                self.freq_tend.insert(0, "300")
 
     def _build_oscillation_tab(self) -> None:
         self.osc_tab.columnconfigure(0, weight=1)
@@ -1250,19 +1242,21 @@ class ApproximationToolGUI(tk.Tk):
 
         self.smib_mode_hint_var = tk.StringVar(value="提示：主分析采用 Kundur 六阶小扰动模型；1型 AVR/PSS 用于参数校核。")
         ttk.Label(left, textvariable=self.smib_mode_hint_var, style="Muted.TLabel", wraplength=560, justify="left").grid(
-            row=2, column=0, sticky="ew", pady=(0, 6)
+            row=3, column=0, sticky="ew", pady=(0, 6)
         )
 
         nb = ttk.Notebook(left)
-        nb.grid(row=3, column=0, sticky="nsew")
-        left.rowconfigure(3, weight=1)
+        nb.grid(row=4, column=0, sticky="nsew")
+        left.rowconfigure(4, weight=1)
         self.smib_sub_notebook = nb
 
         page_case = ttk.Frame(nb, padding=8)
         page_machine = ttk.Frame(nb, padding=8)
         page_avr = ttk.Frame(nb, padding=8)
         page_pss = ttk.Frame(nb, padding=8)
-        page_type1 = ttk.Frame(nb, padding=8)
+        page_type1 = ttk.Frame(nb, padding=0)
+        page_type1.columnconfigure(0, weight=1)
+        page_type1.rowconfigure(0, weight=1)
         self.smib_page_type1 = page_type1
         nb.add(page_case, text="工况与网络")
         nb.add(page_machine, text="六阶机组")
@@ -1270,9 +1264,21 @@ class ApproximationToolGUI(tk.Tk):
         nb.add(page_pss, text="PSS II")
         nb.add(page_type1, text="1型 AVR/PSS")
 
-        for page in (page_case, page_machine, page_avr, page_pss, page_type1):
+        for page in (page_case, page_machine, page_avr, page_pss):
             page.columnconfigure(1, weight=1)
             page.columnconfigure(3, weight=1)
+
+        page_type1_canvas = tk.Canvas(page_type1, highlightthickness=0)
+        page_type1_scroll = ttk.Scrollbar(page_type1, orient="vertical", command=page_type1_canvas.yview)
+        page_type1_body = ttk.Frame(page_type1_canvas, padding=8)
+        page_type1_body.columnconfigure(1, weight=1)
+        page_type1_body.columnconfigure(3, weight=1)
+        page_type1_canvas.configure(yscrollcommand=page_type1_scroll.set)
+        page_type1_canvas.grid(row=0, column=0, sticky="nsew")
+        page_type1_scroll.grid(row=0, column=1, sticky="ns")
+        page_type1_window = page_type1_canvas.create_window((0, 0), window=page_type1_body, anchor="nw")
+        page_type1_body.bind("<Configure>", lambda _e: page_type1_canvas.configure(scrollregion=page_type1_canvas.bbox("all")))
+        page_type1_canvas.bind("<Configure>", lambda e: page_type1_canvas.itemconfigure(page_type1_window, width=e.width))
 
         self.smib_entries: dict[str, ttk.Entry] = {}
         self.smib_avr_widgets: list[tk.Widget] = []
@@ -1347,7 +1353,7 @@ class ApproximationToolGUI(tk.Tk):
 
         self.smib_type1_entries: dict[str, ttk.Entry] = {}
         def add_type1(key: str, row: int, label: str, default: str, column: int = 0) -> None:
-            self.smib_type1_entries[key] = self._add_entry(page_type1, row, label, default, column=column, width=11)
+            self.smib_type1_entries[key] = self._add_entry(page_type1_body, row, label, default, column=column, width=11)
 
         add_type1("Kr", 0, "Kr", "1.0", 0); add_type1("Tr", 0, "Tr / s", "0.02", 2)
         add_type1("Ka", 1, "Ka", "200", 0); add_type1("Ta", 1, "Ta / s", "0.05", 2)
@@ -1362,30 +1368,29 @@ class ApproximationToolGUI(tk.Tk):
         add_type1("Vsmin", 10, "Vsmin / pu", "-0.2", 0); add_type1("f_eval", 10, "评估频率 / Hz", "1.0", 2)
 
         ttk.Label(
-            page_type1,
+            page_type1_body,
             text="传递函数框图（参考教材 1型 AVR/PSS）：",
             style="Muted.TLabel",
         ).grid(row=11, column=0, columnspan=4, sticky="w", padx=4, pady=(8, 2))
 
-        page_type1.rowconfigure(14, weight=1)
         self.smib_type1_pss_fig = Figure(figsize=(6.4, 2.6), dpi=100)
         self.smib_type1_pss_ax = self.smib_type1_pss_fig.add_subplot(111)
         _draw_type1_pss_diagram(self.smib_type1_pss_ax)
-        self.smib_type1_pss_canvas = FigureCanvasTkAgg(self.smib_type1_pss_fig, master=page_type1)
+        self.smib_type1_pss_canvas = FigureCanvasTkAgg(self.smib_type1_pss_fig, master=page_type1_body)
         self.smib_type1_pss_canvas.get_tk_widget().grid(row=12, column=0, columnspan=4, sticky="nsew", padx=4, pady=(0, 2))
         self.smib_type1_pss_canvas.draw()
 
         self.smib_type1_avr_fig = Figure(figsize=(6.4, 2.8), dpi=100)
         self.smib_type1_avr_ax = self.smib_type1_avr_fig.add_subplot(111)
         _draw_type1_avr_diagram(self.smib_type1_avr_ax)
-        self.smib_type1_avr_canvas = FigureCanvasTkAgg(self.smib_type1_avr_fig, master=page_type1)
+        self.smib_type1_avr_canvas = FigureCanvasTkAgg(self.smib_type1_avr_fig, master=page_type1_body)
         self.smib_type1_avr_canvas.get_tk_widget().grid(row=13, column=0, columnspan=4, sticky="nsew", padx=4, pady=(0, 4))
         self.smib_type1_avr_canvas.draw()
 
-        ttk.Button(page_type1, text="计算1型 AVR/PSS 指标", command=self.calculate_type1_avr_pss).grid(
+        ttk.Button(page_type1_body, text="计算1型 AVR/PSS 指标", command=self.calculate_type1_avr_pss).grid(
             row=14, column=0, columnspan=4, sticky="ew", padx=4, pady=(4, 4)
         )
-        self.smib_type1_result = ScrolledText(page_type1, width=56, height=8, wrap=tk.WORD)
+        self.smib_type1_result = ScrolledText(page_type1_body, width=56, height=8, wrap=tk.WORD)
         self.smib_type1_result.grid(row=15, column=0, columnspan=4, sticky="nsew", padx=4, pady=(2, 2))
         self.smib_type1_result.configure(state="disabled")
 
