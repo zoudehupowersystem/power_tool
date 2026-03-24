@@ -23,7 +23,7 @@ from power_tool_common import (
 def impact_method(delta_p: float,
                   delta_t_s: float,
                   f_d_hz: float,
-                  p_current_pu: Optional[float]) -> ImpactMethodSummary:
+                  p_current_pu: Optional[float] = None) -> ImpactMethodSummary:
     """冲击法快估功率振荡幅度。"""
     _validate_positive("ΔP", delta_p)
     _validate_positive("Δt", delta_t_s)
