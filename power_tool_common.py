@@ -163,6 +163,14 @@ class ShortCircuitSummary:
     Va_V: complex
     Vb_V: complex
     Vc_V: complex
+    Ia_from_left_A: complex
+    Ib_from_left_A: complex
+    Ic_from_left_A: complex
+    Ia_from_right_A: complex
+    Ib_from_right_A: complex
+    Ic_from_right_A: complex
+    I_break_left_kA: float
+    I_break_right_kA: float
     I_break_kA: float
     tau_dc_s: float
     breaker_ok: Optional[bool]

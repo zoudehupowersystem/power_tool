@@ -45,3 +45,19 @@ def test_short_circuit_dual_source_requires_right_side_inputs() -> None:
             "直接接地", 0.0, 0.0, 0.0, 31.5,
             network_mode="双电源",
         )
+
+
+def test_short_circuit_dual_source_angle_difference_changes_result() -> None:
+    base = short_circuit_capacity(
+        110.0, "AB两相短路", 2000.0, 10.0, 30.0, 0.05, 0.40, 0.15, 1.20,
+        "直接接地", 0.0, 0.0, 0.0, None,
+        network_mode="双电源", s_sc_right_mva=2000.0, xr_sys_right=10.0, fault_pos_from_left_pct=50.0,
+        delta_right_deg=0.0,
+    )
+    shifted = short_circuit_capacity(
+        110.0, "AB两相短路", 2000.0, 10.0, 30.0, 0.05, 0.40, 0.15, 1.20,
+        "直接接地", 0.0, 0.0, 0.0, None,
+        network_mode="双电源", s_sc_right_mva=2000.0, xr_sys_right=10.0, fault_pos_from_left_pct=50.0,
+        delta_right_deg=20.0,
+    )
+    assert abs(base.I1_A - shifted.I1_A) > 1e-3
