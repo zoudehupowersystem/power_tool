@@ -98,7 +98,7 @@ class _SummaryDummy:
         self.comtrade_time_label = _FakeLabel("-0.1 s ~ 0.2 s")
         self._comtrade_cfg_path = "demo.cfg"
         entries = {
-            "freq_f0": "50", "freq_dp": "0.08", "freq_ts": "8", "freq_tg": "5", "freq_kd": "1.2", "freq_kg": "4.0", "freq_tend": "30",
+            "freq_f0": "50", "freq_dp": "0.08", "freq_ts": "8", "freq_tg": "5", "freq_kd": "1.2", "freq_kg": "4.0", "freq_tend": "30", "freq_kp_agc": "0.12", "freq_ki_agc": "0.01",
             "osc_eq": "1.12", "osc_u": "1.0", "osc_x": "0.55", "osc_p0": "0.8", "osc_tj": "9", "osc_f0": "50",
             "volt_ug": "1.0", "volt_x": "0.32", "volt_pf": "0.95", "volt_sbase": "100",
             "line_u": "500", "line_zc": "250", "line_l": "", "line_c": "", "line_p": "900", "line_qn": "1.1", "line_len": "300",

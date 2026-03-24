@@ -426,7 +426,7 @@ class ApproximationToolGUI(tk.Tk):
         if tab == "频率动态":
             pairs = [("额定频率 f0 / Hz", self.freq_f0), ("功率缺额 ΔP_OL0 / pu", self.freq_dp), ("系统惯性时间常数 T_s / s", self.freq_ts),
                      ("一次调频时间常数 T_G / s", self.freq_tg), ("负荷频率系数 k_D / pu/pu", self.freq_kd), ("一次调频系数 k_G / pu/pu", self.freq_kg),
-                     ("绘图时长 / s", self.freq_tend)]
+                     ("绘图时长 / s", self.freq_tend), ("AGC比例 Kp", self.freq_kp_agc), ("AGC积分 Ki", self.freq_ki_agc)]
         elif tab == "机电振荡":
             pairs = [("内电势 E'_q / pu", self.osc_eq), ("端电压 U / pu", self.osc_u), ("等值电抗 X_Σ / pu", self.osc_x), ("初始有功 P0 / pu", self.osc_p0),
                      ("惯性时间常数 T_j / s", self.osc_tj), ("同步频率 f0 / Hz", self.osc_f0)]
@@ -557,22 +557,33 @@ class ApproximationToolGUI(tk.Tk):
         self.freq_kd = self._add_entry(left, 5, "负荷频率系数 k_D / pu/pu", "1.2")
         self.freq_kg = self._add_entry(left, 6, "一次调频系数 k_G / pu/pu", "4.0")
         self.freq_tend = self._add_entry(left, 7, "绘图时长 / s", "30")
+        self.enable_agc = tk.BooleanVar(value=False)
+        ttk.Checkbutton(left, text="启用二次调频（AGC，默认关闭）", variable=self.enable_agc, command=self._on_agc_toggle).grid(
+            row=8, column=0, columnspan=2, sticky="w", padx=4, pady=2
+        )
+        self.freq_beta = self._add_entry(left, 9, "ACE频偏系数 B / (MW/Hz, 标幺化)", "15")
+        self.freq_kp_agc = self._add_entry(left, 10, "AGC比例 Kp", "0.12")
+        self.freq_ki_agc = self._add_entry(left, 11, "AGC积分 Ki / s⁻¹", "0.010")
+        self.freq_tace = self._add_entry(left, 12, "ACE滤波时间常数 Tace / s", "8")
+        self.freq_tcmd = self._add_entry(left, 13, "主站到机组执行滞后 Tcmd / s", "20")
+        self.freq_p2max = self._add_entry(left, 14, "二次调频最大调节量 |P2|max / pu", "0.08")
+        self.freq_deadband = self._add_entry(left, 15, "频率死区 |Δf| / Hz", "0.01")
 
         self.show_first_order = tk.BooleanVar(value=True)
         ttk.Checkbutton(left, text="同时绘制无一次调频一阶对照", variable=self.show_first_order).grid(
-            row=8, column=0, columnspan=2, sticky="w", padx=4, pady=4
+            row=16, column=0, columnspan=2, sticky="w", padx=4, pady=4
         )
 
         ttk.Button(left, text="计算并绘图", command=self.calculate_frequency).grid(
-            row=9, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
+            row=17, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
         )
 
         ttk.Label(left, text="结果", font=("TkDefaultFont", 10, "bold")).grid(
-            row=10, column=0, columnspan=2, sticky="w", pady=(10, 4)
+            row=18, column=0, columnspan=2, sticky="w", pady=(10, 4)
         )
 
         self.freq_result = ScrolledText(left, width=52, height=24, wrap=tk.WORD)
-        self.freq_result.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=4, pady=4)
+        self.freq_result.grid(row=19, column=0, columnspan=2, sticky="nsew", padx=4, pady=4)
         self.freq_result.configure(state="disabled")
 
         ttk.Label(right, text="频率曲线", font=("TkDefaultFont", 11, "bold")).grid(
@@ -590,7 +601,22 @@ class ApproximationToolGUI(tk.Tk):
         self.freq_toolbar.update()
         self.freq_toolbar.grid(row=2, column=0, sticky="ew")
 
+        self._on_agc_toggle()
         self.calculate_frequency()
+
+    def _on_agc_toggle(self) -> None:
+        agc_on = bool(self.enable_agc.get())
+        state = "normal" if agc_on else "disabled"
+        for ent in (self.freq_beta, self.freq_kp_agc, self.freq_ki_agc, self.freq_tace, self.freq_tcmd, self.freq_p2max, self.freq_deadband):
+            ent.configure(state=state)
+        if agc_on:
+            try:
+                t_val = float(self.freq_tend.get().strip() or "0")
+            except Exception:
+                t_val = 0.0
+            if t_val < 120.0:
+                self.freq_tend.delete(0, tk.END)
+                self.freq_tend.insert(0, "300")
 
     def _build_oscillation_tab(self) -> None:
         frame = ttk.Frame(self.osc_tab, padding=12)
@@ -1133,15 +1159,66 @@ class ApproximationToolGUI(tk.Tk):
             kG = _safe_float(self.freq_kg.get(), "k_G")
             t_end = _safe_float(self.freq_tend.get(), "绘图时长")
             _validate_positive("绘图时长", t_end)
+            agc_on = bool(self.enable_agc.get())
 
             summary = frequency_response_summary(delta_p, Ts, TG, kD, kG, f0)
 
-            t = np.linspace(0.0, t_end, 1400)
+            t = np.linspace(0.0, t_end, max(1400, int(8 * t_end)))
             y2 = frequency_response_value(t, delta_p, Ts, TG, kD, kG)
+            ace_f = None
+            p2_act = None
+            if agc_on:
+                beta_mw_hz = _safe_float(self.freq_beta.get(), "B")
+                kp_agc = _safe_float(self.freq_kp_agc.get(), "Kp")
+                ki_agc = _safe_float(self.freq_ki_agc.get(), "Ki")
+                t_ace = _safe_float(self.freq_tace.get(), "Tace")
+                t_cmd = _safe_float(self.freq_tcmd.get(), "Tcmd")
+                p2max = _safe_float(self.freq_p2max.get(), "P2max")
+                deadband_hz = _safe_float(self.freq_deadband.get(), "频率死区")
+                _validate_positive("B", beta_mw_hz)
+                _validate_nonnegative("Kp", kp_agc)
+                _validate_nonnegative("Ki", ki_agc)
+                _validate_positive("Tace", t_ace)
+                _validate_positive("Tcmd", t_cmd)
+                _validate_nonnegative("P2max", p2max)
+                _validate_nonnegative("频率死区", deadband_hz)
+
+                dt = float(t[1] - t[0])
+                df = 0.0
+                pg1 = 0.0
+                ace_state = 0.0
+                ace_int = 0.0
+                p2 = 0.0
+                y2_num = np.zeros_like(t)
+                ace_f = np.zeros_like(t)
+                p2_act = np.zeros_like(t)
+                for i, _ti in enumerate(t):
+                    df_hz = df * f0
+                    df_eff_hz = 0.0 if abs(df_hz) <= deadband_hz else df_hz
+                    ace_raw = beta_mw_hz * df_eff_hz
+                    dace = (ace_raw - ace_state) / t_ace
+                    ace_state += dt * dace
+                    ace_int += dt * ace_state
+                    p2_cmd = -(kp_agc * ace_state + ki_agc * ace_int)
+                    p2_cmd = max(-p2max, min(p2max, p2_cmd))
+                    dp2 = (p2_cmd - p2) / t_cmd
+                    p2 += dt * dp2
+
+                    dpg1 = (-pg1 - kG * df) / TG
+                    pg1 += dt * dpg1
+                    ddf = (-delta_p + pg1 + p2 - kD * df) / Ts
+                    df += dt * ddf
+
+                    y2_num[i] = df
+                    ace_f[i] = ace_state
+                    p2_act[i] = p2
+                y2 = y2_num
+
             f2 = f0 * (1.0 + y2)
 
             self.freq_ax.clear()
-            self.freq_ax.plot(t, f2, label="含一次调频二阶模型", linewidth=2.0)
+            main_label = "含二次调频（AGC）" if agc_on else "含一次调频二阶模型"
+            self.freq_ax.plot(t, f2, label=main_label, linewidth=2.0, color=("#005f73" if agc_on else None))
             if self.show_first_order.get():
                 y1 = first_order_frequency_response_value(t, delta_p, Ts, kD)
                 f1 = f0 * (1.0 + y1)
@@ -1197,6 +1274,14 @@ class ApproximationToolGUI(tk.Tk):
                 )
 
             text += "\n说明：\n" + summary.notes
+            if agc_on and ace_f is not None and p2_act is not None:
+                text += (
+                    "\n\n══ 二次调频（AGC-FFC）附加结果 ═════════════\n"
+                    f"仿真末端频差 = {y2[-1]:+.6f} pu ({y2[-1] * f0:+.4f} Hz)\n"
+                    f"末端滤波ACE = {ace_f[-1]:+.6f}\n"
+                    f"末端二次调频出力 P2 = {p2_act[-1]:+.6f} pu\n"
+                    "ACE按定频率控制（FFC）仅考虑频偏项，主站指令到机组执行采用一阶滞后。"
+                )
             self._set_text(self.freq_result, text)
 
         except Exception as exc:
