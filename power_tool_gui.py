@@ -1876,7 +1876,7 @@ class ApproximationToolGUI(tk.Tk):
         ax.set_theta_zero_location("E")
         ax.set_theta_direction(1)
         ax.set_facecolor("#11161d")
-        ax.set_title(title, color="#f5f7fa", fontsize=10, pad=10)
+        ax.set_title(title, color="#1f2933", fontsize=10.5, pad=14, fontweight="bold")
         if table_ax is not None:
             table_ax.clear()
             table_ax.axis("off")
@@ -1892,16 +1892,16 @@ class ApproximationToolGUI(tk.Tk):
             ax.set_ylim(0.0, 1.0)
             ax.grid(color="#5f6f7e", linestyle="-", linewidth=0.8, alpha=0.45)
             ax.set_yticks([0.25, 0.5, 0.75, 1.0])
-            ax.set_yticklabels(["0.25", "0.50", "0.75", "1.00"], color="#aeb8c2", fontsize=8)
-            ax.set_thetagrids(np.arange(0, 360, 45), color="#8ea1b4", fontsize=8)
+            ax.set_yticklabels(["0.25", "0.50", "0.75", "1.00"], color="#d1d9e0", fontsize=8)
+            ax.set_thetagrids(np.arange(0, 360, 45), color="#475569", fontsize=8.5)
             return
         max_mag = max(1e-6, max(abs(v) for v in vectors.values()))
         radial_max = max_mag * 1.15
         ax.set_ylim(0.0, radial_max)
         rings = np.linspace(radial_max / 4.0, radial_max, 4)
         ax.set_yticks(rings)
-        ax.set_yticklabels([f"{tick:.3g}" for tick in rings], color="#aeb8c2", fontsize=8)
-        ax.set_thetagrids(np.arange(0, 360, 45), color="#8ea1b4", fontsize=8)
+        ax.set_yticklabels([f"{tick:.3g}" for tick in rings], color="#d1d9e0", fontsize=8)
+        ax.set_thetagrids(np.arange(0, 360, 45), color="#475569", fontsize=8.5)
         ax.grid(color="#5f6f7e", linestyle="-", linewidth=0.8, alpha=0.45)
         ax.spines["polar"].set_color("#7c8794")
         ax.spines["polar"].set_linewidth(1.0)
@@ -1965,8 +1965,10 @@ class ApproximationToolGUI(tk.Tk):
                 bbox_to_anchor=(0.02, 1.04),
                 ncol=min(3, len(handles)),
                 fontsize=7.5,
-                framealpha=0.28,
-                labelcolor="#d7dfe7",
+                framealpha=0.92,
+                facecolor="#ffffff",
+                edgecolor="#aab4bf",
+                labelcolor="#1f2933",
             )
 
     def calculate_short_circuit(self) -> None:
