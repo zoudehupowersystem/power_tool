@@ -1728,7 +1728,7 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_brk = self._add_entry(left, 25, "断路器额定开断电流 Ik / kA（可留空）", "31.5")
         self.sc_cycles = self._add_entry(left, 26, "仿真周波数（波形）", "10")
 
-        self.sc_vector_labels_var = tk.BooleanVar(value=True)
+        self.sc_vector_labels_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(left, text="向量图显示数值标签", variable=self.sc_vector_labels_var, command=self.calculate_short_circuit).grid(
             row=27, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2)
         )
@@ -1760,7 +1760,7 @@ class ApproximationToolGUI(tk.Tk):
         gs = self.sc_fig.add_gridspec(2, 2, width_ratios=[1.7, 1.0], hspace=0.26, wspace=0.18)
         self.sc_ax_phase = self.sc_fig.add_subplot(gs[0, 0])
         self.sc_ax_seq = self.sc_fig.add_subplot(gs[1, 0])
-        gs_i_right = gs[:, 1].subgridspec(2, 1, height_ratios=[0.35, 1.0], hspace=0.04)
+        gs_i_right = gs[:, 1].subgridspec(2, 1, height_ratios=[0.28, 1.0], hspace=0.05)
         self.sc_ax_i_table = self.sc_fig.add_subplot(gs_i_right[0, 0])
         self.sc_ax_i_vector = self.sc_fig.add_subplot(gs_i_right[1, 0], projection="polar")
         self.sc_ax_phase.set_ylabel("i_abc / A")
@@ -1780,7 +1780,7 @@ class ApproximationToolGUI(tk.Tk):
         gs_v = self.sc_v_fig.add_gridspec(2, 2, width_ratios=[1.7, 1.0], hspace=0.26, wspace=0.18)
         self.sc_v_ax_phase = self.sc_v_fig.add_subplot(gs_v[0, 0])
         self.sc_v_ax_seq = self.sc_v_fig.add_subplot(gs_v[1, 0])
-        gs_v_right = gs_v[:, 1].subgridspec(2, 1, height_ratios=[0.35, 1.0], hspace=0.04)
+        gs_v_right = gs_v[:, 1].subgridspec(2, 1, height_ratios=[0.28, 1.0], hspace=0.05)
         self.sc_v_ax_table = self.sc_v_fig.add_subplot(gs_v_right[0, 0])
         self.sc_v_ax_vector = self.sc_v_fig.add_subplot(gs_v_right[1, 0], projection="polar")
         self.sc_v_ax_phase.set_ylabel("u_abc / V")
@@ -1921,7 +1921,7 @@ class ApproximationToolGUI(tk.Tk):
             if show_labels:
                 ang = math.degrees(theta)
                 ax.text(theta, min(radial_max, radius * 1.07), f"{name}\n{radius:.3g}∠{ang:.1f}°",
-                        color=color, fontsize=7, ha="center", va="center")
+                        color=color, fontsize=6.5, ha="center", va="center")
         legend_order = [k for k in ("A", "B", "C", "1", "2", "0") if k in vectors]
         if legend_order:
             table_rows = []
@@ -1945,13 +1945,13 @@ class ApproximationToolGUI(tk.Tk):
                     cellLoc="center",
                 )
                 table.auto_set_font_size(False)
-                table.set_fontsize(8.0)
-                table.scale(1.0, 1.16)
+                table.set_fontsize(8.5)
+                table.scale(1.0, 1.10)
                 for (row, _col), cell in table.get_celld().items():
                     cell.set_linewidth(0.8)
                     cell.set_edgecolor("#aab4bf")
                     if row == 0:
-                        cell.set_facecolor("#f3f6f9")
+                        cell.set_facecolor("#edf2f7")
                         cell.get_text().set_color("#1f2933")
                         cell.get_text().set_fontweight("bold")
                     else:
@@ -1963,11 +1963,11 @@ class ApproximationToolGUI(tk.Tk):
             ]
             ax.legend(
                 handles=handles,
-                loc="upper center",
-                bbox_to_anchor=(0.5, 1.11),
+                loc="upper left",
+                bbox_to_anchor=(0.02, 1.04),
                 ncol=min(3, len(handles)),
-                fontsize=8.0,
-                framealpha=0.45,
+                fontsize=7.5,
+                framealpha=0.28,
                 labelcolor="#d7dfe7",
             )
 
