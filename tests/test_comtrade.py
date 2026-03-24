@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -153,7 +154,11 @@ def test_parse_yokogawa_wdf_via_converter(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_parse_embedded_wdf_samples() -> None:
-    for name in ["不接地系统500Ω单相接地.WDF", "消弧线圈系统1000Ω单相接地.WDF"]:
+    sample_names = ["不接地系统500Ω单相接地.WDF", "消弧线圈系统1000Ω单相接地.WDF"]
+    missing = [name for name in sample_names if not Path(__file__).with_name(name).exists()]
+    if missing:
+        pytest.skip(f"embedded WDF samples are missing: {', '.join(missing)}")
+    for name in sample_names:
         record = parse_waveform_file(Path(__file__).with_name(name))
         assert record.file_type == "WDF"
         assert record.analog_values.shape == (250250, 11)
