@@ -59,35 +59,103 @@ def short_circuit_capacity(U_kV_ll: float,
                            neutral_rn_ohm: float,
                            neutral_xn_ohm: float,
                            Rf_ohm: float,
-                           breaker_IkA: Optional[float]) -> ShortCircuitSummary:
+                           breaker_IkA: Optional[float],
+                           network_mode: str = "单电源",
+                           s_sc_right_mva: Optional[float] = None,
+                           xr_sys_right: Optional[float] = None,
+                           fault_pos_from_left_pct: float = 100.0,
+                           e_left_pu: float = 1.0,
+                           e_right_pu: float = 1.0,
+                           delta_left_deg: float = 0.0,
+                           delta_right_deg: float = 0.0,
+                           neutral_mode_right: Optional[str] = None,
+                           neutral_rn_right_ohm: Optional[float] = None,
+                           neutral_xn_right_ohm: Optional[float] = None) -> ShortCircuitSummary:
     _validate_positive("U", U_kV_ll)
     _validate_positive("系统短路容量 S_sc", s_sc_mva)
     _validate_positive("系统 X/R", xr_sys)
+    _validate_positive("左侧电源电势幅值 pu", e_left_pu)
+    _validate_positive("右侧电源电势幅值 pu", e_right_pu)
     _validate_nonnegative("线路长度", line_len_km)
     _validate_nonnegative("过渡电阻 Rf", Rf_ohm)
+    if not (0.0 <= fault_pos_from_left_pct <= 100.0):
+        raise InputError("故障点位置百分比必须在 0~100 之间。")
 
     zsys_mag = U_kV_ll * U_kV_ll / s_sc_mva
     r_sys, x_sys = _zr_from_xr(zsys_mag, xr_sys)
-    Zsys1 = complex(r_sys, x_sys)
-    Zsys2 = complex(r_sys, x_sys)
+    Zsys1_left = complex(r_sys, x_sys)
+    Zsys2_left = complex(r_sys, x_sys)
 
-    Zl1 = complex(line_r1_ohm_km * line_len_km, line_x1_ohm_km * line_len_km)
-    Zl2 = Zl1
-    Zl0 = complex(line_r0_ohm_km * line_len_km, line_x0_ohm_km * line_len_km)
+    Zl1_total = complex(line_r1_ohm_km * line_len_km, line_x1_ohm_km * line_len_km)
+    Zl2_total = Zl1_total
+    Zl0_total = complex(line_r0_ohm_km * line_len_km, line_x0_ohm_km * line_len_km)
 
-    Z1 = Zsys1 + Zl1
-    Z2 = Zsys2 + Zl2
-    Zn, neutral_name = _neutral_impedance(neutral_mode, neutral_rn_ohm, neutral_xn_ohm)
-    Z0 = Zsys1 + Zl0
+    mode = network_mode.strip()
+    ratio_left = fault_pos_from_left_pct / 100.0
+    ratio_right = 1.0 - ratio_left
+    Zn_left, neutral_name = _neutral_impedance(neutral_mode, neutral_rn_ohm, neutral_xn_ohm)
+    neutral_mode_right_use = neutral_mode if neutral_mode_right is None else neutral_mode_right
+    rn_right = neutral_rn_ohm if neutral_rn_right_ohm is None else neutral_rn_right_ohm
+    xn_right = neutral_xn_ohm if neutral_xn_right_ohm is None else neutral_xn_right_ohm
+    Zn_right, neutral_name_right = _neutral_impedance(neutral_mode_right_use, rn_right, xn_right)
+    E_base = U_kV_ll * 1e3 / math.sqrt(3.0)
+    E_left = E_base * e_left_pu * complex(math.cos(math.radians(delta_left_deg)), math.sin(math.radians(delta_left_deg)))
+    E_right = E_base * e_right_pu * complex(math.cos(math.radians(delta_right_deg)), math.sin(math.radians(delta_right_deg)))
+
+    Z1_left = Zsys1_left + Zl1_total * ratio_left
+    Z2_left = Zsys2_left + Zl2_total * ratio_left
+    Z0_left = Zsys1_left + Zl0_total * ratio_left + 3.0 * Zn_left
+
+    Z1_right = complex(1e12, 0.0)
+    Z2_right = complex(1e12, 0.0)
+    Z0_right = complex(1e12, 0.0)
+    sources: list[tuple[complex, complex]] = [(E_left, Z1_left)]
+    z2_branches: list[complex] = [Z2_left]
+    z0_branches: list[complex] = [Z0_left]
+    if mode == "单电源":
+        Z1 = Z1_left
+        Z2 = Z2_left
+        Z0 = Z0_left
+        mode_name = "单电源+线路末端故障"
+    elif mode == "双电源":
+        if s_sc_right_mva is None or xr_sys_right is None:
+            raise InputError("双电源模式下需输入右侧电源短路容量与 X/R。")
+        _validate_positive("右侧系统短路容量 S_sc_right", s_sc_right_mva)
+        _validate_positive("右侧系统 X/R", xr_sys_right)
+        zsys_mag_right = U_kV_ll * U_kV_ll / s_sc_right_mva
+        r_sys_right, x_sys_right = _zr_from_xr(zsys_mag_right, xr_sys_right)
+        Zsys1_right = complex(r_sys_right, x_sys_right)
+        Zsys2_right = complex(r_sys_right, x_sys_right)
+
+        Zl1_right = Zl1_total * ratio_right
+        Zl2_right = Zl2_total * ratio_right
+        Zl0_right = Zl0_total * ratio_right
+
+        Z1_right = Zsys1_right + Zl1_right
+        Z2_right = Zsys2_right + Zl2_right
+        Z0_right = Zsys1_right + Zl0_right + 3.0 * Zn_right
+
+        sources.append((E_right, Z1_right))
+        z2_branches.append(Z2_right)
+        z0_branches.append(Z0_right)
+        Y1 = sum(1.0 / z for _e, z in sources)
+        Z1 = 1.0 / Y1
+        E = Z1 * sum(e / z for e, z in sources)
+        Z2 = 1.0 / sum(1.0 / z for z in z2_branches)
+        Z0 = 1.0 / sum(1.0 / z for z in z0_branches)
+        mode_name = "线路两侧双电源+线路故障点"
+    else:
+        raise InputError("短路模型不支持。可选：单电源/双电源。")
+
     Zf = complex(Rf_ohm, 0.0)
-
-    E = U_kV_ll * 1e3 / math.sqrt(3.0)
+    if mode == "单电源":
+        E = E_left
     ft = fault_type.strip()
     if ft in {"三相短路", "三相接地", "ABC三相短路"}:
         I1 = E / (Z1 + Zf); I2 = 0j; I0 = 0j
         fault_name = "三相短路"; Z_eq = Z1 + Zf
     elif ft in {"A相接地", "B相接地", "C相接地", "单相接地", "A-G", "B-G", "C-G"}:
-        denom = Z1 + Z2 + Z0 + 3.0 * (Zn + Zf)
+        denom = Z1 + Z2 + Z0 + 3.0 * Zf
         Ieq = E / denom
 
         if ft in {"A相接地", "单相接地", "A-G"}:
@@ -111,7 +179,7 @@ def short_circuit_capacity(U_kV_ll: float,
         I1 = E / denom; I2 = -I1; I0 = 0j
         fault_name = ft; Z_eq = denom / 2.0
     elif ft in {"AB两相接地", "BC两相接地", "CA两相接地", "两相接地"}:
-        z0g = Z0 + 3.0 * (Zn + Zf)
+        z0g = Z0 + 3.0 * Zf
         zpar = (Z2 * z0g) / (Z2 + z0g)
         I1 = E / (Z1 + zpar)
         Vx = E - I1 * Z1
@@ -123,6 +191,24 @@ def short_circuit_capacity(U_kV_ll: float,
 
     if ft not in {"A相接地", "B相接地", "C相接地", "单相接地", "A-G", "B-G", "C-G"}:
         Ia, Ib, Ic = _phase_currents_from_sequence(I0, I1, I2)
+
+    V1 = E - I1 * Z1
+    V2 = -I2 * Z2
+    V0 = -I0 * Z0
+    Va, Vb, Vc = _phase_currents_from_sequence(V0, V1, V2)
+    I1_left = (E_left - V1) / Z1_left
+    I2_left = -V2 / Z2_left
+    I0_left = -V0 / Z0_left
+    Ia_left, Ib_left, Ic_left = _phase_currents_from_sequence(I0_left, I1_left, I2_left)
+    if mode == "双电源":
+        I1_right = (E_right - V1) / Z1_right
+        I2_right = -V2 / Z2_right
+        I0_right = -V0 / Z0_right
+        Ia_right, Ib_right, Ic_right = _phase_currents_from_sequence(I0_right, I1_right, I2_right)
+    else:
+        Ia_right, Ib_right, Ic_right = 0j, 0j, 0j
+    i_break_left_kA = max(abs(Ia_left), abs(Ib_left), abs(Ic_left)) / 1e3
+    i_break_right_kA = max(abs(Ia_right), abs(Ib_right), abs(Ic_right)) / 1e3
     i_break_kA = max(abs(Ia), abs(Ib), abs(Ic)) / 1e3
 
     R_eq = max(Z_eq.real, 1e-6)
@@ -135,15 +221,22 @@ def short_circuit_capacity(U_kV_ll: float,
         ok = breaker_IkA >= i_break_kA
 
     notes = (
-        "默认模型：系统等值（由S_sc与X/R给定）与线路串联，故障点在线路末端。"
-        " 已计入中性点接地方式与过渡电阻；波形含交流分量+指数衰减直流偏置。"
+        f"当前模型：{mode_name}。"
+        f" 左侧中性点：{neutral_name}，右侧中性点：{neutral_name_right}。"
+        " 已计入过渡电阻；波形含交流分量+指数衰减直流偏置。"
     )
 
     return ShortCircuitSummary(
+        network_mode=mode_name,
         fault_type=fault_name, neutral_mode=neutral_name,
         U_kV=U_kV_ll, line_len_km=line_len_km,
-        Z1_ohm=Z1, Z2_ohm=Z2, Z0_ohm=Z0, Zn_ohm=Zn, Rf_ohm=Rf_ohm,
+        fault_pos_from_left_pct=fault_pos_from_left_pct,
+        Z1_ohm=Z1, Z2_ohm=Z2, Z0_ohm=Z0, Zn_ohm=(Zn_left if mode == "单电源" else (Zn_left * Zn_right) / (Zn_left + Zn_right + 1e-12)), Rf_ohm=Rf_ohm,
         I0_A=I0, I1_A=I1, I2_A=I2, Ia_A=Ia, Ib_A=Ib, Ic_A=Ic,
+        V0_V=V0, V1_V=V1, V2_V=V2, Va_V=Va, Vb_V=Vb, Vc_V=Vc,
+        Ia_from_left_A=Ia_left, Ib_from_left_A=Ib_left, Ic_from_left_A=Ic_left,
+        Ia_from_right_A=Ia_right, Ib_from_right_A=Ib_right, Ic_from_right_A=Ic_right,
+        I_break_left_kA=i_break_left_kA, I_break_right_kA=i_break_right_kA,
         I_break_kA=i_break_kA, tau_dc_s=tau_dc, breaker_ok=ok, notes=notes,
     )
 

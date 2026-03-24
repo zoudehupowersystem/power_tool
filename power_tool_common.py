@@ -99,7 +99,7 @@ class NaturalPowerSummary:
 @dataclass
 class ImpactMethodSummary:
     Dp_pu: float
-    Pst_pu: float
+    osc_amp_pu: float
     margin_pu: Optional[float]
     status: str
     notes: str
@@ -140,10 +140,12 @@ class EACResult:
 
 @dataclass
 class ShortCircuitSummary:
+    network_mode: str
     fault_type: str
     neutral_mode: str
     U_kV: float
     line_len_km: float
+    fault_pos_from_left_pct: float
     Z1_ohm: complex
     Z2_ohm: complex
     Z0_ohm: complex
@@ -155,6 +157,20 @@ class ShortCircuitSummary:
     Ia_A: complex
     Ib_A: complex
     Ic_A: complex
+    V0_V: complex
+    V1_V: complex
+    V2_V: complex
+    Va_V: complex
+    Vb_V: complex
+    Vc_V: complex
+    Ia_from_left_A: complex
+    Ib_from_left_A: complex
+    Ic_from_left_A: complex
+    Ia_from_right_A: complex
+    Ib_from_right_A: complex
+    Ic_from_right_A: complex
+    I_break_left_kA: float
+    I_break_right_kA: float
     I_break_kA: float
     tau_dc_s: float
     breaker_ok: Optional[bool]

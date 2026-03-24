@@ -17,11 +17,11 @@ from power_tool_stability import critical_cut_angle_approx, equal_area_criterion
 
 
 def test_impact_method_default_case_regression() -> None:
-    result = impact_method(0.9, 0.12, 1.106, 1.65, 0.9)
+    result = impact_method(0.9, 0.12, 1.106, 0.9)
     assert result.Dp_pu == pytest.approx(0.7505139185719872, rel=1e-12)
-    assert result.Pst_pu == pytest.approx(0.8994860814280127, rel=1e-12)
-    assert result.margin_pu == pytest.approx(-0.0005139185719873485, rel=1e-12)
-    assert result.status == "第一摆稳定裕度不足"
+    assert result.osc_amp_pu == pytest.approx(0.7505139185719872, rel=1e-12)
+    assert result.margin_pu == pytest.approx(-0.14948608142801283, rel=1e-12)
+    assert result.status == "振荡幅值可接受"
 
 
 def test_critical_cut_angle_default_case_regression() -> None:

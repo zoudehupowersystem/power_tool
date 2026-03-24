@@ -35,7 +35,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle, Rectangle
 
 
-from power_tool_common import InputError, _safe_float, _validate_positive, load_line_params_reference
+from power_tool_common import InputError, _safe_float, _validate_positive, _validate_nonnegative, load_line_params_reference
 
 
 from power_tool_params import _format_warnings, convert_2wt_to_pu, convert_3wt_to_pu, convert_line_to_pu
@@ -101,6 +101,25 @@ if _cn_font:
     matplotlib.rcParams["font.sans-serif"] = [_cn_font] + matplotlib.rcParams["font.sans-serif"]
 
 matplotlib.rcParams["axes.unicode_minus"] = False
+matplotlib.rcParams.update({
+    "figure.facecolor": "#ffffff",
+    "axes.facecolor": "#ffffff",
+    "savefig.facecolor": "#ffffff",
+    "axes.edgecolor": "#d0d9e3",
+    "axes.labelcolor": "#243447",
+    "axes.titlecolor": "#243447",
+    "axes.titleweight": "bold",
+    "grid.color": "#d9e3ee",
+    "grid.alpha": 0.9,
+    "grid.linewidth": 0.8,
+    "xtick.color": "#5a6c7f",
+    "ytick.color": "#5a6c7f",
+    "legend.frameon": True,
+    "legend.facecolor": "#ffffff",
+    "legend.edgecolor": "#d9e3ee",
+    "legend.framealpha": 0.95,
+    "figure.autolayout": False,
+})
 # ─────────────────────────────────────────────────────────────────────────────
 
 _KEY_CONCLUSION_PREFIXES = (
@@ -234,7 +253,6 @@ class ApproximationToolGUI(tk.Tk):
         self.freq_tab = ttk.Frame(notebook)
         self.osc_tab = ttk.Frame(notebook)
         self.volt_tab = ttk.Frame(notebook)
-        self.line_tab = ttk.Frame(notebook)
         self.impact_tab = ttk.Frame(notebook)
         self.smib_tab = ttk.Frame(notebook)
         self.loop_tab = ttk.Frame(notebook)
@@ -244,10 +262,9 @@ class ApproximationToolGUI(tk.Tk):
 
         notebook.add(self.freq_tab, text="频率动态")
         notebook.add(self.osc_tab, text="机电振荡")
-        notebook.add(self.volt_tab, text="静态电压稳定")
-        notebook.add(self.line_tab, text="线路自然功率与无功")
+        notebook.add(self.volt_tab, text="电压无功分析")
         notebook.add(self.impact_tab, text="暂稳评估")
-        notebook.add(self.smib_tab, text="小扰动分析（SMIB）")
+        notebook.add(self.smib_tab, text="小扰动分析")
         notebook.add(self.loop_tab, text="配电网合环分析")
         notebook.add(self.param_tab, text="参数校核与标幺值")
         notebook.add(self.sc_tab, text="短路电流计算")
@@ -267,7 +284,6 @@ class ApproximationToolGUI(tk.Tk):
         self._build_frequency_tab()
         self._build_oscillation_tab()
         self._build_voltage_tab()
-        self._build_line_tab()
         self._build_impact_tab()
         self._build_smib_tab()
         self._build_loop_closure_tab()
@@ -275,6 +291,7 @@ class ApproximationToolGUI(tk.Tk):
         self._build_short_circuit_tab()
         self._build_comtrade_tab()
         self._build_ai_sidebar()
+        self._apply_global_aesthetics()
         self.main_notebook.bind("<<NotebookTabChanged>>", self._on_ai_context_changed)
 
     @staticmethod
@@ -284,8 +301,8 @@ class ApproximationToolGUI(tk.Tk):
                    default: str,
                    column: int = 0,
                    width: int = 14) -> ttk.Entry:
-        ttk.Label(parent, text=label).grid(row=row, column=column, sticky="w", padx=4, pady=4)
-        entry = ttk.Entry(parent, width=width)
+        ttk.Label(parent, text=label, style="Form.TLabel").grid(row=row, column=column, sticky="w", padx=4, pady=4)
+        entry = ttk.Entry(parent, width=width, style="Input.TEntry")
         entry.grid(row=row, column=column + 1, sticky="ew", padx=4, pady=4)
         entry.insert(0, default)
         return entry
@@ -302,29 +319,203 @@ class ApproximationToolGUI(tk.Tk):
         widget.configure(state="disabled")
 
     def _configure_styles(self) -> None:
-        bg = "#f3f5f7"
-        panel = "#ffffff"
-        self.configure(bg=bg)
+        self._palette = {
+            "bg": "#edf3f8",
+            "bg_alt": "#f5f8fc",
+            "surface": "#ffffff",
+            "surface_alt": "#f8fbff",
+            "border": "#d5dfeb",
+            "border_strong": "#c3d1e0",
+            "text": "#203040",
+            "muted": "#63778c",
+            "accent": "#1f4d8b",
+            "accent_dark": "#173f7a",
+            "accent_soft": "#e8f0fb",
+            "success": "#1f8f5f",
+        }
+        p = self._palette
+        self.configure(bg=p["bg"])
 
         style = ttk.Style(self)
         if "clam" in style.theme_names():
             style.theme_use("clam")
 
-        style.configure("TFrame", background=bg)
-        style.configure("Card.TFrame", background=panel)
-        style.configure("TLabel", background=bg)
-        style.configure("Card.TLabel", background=panel)
-        style.configure("TLabelframe", background=bg, padding=8)
-        style.configure("TLabelframe.Label", background=bg, font=("TkDefaultFont", 10, "bold"))
+        style.configure("TFrame", background=p["bg"])
+        style.configure("Surface.TFrame", background=p["bg_alt"])
+        style.configure("Card.TFrame", background=p["surface"])
+        style.configure("Metric.TFrame", background=p["surface_alt"], relief="flat")
+
+        style.configure("TLabel", background=p["bg"], foreground=p["text"])
+        style.configure("Surface.TLabel", background=p["bg_alt"], foreground=p["text"])
+        style.configure("Card.TLabel", background=p["surface"], foreground=p["text"])
+        style.configure("Muted.TLabel", background=p["surface"], foreground=p["muted"])
+        style.configure("Form.TLabel", background=p["surface"], foreground=p["text"])
+        style.configure("PageTitle.TLabel", background=p["surface"], foreground=p["text"], font=("TkDefaultFont", 13, "bold"))
+        style.configure("SectionTitle.TLabel", background=p["surface"], foreground=p["accent"], font=("TkDefaultFont", 11, "bold"))
+        style.configure("MetricTitle.TLabel", background=p["surface_alt"], foreground=p["muted"], font=("TkDefaultFont", 9))
+        style.configure("MetricValue.TLabel", background=p["surface_alt"], foreground=p["text"], font=("TkDefaultFont", 12, "bold"))
+
+        style.configure("TLabelframe", background=p["bg_alt"], borderwidth=1, relief="solid", bordercolor=p["border"], padding=10)
+        style.configure("TLabelframe.Label", background=p["bg_alt"], foreground=p["text"], font=("TkDefaultFont", 10, "bold"))
+        style.configure("Card.TLabelframe", background=p["surface"], borderwidth=1, relief="solid", bordercolor=p["border"], padding=10)
+        style.configure("Card.TLabelframe.Label", background=p["surface"], foreground=p["text"], font=("TkDefaultFont", 10, "bold"))
 
         notebook_spec = _notebook_style_spec()
         for style_name, options in notebook_spec["configure"].items():
             style.configure(style_name, **options)
         style.map("TNotebook.Tab", **notebook_spec["map"])
+        style.configure("TNotebook", background=p["bg"], borderwidth=0, tabmargins=(0, 0, 0, 0))
 
-        style.configure("TButton", padding=(10, 5))
-        style.configure("TEntry", padding=3)
-        style.configure("TCombobox", padding=2)
+        style.configure("TButton", padding=(11, 6), background=p["surface_alt"], foreground=p["text"], bordercolor=p["border"], relief="flat")
+        style.map(
+            "TButton",
+            background=[("active", "#ecf3fb"), ("pressed", "#dfeaf7")],
+            bordercolor=[("focus", p["accent"]), ("!focus", p["border"])],
+        )
+        style.configure("Accent.TButton", padding=(12, 6), background=p["accent"], foreground="#ffffff", bordercolor=p["accent"], relief="flat", font=("TkDefaultFont", 10, "bold"))
+        style.map("Accent.TButton", background=[("active", p["accent_dark"]), ("pressed", p["accent_dark"])], foreground=[("disabled", "#f4f6f8")])
+
+        style.configure("Input.TEntry", padding=5, fieldbackground="#ffffff", foreground=p["text"], bordercolor=p["border_strong"], lightcolor=p["border_strong"], darkcolor=p["border_strong"], insertcolor=p["text"])
+        style.map("Input.TEntry", bordercolor=[("focus", p["accent"]), ("!focus", p["border_strong"])], lightcolor=[("focus", p["accent_soft"]), ("!focus", p["border_strong"])], darkcolor=[("focus", p["accent_soft"]), ("!focus", p["border_strong"])])
+
+        style.configure("Input.TCombobox", padding=4, fieldbackground="#ffffff", background="#ffffff", foreground=p["text"], bordercolor=p["border_strong"], lightcolor=p["border_strong"], darkcolor=p["border_strong"], arrowcolor=p["accent"])
+        style.map(
+            "Input.TCombobox",
+            bordercolor=[("focus", p["accent"]), ("!focus", p["border_strong"])],
+            lightcolor=[("focus", p["accent_soft"]), ("!focus", p["border_strong"])],
+            darkcolor=[("focus", p["accent_soft"]), ("!focus", p["border_strong"])],
+            fieldbackground=[("readonly", "#ffffff"), ("disabled", "#f2f5f8")],
+            background=[("readonly", "#ffffff"), ("disabled", "#f2f5f8")],
+            foreground=[("readonly", p["text"]), ("disabled", p["muted"])],
+            arrowcolor=[("disabled", p["muted"]), ("!disabled", p["accent"])],
+        )
+
+        style.configure("TCheckbutton", background=p["surface"], foreground=p["text"])
+        style.configure("Card.TCheckbutton", background=p["surface"], foreground=p["text"])
+        style.configure("Surface.TCheckbutton", background=p["bg_alt"], foreground=p["text"])
+        style.configure("TRadiobutton", background=p["surface"], foreground=p["text"])
+        style.configure("Horizontal.TScale", background=p["surface"])
+        style.configure("Accent.Horizontal.TScale", background=p["surface"])
+
+        style.configure("Treeview", background="#ffffff", fieldbackground="#ffffff", foreground=p["text"], rowheight=24, bordercolor=p["border"], lightcolor=p["border"], darkcolor=p["border"])
+        style.configure("Treeview.Heading", background="#eef3f9", foreground=p["text"], bordercolor=p["border"], relief="flat", font=("TkDefaultFont", 10, "bold"))
+        style.map("Treeview", background=[("selected", "#d9e7f7")], foreground=[("selected", p["text"])])
+
+        style.configure("Vertical.TScrollbar", background="#e9eff6", troughcolor=p["bg_alt"], bordercolor=p["bg_alt"], arrowcolor=p["muted"])
+        style.configure("Horizontal.TScrollbar", background="#e9eff6", troughcolor=p["bg_alt"], bordercolor=p["bg_alt"], arrowcolor=p["muted"])
+
+    def _style_text_widget(self, widget: tk.Text | ScrolledText, *, font: str | tuple[str, int] = "TkFixedFont") -> None:
+        p = self._palette
+        widget.configure(
+            font=font,
+            background=p["surface_alt"],
+            foreground=p["text"],
+            insertbackground=p["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=p["border"],
+            highlightcolor=p["accent"],
+            selectbackground="#d7e4f6",
+            selectforeground=p["text"],
+            padx=10,
+            pady=8,
+        )
+        try:
+            widget.configure(inactiveselectbackground="#d7e4f6")
+        except Exception:
+            pass
+
+    def _style_listbox_widget(self, widget: tk.Listbox) -> None:
+        p = self._palette
+        widget.configure(
+            bg=p["surface_alt"],
+            fg=p["text"],
+            selectbackground="#d7e4f6",
+            selectforeground=p["text"],
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=p["border"],
+            highlightcolor=p["accent"],
+        )
+
+    def _bind_canvas_mousewheel(self, canvas: tk.Canvas) -> None:
+        def _on_mousewheel(event: tk.Event) -> None:
+            if getattr(event, "delta", 0):
+                canvas.yview_scroll(int(-event.delta / 120), "units")
+            elif getattr(event, "num", None) == 4:
+                canvas.yview_scroll(-1, "units")
+            elif getattr(event, "num", None) == 5:
+                canvas.yview_scroll(1, "units")
+
+        canvas.bind("<Enter>", lambda _e: (canvas.bind_all("<MouseWheel>", _on_mousewheel), canvas.bind_all("<Button-4>", _on_mousewheel), canvas.bind_all("<Button-5>", _on_mousewheel)))
+        canvas.bind("<Leave>", lambda _e: (canvas.unbind_all("<MouseWheel>"), canvas.unbind_all("<Button-4>"), canvas.unbind_all("<Button-5>")))
+
+    def _create_scrollable_card(self, parent: ttk.Frame, *, padding: int = 16) -> tuple[ttk.Frame, ttk.Frame, tk.Canvas]:
+        outer = ttk.Frame(parent, style="Card.TFrame")
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(0, weight=1)
+        canvas = tk.Canvas(outer, background=self._palette["surface"], highlightthickness=0, bd=0)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        inner = ttk.Frame(canvas, padding=padding, style="Card.TFrame")
+        window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window_id, width=e.width))
+        self._bind_canvas_mousewheel(canvas)
+        return outer, inner, canvas
+
+    def _apply_surface_theme(self, widget: tk.Widget, *, card: bool = True) -> None:
+        surface_prefix = "Card" if card else "Surface"
+        wclass = widget.winfo_class()
+        try:
+            current_style = str(widget.cget("style")) if wclass.startswith("T") else ""
+            if wclass == "TFrame" and not current_style:
+                widget.configure(style=f"{surface_prefix}.TFrame")
+            elif wclass == "TLabel" and not current_style:
+                widget.configure(style=f"{surface_prefix}.TLabel")
+            elif wclass == "TLabelframe" and not current_style:
+                widget.configure(style="Card.TLabelframe" if card else "TLabelframe")
+            elif wclass == "TCheckbutton" and not str(widget.cget("style")):
+                widget.configure(style=f"{surface_prefix}.TCheckbutton")
+            elif wclass == "TRadiobutton" and not str(widget.cget("style")):
+                widget.configure(style="TRadiobutton")
+            elif wclass == "TEntry" and not str(widget.cget("style")):
+                widget.configure(style="Input.TEntry")
+            elif wclass == "TCombobox" and not str(widget.cget("style")):
+                widget.configure(style="Input.TCombobox")
+            elif wclass == "TScale" and not str(widget.cget("style")):
+                widget.configure(style="Accent.Horizontal.TScale")
+            elif wclass == "Canvas":
+                widget.configure(bg=self._palette["surface" if card else "bg_alt"], highlightthickness=0, bd=0)
+        except Exception:
+            pass
+        for child in widget.winfo_children():
+            self._apply_surface_theme(child, card=card)
+
+    def _apply_global_aesthetics(self) -> None:
+        for page in (self.freq_tab, self.osc_tab, self.volt_tab, self.impact_tab, self.smib_tab, self.loop_tab, self.param_tab, self.sc_tab, self.comtrade_tab):
+            self._apply_surface_theme(page, card=False)
+        for panel in (getattr(self, name, None) for name in ("_vr_static_tab", "_vr_line_tab", "_vr_avc_tab", "_ptab_line", "_ptab_2wt", "_ptab_3wt")):
+            if panel is not None:
+                self._apply_surface_theme(panel, card=True)
+        for widget_name in (
+            "freq_result", "osc_result", "volt_result", "line_result", "avc_result",
+            "imp_result", "eac_result", "smib_result", "smib_type1_result",
+            "lp_result", "tx2_result", "tx3_result", "loop_result", "sc_result",
+            "comtrade_info", "ai_question", "ai_answer", "comtrade_cursor_label",
+        ):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                font = ("TkDefaultFont", 10) if widget_name in {"ai_question", "ai_answer", "comtrade_cursor_label"} else "TkFixedFont"
+                self._style_text_widget(widget, font=font)
+        if getattr(self, "_line_geometry_result", None) is not None:
+            self._style_text_widget(self._line_geometry_result)
+        if getattr(self, "comtrade_channel_list", None) is not None:
+            self._style_listbox_widget(self.comtrade_channel_list)
 
     @staticmethod
     def _set_enabled(widgets: list[tk.Widget], enabled: bool) -> None:
@@ -429,20 +620,26 @@ class ApproximationToolGUI(tk.Tk):
         if tab == "频率动态":
             pairs = [("额定频率 f0 / Hz", self.freq_f0), ("功率缺额 ΔP_OL0 / pu", self.freq_dp), ("系统惯性时间常数 T_s / s", self.freq_ts),
                      ("一次调频时间常数 T_G / s", self.freq_tg), ("负荷频率系数 k_D / pu/pu", self.freq_kd), ("一次调频系数 k_G / pu/pu", self.freq_kg),
-                     ("绘图时长 / s", self.freq_tend)]
+                     ("绘图时长 / s", self.freq_tend), ("AGC比例 Kp", self.freq_kp_agc), ("AGC积分 Ki", self.freq_ki_agc)]
         elif tab == "机电振荡":
             pairs = [("内电势 E'_q / pu", self.osc_eq), ("端电压 U / pu", self.osc_u), ("等值电抗 X_Σ / pu", self.osc_x), ("初始有功 P0 / pu", self.osc_p0),
                      ("惯性时间常数 T_j / s", self.osc_tj), ("同步频率 f0 / Hz", self.osc_f0)]
-        elif tab == "静态电压稳定":
-            pairs = [("送端电压 U_g / pu", self.volt_ug), ("总电抗 X_Σ / pu", self.volt_x), ("功率因数 cosφ", self.volt_pf), ("容量基准 S_base / MVA", self.volt_sbase)]
-        elif tab == "线路自然功率与无功":
-            pairs = [("线路额定电压 U / kV", self.line_u), ("波阻抗 Z_c / Ω", self.line_zc), ("单位长度电感 L", self.line_l), ("单位长度电容 C", self.line_c),
-                     ("实际传输有功 P / MW", self.line_p), ("单位长度充电功率 Q_N / (Mvar/km)", self.line_qn), ("线路长度 l / km", self.line_len)]
+        elif tab == "电压无功分析":
+            current = self._vr_notebook.tab(self._vr_notebook.select(), "text")
+            if current == "静态电压稳定":
+                pairs = [("送端电压 U_g / pu", self.volt_ug), ("总电抗 X_Σ / pu", self.volt_x), ("功率因数 cosφ", self.volt_pf), ("容量基准 S_base / MVA", self.volt_sbase)]
+            elif current == "线路自然功率与无功":
+                pairs = [("线路额定电压 U / kV", self.line_u), ("波阻抗 Z_c / Ω", self.line_zc), ("单位长度电感 L", self.line_l), ("单位长度电容 C", self.line_c),
+                         ("实际传输有功 P / MW", self.line_p), ("单位长度充电功率 Q_N / (Mvar/km)", self.line_qn), ("线路长度 l / km", self.line_len)]
+            else:
+                pairs = [("高压侧当前电压 / kV", self.avc_vh), ("有功潮流 P / MW", self.avc_p), ("无功潮流 Q / Mvar", self.avc_q), ("当前档位", self.avc_tap_now)]
+            header = f"电压无功子标签: {current}"
+            return header + "\n" + "\n".join(f"{name}: {entry.get().strip()}" for name, entry in pairs)
         elif tab == "暂稳评估":
-            pairs = [("冲击法 ΔPa / pu", self.imp_dp), ("冲击法 Δt / s", self.imp_dt), ("冲击法 f_d / Hz", self.imp_fd), ("冲击法 Pmax_post / pu", self.imp_pmax),
+            pairs = [("冲击法 ΔPa / pu", self.imp_dp), ("冲击法 Δt / s", self.imp_dt), ("冲击法 f_d / Hz", self.imp_fd),
                      ("冲击法 Pm / pu", self.imp_pcur), ("等面积法 Pm / pu", self.eac_pm), ("等面积法 Pmax_pre / pu", self.eac_ppre),
                      ("等面积法 Pmax_fault / pu", self.eac_pf), ("等面积法 Pmax_post / pu", self.eac_ppost), ("等面积法 Δt / s", self.eac_dt)]
-        elif tab == "小扰动分析（SMIB）":
+        elif tab == "小扰动分析":
             lines = [f"模型配置: {self.smib_config.get().strip()}"]
             for key, entry in self.smib_entries.items():
                 lines.append(f"{key}: {entry.get().strip()}")
@@ -464,7 +661,8 @@ class ApproximationToolGUI(tk.Tk):
             return header + "\n" + "\n".join(f"{name}: {entry.get().strip()}" for name, entry in pairs)
         elif tab == "短路电流计算":
             pairs = [("系统电压 / kV", self.sc_u), ("线路长度 / km", self.sc_len), ("R1 / Ω/km", self.sc_r1), ("X1 / Ω/km", self.sc_x1),
-                     ("R0 / Ω/km", self.sc_r0), ("X0 / Ω/km", self.sc_x0), ("接地电阻 / Ω", self.sc_zn), ("故障电阻 / Ω", self.sc_rf)]
+                     ("R0 / Ω/km", self.sc_r0), ("X0 / Ω/km", self.sc_x0), ("左侧中性点电阻 / Ω", self.sc_rn), ("故障电阻 / Ω", self.sc_rf),
+                     ("右侧相角 / °", self.sc_delta_right), ("故障点位置 / %", self.sc_fault_pos)]
         elif tab == "录波曲线":
             return f"当前录波文件: {getattr(self, '_comtrade_cfg_path', '') or '未载入'}\n当前时间窗: {self.comtrade_time_label.cget('text')}"
         else:
@@ -533,186 +731,380 @@ class ApproximationToolGUI(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _build_frequency_tab(self) -> None:
-        self.freq_tab.columnconfigure(1, weight=1)
+        self.freq_tab.columnconfigure(0, weight=1)
         self.freq_tab.rowconfigure(0, weight=1)
 
-        left = ttk.Frame(self.freq_tab, padding=10)
-        right = ttk.Frame(self.freq_tab, padding=10)
-        left.grid(row=0, column=0, sticky="nsw")
-        right.grid(row=0, column=1, sticky="nsew")
+        shell = ttk.Frame(self.freq_tab, padding=8, style="Surface.TFrame")
+        shell.grid(row=0, column=0, sticky="nsew")
+        shell.columnconfigure(0, weight=0)
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(shell, padding=16, style="Card.TFrame")
+        right = ttk.Frame(shell, padding=16, style="Card.TFrame")
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, 6))
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=1)
+        right.rowconfigure(2, weight=1)
+        left.columnconfigure(0, weight=1)
+        left.rowconfigure(5, weight=1)
 
-        ttk.Label(left, text="二阶频率动态（含一次调频）", font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        ttk.Label(left, text="二阶频率动态（含一次调频）", style="PageTitle.TLabel").grid(
+            row=0, column=0, sticky="w"
         )
-        self.freq_f0 = self._add_entry(left, 1, "额定频率 f0 / Hz", "50")
-        self.freq_dp = self._add_entry(left, 2, "功率缺额 ΔP_OL0 / pu", "0.08")
-        self.freq_ts = self._add_entry(left, 3, "系统惯性时间常数 T_s / s", "8")
-        self.freq_tg = self._add_entry(left, 4, "一次调频时间常数 T_G / s", "5")
-        self.freq_kd = self._add_entry(left, 5, "负荷频率系数 k_D / pu/pu", "1.2")
-        self.freq_kg = self._add_entry(left, 6, "一次调频系数 k_G / pu/pu", "4.0")
-        self.freq_tend = self._add_entry(left, 7, "绘图时长 / s", "30")
+        ttk.Label(
+            left,
+            text="界面按“基础模型—AGC—结果”组织。默认参数对应常规机组一次调频算例；启用 AGC 后会自动放宽绘图时长。",
+            style="Muted.TLabel", justify="left", wraplength=430,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
 
+        basic = ttk.LabelFrame(left, text="基础模型参数", style="Card.TLabelframe", padding=10)
+        basic.grid(row=2, column=0, sticky="ew")
+        basic.columnconfigure(1, weight=1)
+        self.freq_f0 = self._add_entry(basic, 0, "额定频率 f0 / Hz", "50")
+        self.freq_dp = self._add_entry(basic, 1, "功率缺额 ΔP_OL0 / pu", "0.08")
+        self.freq_ts = self._add_entry(basic, 2, "系统惯性时间常数 T_s / s", "8")
+        self.freq_tg = self._add_entry(basic, 3, "一次调频时间常数 T_G / s", "5")
+        self.freq_kd = self._add_entry(basic, 4, "负荷频率系数 k_D / pu/pu", "1.2")
+        self.freq_kg = self._add_entry(basic, 5, "一次调频系数 k_G / pu/pu", "4.0")
+        self.freq_tend = self._add_entry(basic, 6, "绘图时长 / s", "30")
         self.show_first_order = tk.BooleanVar(value=True)
-        ttk.Checkbutton(left, text="同时绘制无一次调频一阶对照", variable=self.show_first_order).grid(
-            row=8, column=0, columnspan=2, sticky="w", padx=4, pady=4
+        ttk.Checkbutton(basic, text="同时绘制无一次调频一阶对照", variable=self.show_first_order, style="Card.TCheckbutton").grid(
+            row=7, column=0, columnspan=2, sticky="w", padx=4, pady=(4, 2)
         )
 
-        ttk.Button(left, text="计算并绘图", command=self.calculate_frequency).grid(
-            row=9, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
+        agc = ttk.LabelFrame(left, text="二次调频（AGC）", style="Card.TLabelframe", padding=10)
+        agc.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        agc.columnconfigure(1, weight=1)
+        self.enable_agc = tk.BooleanVar(value=False)
+        ttk.Checkbutton(agc, text="启用 AGC（默认关闭）", variable=self.enable_agc,
+                        command=self._on_agc_toggle, style="Card.TCheckbutton").grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=4, pady=(0, 6)
+        )
+        self.freq_beta = self._add_entry(agc, 1, "ACE频偏系数 B / (MW/Hz, 标幺化)", "15")
+        self.freq_kp_agc = self._add_entry(agc, 2, "AGC比例 Kp", "0.12")
+        self.freq_ki_agc = self._add_entry(agc, 3, "AGC积分 Ki / s⁻¹", "0.010")
+        self.freq_tace = self._add_entry(agc, 4, "ACE滤波时间常数 Tace / s", "8")
+        self.freq_tcmd = self._add_entry(agc, 5, "主站到机组执行滞后 Tcmd / s", "20")
+        self.freq_p2max = self._add_entry(agc, 6, "二次调频最大调节量 |P2|max / pu", "0.08")
+        self.freq_deadband = self._add_entry(agc, 7, "频率死区 |Δf| / Hz", "0.01")
+
+        action = ttk.Frame(left, style="Card.TFrame")
+        action.grid(row=4, column=0, sticky="ew", pady=(10, 8))
+        action.columnconfigure(0, weight=1)
+        ttk.Button(action, text="计算并绘图", command=self.calculate_frequency, style="Accent.TButton").grid(
+            row=0, column=0, sticky="ew"
         )
 
-        ttk.Label(left, text="结果", font=("TkDefaultFont", 10, "bold")).grid(
-            row=10, column=0, columnspan=2, sticky="w", pady=(10, 4)
-        )
-
-        self.freq_result = ScrolledText(left, width=52, height=24, wrap=tk.WORD)
-        self.freq_result.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=4, pady=4)
+        ttk.Label(left, text="结果摘要", style="SectionTitle.TLabel").grid(row=5, column=0, sticky="w", pady=(2, 4))
+        self.freq_result = ScrolledText(left, width=54, height=22, wrap=tk.WORD)
+        self.freq_result.grid(row=6, column=0, sticky="nsew")
         self.freq_result.configure(state="disabled")
+        left.rowconfigure(6, weight=1)
 
-        ttk.Label(right, text="频率曲线", font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, sticky="w", pady=(0, 8)
-        )
-        self.freq_fig = Figure(figsize=(7.4, 5.2), dpi=100)
+        ttk.Label(right, text="频率响应曲线", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(right, text="右侧绘图区与录波页保持相同的“图表 + 工具栏”组织形式，但改为浅色工程风格。",
+                  style="Muted.TLabel", justify="left", wraplength=760).grid(row=1, column=0, sticky="w", pady=(4, 0))
+
+        self.freq_fig = Figure(figsize=(7.6, 5.4), dpi=100)
         self.freq_ax = self.freq_fig.add_subplot(111)
         self.freq_ax.set_xlabel("t / s")
         self.freq_ax.set_ylabel("f / Hz")
         self.freq_ax.grid(True)
 
         self.freq_canvas = FigureCanvasTkAgg(self.freq_fig, master=right)
-        self.freq_canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
+        self.freq_canvas.get_tk_widget().grid(row=2, column=0, sticky="nsew", pady=(10, 0))
         self.freq_toolbar = NavigationToolbar2Tk(self.freq_canvas, right, pack_toolbar=False)
         self.freq_toolbar.update()
-        self.freq_toolbar.grid(row=2, column=0, sticky="ew")
+        self.freq_toolbar.grid(row=3, column=0, sticky="ew", pady=(6, 0))
 
+        self._on_agc_toggle()
         self.calculate_frequency()
+    def _on_agc_toggle(self) -> None:
+        agc_on = bool(self.enable_agc.get())
+        state = "normal" if agc_on else "disabled"
+        for ent in (self.freq_beta, self.freq_kp_agc, self.freq_ki_agc, self.freq_tace, self.freq_tcmd, self.freq_p2max, self.freq_deadband):
+            ent.configure(state=state)
+        if agc_on:
+            try:
+                t_val = float(self.freq_tend.get().strip() or "0")
+            except Exception:
+                t_val = 0.0
+            if t_val < 120.0:
+                self.freq_tend.delete(0, tk.END)
+                self.freq_tend.insert(0, "300")
 
     def _build_oscillation_tab(self) -> None:
-        frame = ttk.Frame(self.osc_tab, padding=12)
-        frame.pack(fill="both", expand=True)
-        frame.columnconfigure(0, weight=0)
-        frame.columnconfigure(1, weight=1)
+        self.osc_tab.columnconfigure(0, weight=1)
+        self.osc_tab.rowconfigure(0, weight=1)
 
-        ttk.Label(frame, text="机电振荡频率快估", font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        shell = ttk.Frame(self.osc_tab, padding=8, style="Surface.TFrame")
+        shell.pack(fill="both", expand=True)
+        shell.columnconfigure(0, weight=0)
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(shell, padding=16, style="Card.TFrame")
+        right = ttk.Frame(shell, padding=16, style="Card.TFrame")
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, 6))
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        left.columnconfigure(0, weight=1)
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(2, weight=1)
+
+        ttk.Label(left, text="机电振荡频率快估", style="PageTitle.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Label(
+            left,
+            text="适用于单机与等值系统之间的小扰动初步核算。界面保留轻量输入，但使用更清晰的参数卡片与结果卡片布局。",
+            style="Muted.TLabel", justify="left", wraplength=400,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
+
+        form = ttk.LabelFrame(left, text="计算参数", style="Card.TLabelframe", padding=10)
+        form.grid(row=2, column=0, sticky="ew")
+        form.columnconfigure(1, weight=1)
+        self.osc_eq = self._add_entry(form, 0, "内电势 E'_q / pu", "1.12")
+        self.osc_u = self._add_entry(form, 1, "端电压 U / pu", "1.0")
+        self.osc_x = self._add_entry(form, 2, "等值电抗 X_Σ / pu", "0.55")
+        self.osc_p0 = self._add_entry(form, 3, "初始有功 P0 / pu", "0.8")
+        self.osc_tj = self._add_entry(form, 4, "惯性时间常数 T_j / s", "9")
+        self.osc_f0 = self._add_entry(form, 5, "同步频率 f0 / Hz", "50")
+
+        ttk.Button(left, text="计算", command=self.calculate_oscillation, style="Accent.TButton").grid(
+            row=3, column=0, sticky="ew", pady=(10, 0)
         )
 
-        self.osc_eq = self._add_entry(frame, 1, "内电势 E'_q / pu", "1.12")
-        self.osc_u = self._add_entry(frame, 2, "端电压 U / pu", "1.0")
-        self.osc_x = self._add_entry(frame, 3, "等值电抗 X_Σ / pu", "0.55")
-        self.osc_p0 = self._add_entry(frame, 4, "初始有功 P0 / pu", "0.8")
-        self.osc_tj = self._add_entry(frame, 5, "惯性时间常数 T_j / s", "9")
-        self.osc_f0 = self._add_entry(frame, 6, "同步频率 f0 / Hz", "50")
-
-        ttk.Button(frame, text="计算", command=self.calculate_oscillation).grid(
-            row=7, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
-        )
-
-        self.osc_result = ScrolledText(frame, width=85, height=24, wrap=tk.WORD)
-        self.osc_result.grid(row=8, column=0, columnspan=2, sticky="nsew", padx=4, pady=8)
+        ttk.Label(right, text="计算结果", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(right, text="右侧统一收纳摘要、点位图与冲击暂态电流波形。", style="Muted.TLabel", justify="left", wraplength=760).grid(row=1, column=0, sticky="ew", pady=(4, 8))
+        ttk.Label(
+            right,
+            text="结果区强调固有频率、同步系数与线性化假设。与其它页统一为白色结果面板。",
+            style="Muted.TLabel", justify="left", wraplength=720,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
+        self.osc_result = ScrolledText(right, width=90, height=24, wrap=tk.WORD)
+        self.osc_result.grid(row=2, column=0, sticky="nsew")
         self.osc_result.configure(state="disabled")
 
         self.calculate_oscillation()
-
     def _build_voltage_tab(self) -> None:
-        frame = ttk.Frame(self.volt_tab, padding=12)
-        frame.pack(fill="both", expand=True)
-        frame.columnconfigure(0, weight=0)
-        frame.columnconfigure(1, weight=1)
+        self.volt_tab.columnconfigure(0, weight=1)
+        self.volt_tab.rowconfigure(0, weight=1)
+        nb = ttk.Notebook(self.volt_tab)
+        nb.grid(row=0, column=0, sticky="nsew")
+        self._vr_notebook = nb
+        self._vr_notebook.bind("<<NotebookTabChanged>>", self._on_ai_context_changed)
 
-        ttk.Label(frame, text="静态电压稳定极限快估", font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        self._vr_static_tab = ttk.Frame(nb)
+        self._vr_line_tab = ttk.Frame(nb)
+        self._vr_avc_tab = ttk.Frame(nb)
+        nb.add(self._vr_static_tab, text="静态电压稳定")
+        nb.add(self._vr_line_tab, text="线路自然功率与无功")
+        nb.add(self._vr_avc_tab, text="AVC策略模拟")
+
+        # 子页1：静态电压稳定
+        self._vr_static_tab.columnconfigure(0, weight=1)
+        self._vr_static_tab.rowconfigure(0, weight=1)
+        static_shell = ttk.Frame(self._vr_static_tab, padding=8, style="Surface.TFrame")
+        static_shell.grid(row=0, column=0, sticky="nsew")
+        static_shell.columnconfigure(0, weight=0, minsize=420)
+        static_shell.columnconfigure(1, weight=1)
+        static_shell.rowconfigure(0, weight=1)
+
+        static_left = ttk.Frame(static_shell, padding=16, style="Card.TFrame")
+        static_right = ttk.Frame(static_shell, padding=16, style="Card.TFrame")
+        static_left.grid(row=0, column=0, sticky="nsw", padx=(0, 6))
+        static_right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        static_left.columnconfigure(0, weight=1)
+        static_right.columnconfigure(0, weight=1)
+        static_right.rowconfigure(2, weight=1)
+
+        ttk.Label(static_left, text="静态电压稳定极限快估", style="PageTitle.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Label(
+            static_left,
+            text="界面改为“输入参数—结果说明”双栏结构，适合快速评估受端最低电压、最大有功传输与折算 MW 指标。",
+            style="Muted.TLabel", justify="left", wraplength=390,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
+
+        static_form = ttk.LabelFrame(static_left, text="参数输入", style="Card.TLabelframe", padding=10)
+        static_form.grid(row=2, column=0, sticky="ew")
+        static_form.columnconfigure(1, weight=1)
+        self.volt_ug = self._add_entry(static_form, 0, "送端电压 U_g / pu", "1.0")
+        self.volt_x = self._add_entry(static_form, 1, "总电抗 X_Σ / pu", "0.32")
+        self.volt_pf = self._add_entry(static_form, 2, "功率因数 cosφ（默认滞后）", "0.95")
+        self.volt_sbase = self._add_entry(static_form, 3, "容量基准 S_base / MVA（可改）", "100")
+        ttk.Button(static_left, text="计算", command=self.calculate_voltage, style="Accent.TButton").grid(
+            row=3, column=0, sticky="ew", pady=(10, 0)
         )
 
-        self.volt_ug = self._add_entry(frame, 1, "送端电压 U_g / pu", "1.0")
-        self.volt_x = self._add_entry(frame, 2, "总电抗 X_Σ / pu", "0.32")
-        self.volt_pf = self._add_entry(frame, 3, "功率因数 cosφ（默认滞后）", "0.95")
-        self.volt_sbase = self._add_entry(frame, 4, "容量基准 S_base / MVA（可改）", "100")
-
-        ttk.Button(frame, text="计算", command=self.calculate_voltage).grid(
-            row=5, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
-        )
-
-        self.volt_result = ScrolledText(frame, width=85, height=24, wrap=tk.WORD)
-        self.volt_result.grid(row=6, column=0, columnspan=2, sticky="nsew", padx=4, pady=8)
+        ttk.Label(static_right, text="计算结果", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            static_right,
+            text="结果区强调稳定极限、受端最低电压与工程适用条件，便于与负荷水平或规划指标对照。",
+            style="Muted.TLabel", justify="left", wraplength=760,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
+        self.volt_result = ScrolledText(static_right, width=88, height=24, wrap=tk.WORD)
+        self.volt_result.grid(row=2, column=0, sticky="nsew")
         self.volt_result.configure(state="disabled")
 
-        self.calculate_voltage()
+        # 子页2：线路自然功率与无功
+        self._vr_line_tab.columnconfigure(0, weight=1)
+        self._vr_line_tab.rowconfigure(0, weight=1)
+        line_shell = ttk.Frame(self._vr_line_tab, padding=8, style="Surface.TFrame")
+        line_shell.grid(row=0, column=0, sticky="nsew")
+        line_shell.columnconfigure(0, weight=0, minsize=450)
+        line_shell.columnconfigure(1, weight=1)
+        line_shell.rowconfigure(0, weight=1)
 
-    def _build_line_tab(self) -> None:
-        frame = ttk.Frame(self.line_tab, padding=12)
-        frame.pack(fill="both", expand=True)
-        frame.columnconfigure(0, weight=0)
-        frame.columnconfigure(1, weight=1)
+        line_left = ttk.Frame(line_shell, padding=16, style="Card.TFrame")
+        line_right = ttk.Frame(line_shell, padding=16, style="Card.TFrame")
+        line_left.grid(row=0, column=0, sticky="nsw", padx=(0, 6))
+        line_right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        line_left.columnconfigure(0, weight=1)
+        line_right.columnconfigure(0, weight=1)
+        line_right.rowconfigure(2, weight=1)
 
-        ttk.Label(frame, text="长线路自然功率与无功行为快估", font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        ttk.Label(line_left, text="长线路自然功率与无功行为快估", style="PageTitle.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Label(
+            line_left,
+            text="左侧保留线路额定电压、波阻抗、充电功率与长度等输入；右侧集中展示自然功率、无功平衡与实际运行偏离。",
+            style="Muted.TLabel", justify="left", wraplength=420,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
+
+        line_form = ttk.LabelFrame(line_left, text="线路参数", style="Card.TLabelframe", padding=10)
+        line_form.grid(row=2, column=0, sticky="ew")
+        line_form.columnconfigure(1, weight=1)
+        self.line_u = self._add_entry(line_form, 0, "线路额定电压 U / kV（线电压）", "500")
+        self.line_zc = self._add_entry(line_form, 1, "波阻抗 Z_c / Ω（优先）", "250")
+        self.line_l = self._add_entry(line_form, 2, "单位长度电感 L（可留空）", "")
+        self.line_c = self._add_entry(line_form, 3, "单位长度电容 C（可留空）", "")
+        self.line_p = self._add_entry(line_form, 4, "实际传输有功 P / MW", "700")
+        self.line_qn = self._add_entry(line_form, 5, "单位长度充电功率 Q_N / (Mvar/km)", "1.2")
+        self.line_len = self._add_entry(line_form, 6, "线路长度 l / km", "200")
+        ttk.Button(line_left, text="计算", command=self.calculate_line, style="Accent.TButton").grid(
+            row=3, column=0, sticky="ew", pady=(10, 0)
         )
 
-        self.line_u = self._add_entry(frame, 1, "线路额定电压 U / kV（线电压）", "500")
-        self.line_zc = self._add_entry(frame, 2, "波阻抗 Z_c / Ω（优先）", "250")
-        self.line_l = self._add_entry(frame, 3, "单位长度电感 L（可留空）", "")
-        self.line_c = self._add_entry(frame, 4, "单位长度电容 C（可留空）", "")
-        self.line_p = self._add_entry(frame, 5, "实际传输有功 P / MW", "700")
-        self.line_qn = self._add_entry(frame, 6, "单位长度充电功率 Q_N / (Mvar/km)", "1.2")
-        self.line_len = self._add_entry(frame, 7, "线路长度 l / km", "200")
-
-        ttk.Button(frame, text="计算", command=self.calculate_line).grid(
-            row=8, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
-        )
-
-        self.line_result = ScrolledText(frame, width=85, height=24, wrap=tk.WORD)
-        self.line_result.grid(row=9, column=0, columnspan=2, sticky="nsew", padx=4, pady=8)
+        ttk.Label(line_right, text="计算结果", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            line_right,
+            text="结果区按照自然功率、充电无功、实际潮流偏离三部分整理，更适合教学展示与方案初步核算。",
+            style="Muted.TLabel", justify="left", wraplength=760,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
+        self.line_result = ScrolledText(line_right, width=88, height=24, wrap=tk.WORD)
+        self.line_result.grid(row=2, column=0, sticky="nsew")
         self.line_result.configure(state="disabled")
 
+        # 子页3：AVC策略模拟
+        self._vr_avc_tab.columnconfigure(0, weight=1)
+        self._vr_avc_tab.rowconfigure(0, weight=1)
+        avc_shell = ttk.Frame(self._vr_avc_tab, padding=8, style="Surface.TFrame")
+        avc_shell.grid(row=0, column=0, sticky="nsew")
+        avc_shell.columnconfigure(0, weight=0, minsize=500)
+        avc_shell.columnconfigure(1, weight=1)
+        avc_shell.rowconfigure(0, weight=1)
+
+        avc_left_outer, avc_left, _avc_canvas = self._create_scrollable_card(avc_shell, padding=16)
+        avc_left_outer.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        avc_right = ttk.Frame(avc_shell, padding=16, style="Card.TFrame")
+        avc_right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        avc_left.columnconfigure(0, weight=1)
+        avc_right.columnconfigure(0, weight=1)
+        avc_right.rowconfigure(2, weight=1)
+
+        ttk.Label(avc_left, text="AVC策略模拟（降压变压器+无功补偿）", style="PageTitle.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Label(
+            avc_left,
+            text="将 AVC 页改为滚动输入卡片，减少长表单带来的压迫感；右侧单独显示 9 区策略判断、推荐档位与无功投切结果。",
+            style="Muted.TLabel", justify="left", wraplength=460,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
+
+        avc_form = ttk.LabelFrame(avc_left, text="运行点与设备参数", style="Card.TLabelframe", padding=10)
+        avc_form.grid(row=2, column=0, sticky="ew")
+        avc_form.columnconfigure(1, weight=1)
+        self.avc_hv_kv = self._add_entry(avc_form, 0, "高压侧额定电压 / kV", "220")
+        self.avc_lv_kv = self._add_entry(avc_form, 1, "低压侧额定电压 / kV", "110")
+        self.avc_vh = self._add_entry(avc_form, 2, "高压侧当前电压 / kV", "226")
+        self.avc_lv_min = self._add_entry(avc_form, 3, "低压侧电压下限 / kV", "108")
+        self.avc_lv_max = self._add_entry(avc_form, 4, "低压侧电压上限 / kV", "116")
+        self.avc_tap_min = self._add_entry(avc_form, 5, "变压器最小档位", "-8")
+        self.avc_tap_max = self._add_entry(avc_form, 6, "变压器最大档位", "8")
+        self.avc_tap_now = self._add_entry(avc_form, 7, "变压器当前档位", "0")
+        self.avc_tap_step = self._add_entry(avc_form, 8, "单档电压调节率 / %", "1.25")
+        self.avc_cap_num = self._add_entry(avc_form, 9, "低压侧电容器组数量", "2")
+        self.avc_cap_each = self._add_entry(avc_form, 10, "每组电容器容量 / Mvar", "10")
+        self.avc_rea_num = self._add_entry(avc_form, 11, "低压侧电抗器组数量", "1")
+        self.avc_rea_each = self._add_entry(avc_form, 12, "每组电抗器容量 / Mvar", "10")
+        self.avc_p = self._add_entry(avc_form, 13, "高压侧有功潮流 P / MW", "160")
+        self.avc_q = self._add_entry(avc_form, 14, "高压侧无功潮流 Q / Mvar（感性为正）", "45")
+        ttk.Button(avc_left, text="执行9区策略模拟", command=self.calculate_avc_strategy, style="Accent.TButton").grid(
+            row=3, column=0, sticky="ew", pady=(10, 0)
+        )
+
+        ttk.Label(avc_right, text="策略结果", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            avc_right,
+            text="结果区突出 AVC 当前区间、建议调压方向、档位与补偿设备动作。适合作为运行策略解释面板。",
+            style="Muted.TLabel", justify="left", wraplength=760,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
+        self.avc_result = ScrolledText(avc_right, width=88, height=22, wrap=tk.WORD)
+        self.avc_result.grid(row=2, column=0, sticky="nsew")
+        self.avc_result.configure(state="disabled")
+
+        self.calculate_voltage()
         self.calculate_line()
+        self.calculate_avc_strategy()
 
     def _build_impact_tab(self) -> None:
-        # ── 顶层布局：左侧两个输入框（上下排列）+ 右侧 P-δ 图 ──────────────
-        self.impact_tab.columnconfigure(0, weight=0)
-        self.impact_tab.columnconfigure(1, weight=1)
+        self.impact_tab.columnconfigure(0, weight=1)
         self.impact_tab.rowconfigure(0, weight=1)
 
-        left  = ttk.Frame(self.impact_tab, padding=6)
-        right = ttk.Frame(self.impact_tab, padding=6)
-        left.grid(row=0, column=0, sticky="nsw")
-        right.grid(row=0, column=1, sticky="nsew")
+        shell = ttk.Frame(self.impact_tab, padding=8, style="Surface.TFrame")
+        shell.grid(row=0, column=0, sticky="nsew")
+        shell.columnconfigure(0, weight=0)
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(0, weight=1)
+
+        left = ttk.Frame(shell, padding=16, style="Card.TFrame")
+        right = ttk.Frame(shell, padding=16, style="Card.TFrame")
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, 6))
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=1)
+        right.rowconfigure(2, weight=1)
 
-        # ══════════════════════════════════════════════════════════════════
-        # 上框：冲击法快估
-        # ══════════════════════════════════════════════════════════════════
-        imp_frame = ttk.LabelFrame(left, text="冲击法快估", padding=8)
-        imp_frame.pack(fill="x", expand=False, pady=(0, 6))
-        imp_frame.columnconfigure(0, weight=0)
+        ttk.Label(left, text="暂稳评估", style="PageTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            left,
+            text="左侧统一收纳冲击法与等面积法。上框侧重切除时间与振荡指标，下框侧重 P-δ 曲线及临界清除判断。",
+            style="Muted.TLabel", justify="left", wraplength=430,
+        ).pack(fill="x", pady=(4, 10))
+
+        imp_frame = ttk.LabelFrame(left, text="冲击法快估", style="Card.TLabelframe", padding=10)
+        imp_frame.pack(fill="x", expand=False, pady=(0, 10))
         imp_frame.columnconfigure(1, weight=1)
-
         self.imp_dp   = self._add_entry(imp_frame, 0, "故障加速功率 ΔPa / pu", "0.9")
         self.imp_dt   = self._add_entry(imp_frame, 1, "故障切除时间 Δt / s", "0.12")
         self.imp_fd   = self._add_entry(imp_frame, 2, "故障后振荡频率 f_d / Hz", "1.106")
-        self.imp_pmax = self._add_entry(imp_frame, 3, "故障后最大传输功率 Pmax_post / pu", "1.65")
-        self.imp_pcur = self._add_entry(imp_frame, 4, "当前传输功率 Pm / pu（冲击法裕度 & 临界切除用）", "0.90")
-        self.imp_tj   = self._add_entry(imp_frame, 5, "惯性时间常数 T_j / s（临界切除用）", "9")
-        self.imp_f0   = self._add_entry(imp_frame, 6, "额定频率 f0 / Hz（临界切除用）", "50")
-
-        ttk.Button(imp_frame, text="计算", command=self.calculate_impact).grid(
-            row=7, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 2)
+        self.imp_pcur = self._add_entry(imp_frame, 3, "当前传输功率 Pm / pu（用于振幅对比 & 临界切除）", "0.90")
+        self.imp_tj   = self._add_entry(imp_frame, 4, "惯性时间常数 T_j / s（临界切除用）", "9")
+        self.imp_f0   = self._add_entry(imp_frame, 5, "额定频率 f0 / Hz（临界切除用）", "50")
+        ttk.Button(imp_frame, text="计算冲击法", command=self.calculate_impact, style="Accent.TButton").grid(
+            row=6, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
         )
-
-        self.imp_result = ScrolledText(imp_frame, width=50, height=12, wrap=tk.WORD)
-        self.imp_result.grid(row=8, column=0, columnspan=2, sticky="nsew", padx=2, pady=4)
+        self.imp_result = ScrolledText(imp_frame, width=50, height=11, wrap=tk.WORD)
+        self.imp_result.grid(row=7, column=0, columnspan=2, sticky="nsew", padx=2, pady=4)
         self.imp_result.configure(state="disabled")
 
-        # ══════════════════════════════════════════════════════════════════
-        # 下框：等面积法
-        # ══════════════════════════════════════════════════════════════════
-        eac_frame = ttk.LabelFrame(left, text="等面积法（单机无穷大）", padding=8)
-        eac_frame.pack(fill="both", expand=True, pady=(0, 0))
-        eac_frame.columnconfigure(0, weight=0)
+        eac_frame = ttk.LabelFrame(left, text="等面积法（单机无穷大）", style="Card.TLabelframe", padding=10)
+        eac_frame.pack(fill="both", expand=True)
         eac_frame.columnconfigure(1, weight=1)
-
+        eac_frame.rowconfigure(8, weight=1)
         self.eac_pm    = self._add_entry(eac_frame, 0, "机械功率 Pm / pu", "0.90")
         self.eac_ppre  = self._add_entry(eac_frame, 1, "故障前 Pmax_pre / pu", "1.65")
         self.eac_pf    = self._add_entry(eac_frame, 2, "故障中 Pmax_fault / pu（三相故障填 0）", "0.0")
@@ -720,25 +1112,23 @@ class ApproximationToolGUI(tk.Tk):
         self.eac_dt    = self._add_entry(eac_frame, 4, "故障切除时间 Δt / s", "0.12")
         self.eac_tj    = self._add_entry(eac_frame, 5, "惯性时间常数 Tj / s", "9")
         self.eac_f0    = self._add_entry(eac_frame, 6, "额定频率 f0 / Hz", "50")
-
-        ttk.Button(eac_frame, text="计算并绘图", command=self.calculate_eac).grid(
-            row=7, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 2)
+        ttk.Button(eac_frame, text="计算并绘图", command=self.calculate_eac, style="Accent.TButton").grid(
+            row=7, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
         )
-
-        self.eac_result = ScrolledText(eac_frame, width=50, height=14, wrap=tk.WORD)
+        self.eac_result = ScrolledText(eac_frame, width=50, height=13, wrap=tk.WORD)
         self.eac_result.grid(row=8, column=0, columnspan=2, sticky="nsew", padx=2, pady=4)
-        eac_frame.rowconfigure(8, weight=1)
         self.eac_result.configure(state="disabled")
-        eac_frame.pack_configure(before=imp_frame)
 
-        # ══════════════════════════════════════════════════════════════════
-        # 右侧：P-δ 功角曲线图
-        # ══════════════════════════════════════════════════════════════════
-        ttk.Label(right, text="功角曲线（等面积法）", font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, sticky="w", pady=(0, 4)
+        ttk.Label(right, text="功角曲线（等面积法）", style="PageTitle.TLabel").grid(
+            row=0, column=0, sticky="w"
         )
+        ttk.Label(
+            right,
+            text="图形区改为浅色工程图风格，重点突出故障前/中/后功角曲线与加减速面积。",
+            style="Muted.TLabel", justify="left", wraplength=760,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 8))
 
-        self.eac_fig = Figure(figsize=(7.2, 5.4), dpi=100)
+        self.eac_fig = Figure(figsize=(7.4, 5.6), dpi=100)
         self.eac_ax  = self.eac_fig.add_subplot(111)
         self.eac_ax.set_xlabel("δ / °")
         self.eac_ax.set_ylabel("P / pu")
@@ -746,15 +1136,13 @@ class ApproximationToolGUI(tk.Tk):
         self.eac_ax.grid(True)
 
         self.eac_canvas = FigureCanvasTkAgg(self.eac_fig, master=right)
-        self.eac_canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
+        self.eac_canvas.get_tk_widget().grid(row=2, column=0, sticky="nsew")
         self.eac_toolbar = NavigationToolbar2Tk(self.eac_canvas, right, pack_toolbar=False)
         self.eac_toolbar.update()
-        self.eac_toolbar.grid(row=2, column=0, sticky="ew")
+        self.eac_toolbar.grid(row=3, column=0, sticky="ew", pady=(6, 0))
 
-        # 初始化
         self.calculate_impact()
         self.calculate_eac()
-
     def _build_smib_tab(self) -> None:
         self.smib_tab.columnconfigure(1, weight=1)
         self.smib_tab.rowconfigure(0, weight=1)
@@ -773,6 +1161,7 @@ class ApproximationToolGUI(tk.Tk):
                   font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 6))
         intro = (
             "采用 Kundur 经典 SMIB 示例的六阶同步机模型；可切换“机组”“机组+AVR”“机组+AVR+PSS”三种配置。"
+            " 新增“1型AVR/PSS模型”参数页（按教材框图）用于控制环节频域校核。"
             " 程序先由给定运行点构造平衡点，再对非线性模型数值线性化并求取特征值。"
         )
         ttk.Label(left, text=intro, style="Card.TLabel", justify="left",
@@ -797,12 +1186,14 @@ class ApproximationToolGUI(tk.Tk):
         page_machine = ttk.Frame(nb, padding=8)
         page_avr = ttk.Frame(nb, padding=8)
         page_pss = ttk.Frame(nb, padding=8)
+        page_type1 = ttk.Frame(nb, padding=8)
         nb.add(page_case, text="工况与网络")
         nb.add(page_machine, text="六阶机组")
         nb.add(page_avr, text="AVR III")
         nb.add(page_pss, text="PSS II")
+        nb.add(page_type1, text="1型 AVR/PSS")
 
-        for page in (page_case, page_machine, page_avr, page_pss):
+        for page in (page_case, page_machine, page_avr, page_pss, page_type1):
             page.columnconfigure(1, weight=1)
             page.columnconfigure(3, weight=1)
 
@@ -877,6 +1268,28 @@ class ApproximationToolGUI(tk.Tk):
         self.smib_pss_canvas.get_tk_widget().grid(row=5, column=0, columnspan=4, sticky="nsew", padx=4, pady=(8, 0))
         self.smib_pss_canvas.draw()
 
+        self.smib_type1_entries: dict[str, ttk.Entry] = {}
+        def add_type1(key: str, row: int, label: str, default: str, column: int = 0) -> None:
+            self.smib_type1_entries[key] = self._add_entry(page_type1, row, label, default, column=column, width=11)
+
+        add_type1("Kr", 0, "Kr", "1.0", 0); add_type1("Tr", 0, "Tr / s", "0.02", 2)
+        add_type1("Ka", 1, "Ka", "200", 0); add_type1("Ta", 1, "Ta / s", "0.05", 2)
+        add_type1("Kf", 2, "Kf", "0.05", 0); add_type1("Tf", 2, "Tf / s", "1.0", 2)
+        add_type1("Te", 3, "Te / s", "0.5", 0); add_type1("Efd_max", 3, "Efd_max / pu", "6.0", 2)
+        add_type1("Efd_min", 4, "Efd_min / pu", "-6.0", 0)
+        add_type1("Kq1", 5, "Kq1", "10", 0); add_type1("Kq2", 5, "Kq2", "2", 2)
+        add_type1("Kq3", 6, "Kq3", "1", 0); add_type1("Kpss", 6, "K", "10", 2)
+        add_type1("Tq", 7, "Tq / s", "0.1", 0); add_type1("T1e", 7, "T1e / s", "0.15", 2)
+        add_type1("T2e", 8, "T2e / s", "0.03", 0); add_type1("T3e", 8, "T3e / s", "0.15", 2)
+        add_type1("T4e", 9, "T4e / s", "0.03", 0); add_type1("Vsmax", 9, "Vsmax / pu", "0.2", 2)
+        add_type1("Vsmin", 10, "Vsmin / pu", "-0.2", 0); add_type1("f_eval", 10, "评估频率 / Hz", "1.0", 2)
+        ttk.Button(page_type1, text="计算1型 AVR/PSS 指标", command=self.calculate_type1_avr_pss).grid(
+            row=11, column=0, columnspan=4, sticky="ew", padx=4, pady=(8, 4)
+        )
+        self.smib_type1_result = ScrolledText(page_type1, width=56, height=8, wrap=tk.WORD)
+        self.smib_type1_result.grid(row=12, column=0, columnspan=4, sticky="nsew", padx=4, pady=(2, 2))
+        self.smib_type1_result.configure(state="disabled")
+
         ttk.Label(right, text="模态结果", style="Card.TLabel",
                   font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
         self.smib_result = ScrolledText(right, width=78, height=18, wrap=tk.WORD, font="TkFixedFont")
@@ -898,6 +1311,57 @@ class ApproximationToolGUI(tk.Tk):
         self.smib_toolbar.grid(row=4, column=0, sticky="ew")
 
         self._apply_smib_defaults()
+
+    def calculate_type1_avr_pss(self) -> None:
+        try:
+            p = {k: _safe_float(v.get(), k) for k, v in self.smib_type1_entries.items()}
+            for key in ("Tr", "Ta", "Tf", "Te", "Tq", "T1e", "T2e", "T3e", "T4e"):
+                _validate_positive(key, p[key])
+            _validate_positive("评估频率", p["f_eval"])
+            if p["Efd_min"] >= p["Efd_max"]:
+                raise InputError("Efd_min 必须小于 Efd_max。")
+            if p["Vsmin"] >= p["Vsmax"]:
+                raise InputError("Vsmin 必须小于 Vsmax。")
+
+            w = 2.0 * math.pi * p["f_eval"]
+            s = complex(0.0, w)
+            avr_meas = p["Kr"] / (1.0 + s * p["Tr"])
+            avr_amp = p["Ka"] / (1.0 + s * p["Ta"])
+            avr_exc = 1.0 / (1.0 + s * p["Te"])
+            avr_fb = s * p["Kf"] / (1.0 + s * p["Tf"])
+            avr_open = avr_meas * avr_amp * avr_exc
+            avr_closed = avr_open / (1.0 + avr_open * avr_fb)
+
+            pss_in = p["Kq1"] + p["Kq2"] + p["Kq3"]
+            pss_core = (p["Kpss"] + s) / (1.0 + s * p["Tq"])
+            lead1 = (1.0 + s * p["T1e"]) / (1.0 + s * p["T2e"])
+            lead2 = (1.0 + s * p["T3e"]) / (1.0 + s * p["T4e"])
+            pss_tf = pss_in * pss_core * lead1 * lead2
+            vs_est = max(p["Vsmin"], min(p["Vsmax"], pss_tf.real))
+
+            def _fmt(z: complex) -> str:
+                return f"{abs(z):.4f}∠{math.degrees(math.atan2(z.imag, z.real)):+.2f}°"
+
+            text = (
+                "══ 1型 AVR/PSS 模型校核 ═════════════════\n"
+                f"评估频率：{p['f_eval']:.4f} Hz\n\n"
+                "【AVR】\n"
+                f"Gm(s)=Kr/(1+sTr) = {_fmt(avr_meas)}\n"
+                f"Ga(s)=Ka/(1+sTa) = {_fmt(avr_amp)}\n"
+                f"Ge(s)=1/(1+sTe) = {_fmt(avr_exc)}\n"
+                f"Gf(s)=sKf/(1+sTf) = {_fmt(avr_fb)}\n"
+                f"开环 Gavr = {_fmt(avr_open)}\n"
+                f"闭环 Gavr_cl = {_fmt(avr_closed)}\n"
+                f"Efd 限幅区间 = [{p['Efd_min']:.3f}, {p['Efd_max']:.3f}] pu\n\n"
+                "【PSS】\n"
+                f"输入加权 Kq1+Kq2+Kq3 = {pss_in:.4f}\n"
+                f"Gpss(s) = {_fmt(pss_tf)}\n"
+                f"Vs 估算（实部限幅）= {vs_est:.4f} pu，限值[{p['Vsmin']:.3f}, {p['Vsmax']:.3f}]\n\n"
+                "说明：该页按截图中的1型 AVR/PSS 传函进行环节校核，用于小扰动控制参数整定参考。"
+            )
+            self._set_text(self.smib_type1_result, text)
+        except Exception as exc:
+            messagebox.showerror("计算错误", str(exc))
 
     def _apply_smib_defaults(self) -> None:
         defaults = kundur_smib_defaults()
@@ -1029,15 +1493,66 @@ class ApproximationToolGUI(tk.Tk):
             kG = _safe_float(self.freq_kg.get(), "k_G")
             t_end = _safe_float(self.freq_tend.get(), "绘图时长")
             _validate_positive("绘图时长", t_end)
+            agc_on = bool(self.enable_agc.get())
 
             summary = frequency_response_summary(delta_p, Ts, TG, kD, kG, f0)
 
-            t = np.linspace(0.0, t_end, 1400)
+            t = np.linspace(0.0, t_end, max(1400, int(8 * t_end)))
             y2 = frequency_response_value(t, delta_p, Ts, TG, kD, kG)
+            ace_f = None
+            p2_act = None
+            if agc_on:
+                beta_mw_hz = _safe_float(self.freq_beta.get(), "B")
+                kp_agc = _safe_float(self.freq_kp_agc.get(), "Kp")
+                ki_agc = _safe_float(self.freq_ki_agc.get(), "Ki")
+                t_ace = _safe_float(self.freq_tace.get(), "Tace")
+                t_cmd = _safe_float(self.freq_tcmd.get(), "Tcmd")
+                p2max = _safe_float(self.freq_p2max.get(), "P2max")
+                deadband_hz = _safe_float(self.freq_deadband.get(), "频率死区")
+                _validate_positive("B", beta_mw_hz)
+                _validate_nonnegative("Kp", kp_agc)
+                _validate_nonnegative("Ki", ki_agc)
+                _validate_positive("Tace", t_ace)
+                _validate_positive("Tcmd", t_cmd)
+                _validate_nonnegative("P2max", p2max)
+                _validate_nonnegative("频率死区", deadband_hz)
+
+                dt = float(t[1] - t[0])
+                df = 0.0
+                pg1 = 0.0
+                ace_state = 0.0
+                ace_int = 0.0
+                p2 = 0.0
+                y2_num = np.zeros_like(t)
+                ace_f = np.zeros_like(t)
+                p2_act = np.zeros_like(t)
+                for i, _ti in enumerate(t):
+                    df_hz = df * f0
+                    df_eff_hz = 0.0 if abs(df_hz) <= deadband_hz else df_hz
+                    ace_raw = beta_mw_hz * df_eff_hz
+                    dace = (ace_raw - ace_state) / t_ace
+                    ace_state += dt * dace
+                    ace_int += dt * ace_state
+                    p2_cmd = -(kp_agc * ace_state + ki_agc * ace_int)
+                    p2_cmd = max(-p2max, min(p2max, p2_cmd))
+                    dp2 = (p2_cmd - p2) / t_cmd
+                    p2 += dt * dp2
+
+                    dpg1 = (-pg1 - kG * df) / TG
+                    pg1 += dt * dpg1
+                    ddf = (-delta_p + pg1 + p2 - kD * df) / Ts
+                    df += dt * ddf
+
+                    y2_num[i] = df
+                    ace_f[i] = ace_state
+                    p2_act[i] = p2
+                y2 = y2_num
+
             f2 = f0 * (1.0 + y2)
 
             self.freq_ax.clear()
-            self.freq_ax.plot(t, f2, label="含一次调频二阶模型", linewidth=2.0)
+            main_label = "含二次调频（AGC）" if agc_on else "含一次调频二阶模型"
+            self.freq_ax.plot(t, f2, label=main_label, linewidth=2.0, color=("#005f73" if agc_on else None))
             if self.show_first_order.get():
                 y1 = first_order_frequency_response_value(t, delta_p, Ts, kD)
                 f1 = f0 * (1.0 + y1)
@@ -1093,6 +1608,14 @@ class ApproximationToolGUI(tk.Tk):
                 )
 
             text += "\n说明：\n" + summary.notes
+            if agc_on and ace_f is not None and p2_act is not None:
+                text += (
+                    "\n\n══ 二次调频（AGC-FFC）附加结果 ═════════════\n"
+                    f"仿真末端频差 = {y2[-1]:+.6f} pu ({y2[-1] * f0:+.4f} Hz)\n"
+                    f"末端滤波ACE = {ace_f[-1]:+.6f}\n"
+                    f"末端二次调频出力 P2 = {p2_act[-1]:+.6f} pu\n"
+                    "ACE按定频率控制（FFC）仅考虑频偏项，主站指令到机组执行采用一阶滞后。"
+                )
             self._set_text(self.freq_result, text)
 
         except Exception as exc:
@@ -1176,26 +1699,141 @@ class ApproximationToolGUI(tk.Tk):
         except Exception as exc:
             messagebox.showerror("计算错误", str(exc))
 
+    def calculate_avc_strategy(self) -> None:
+        """按简化9区策略给出档位+无功补偿调控建议与调后结果。"""
+        try:
+            hv_base = _safe_float(self.avc_hv_kv.get(), "高压额定电压")
+            lv_base = _safe_float(self.avc_lv_kv.get(), "低压额定电压")
+            vh = _safe_float(self.avc_vh.get(), "高压侧电压")
+            lv_min = _safe_float(self.avc_lv_min.get(), "低压侧下限")
+            lv_max = _safe_float(self.avc_lv_max.get(), "低压侧上限")
+            tap_min = int(round(_safe_float(self.avc_tap_min.get(), "最小档位")))
+            tap_max = int(round(_safe_float(self.avc_tap_max.get(), "最大档位")))
+            tap_now = int(round(_safe_float(self.avc_tap_now.get(), "当前档位")))
+            tap_step_pct = _safe_float(self.avc_tap_step.get(), "单档调节率")
+            cap_num = max(0, int(round(_safe_float(self.avc_cap_num.get(), "电容器组数量"))))
+            cap_each = max(0.0, _safe_float(self.avc_cap_each.get(), "每组电容容量"))
+            rea_num = max(0, int(round(_safe_float(self.avc_rea_num.get(), "电抗器组数量"))))
+            rea_each = max(0.0, _safe_float(self.avc_rea_each.get(), "每组电抗容量"))
+            p_mw = _safe_float(self.avc_p.get(), "有功潮流")
+            q_mvar = _safe_float(self.avc_q.get(), "无功潮流")
+
+            if tap_min > tap_max:
+                raise InputError("最小档位不能大于最大档位。")
+            tap_now = min(max(tap_now, tap_min), tap_max)
+            _validate_positive("高压侧额定电压", hv_base)
+            _validate_positive("低压侧额定电压", lv_base)
+            _validate_positive("单档调节率", tap_step_pct)
+
+            # 当前低压估算：基于变比与当前档位（正档升压）
+            ratio = lv_base / hv_base
+            tap_gain = 1.0 + tap_now * tap_step_pct / 100.0
+            lv_est = vh * ratio * tap_gain
+            lv_mid = 0.5 * (lv_min + lv_max)
+
+            q_cap_total = cap_num * cap_each
+            q_rea_total = rea_num * rea_each
+            q_after = q_mvar
+            tap_target = tap_now
+            action_steps: list[str] = []
+
+            # 9区策略（简化）：电压3区×无功3区
+            if lv_est < lv_min:
+                v_zone = "低压区"
+            elif lv_est > lv_max:
+                v_zone = "高压区"
+            else:
+                v_zone = "正常电压区"
+
+            q_abs_ref = max(10.0, 0.2 * max(abs(p_mw), 1.0))
+            if q_mvar > q_abs_ref:
+                q_zone = "感性无功偏大"
+            elif q_mvar < -q_abs_ref:
+                q_zone = "容性无功偏大"
+            else:
+                q_zone = "无功正常区"
+
+            if v_zone == "低压区":
+                if tap_target < tap_max:
+                    tap_target += 1
+                    action_steps.append("升高变压器档位 +1")
+                if q_after > 0 and q_cap_total > 0:
+                    dq = min(q_after, q_cap_total)
+                    q_after -= dq
+                    action_steps.append(f"投入电容器（最多 {q_cap_total:.2f} Mvar，实际补偿 {dq:.2f} Mvar）")
+            elif v_zone == "高压区":
+                if tap_target > tap_min:
+                    tap_target -= 1
+                    action_steps.append("降低变压器档位 -1")
+                if q_after < 0 and q_rea_total > 0:
+                    dq = min(-q_after, q_rea_total)
+                    q_after += dq
+                    action_steps.append(f"投入电抗器（最多 {q_rea_total:.2f} Mvar，实际吸收 {dq:.2f} Mvar）")
+            else:
+                if q_zone == "感性无功偏大" and q_cap_total > 0:
+                    dq = min(q_after, q_cap_total)
+                    q_after -= dq
+                    action_steps.append(f"正常电压下优先投电容器，补偿 {dq:.2f} Mvar")
+                elif q_zone == "容性无功偏大" and q_rea_total > 0:
+                    dq = min(-q_after, q_rea_total)
+                    q_after += dq
+                    action_steps.append(f"正常电压下优先投电抗器，吸收 {dq:.2f} Mvar")
+                else:
+                    action_steps.append("保持当前档位与无功补偿状态")
+
+            # 调后电压估算（简单线性灵敏度）
+            tap_delta = tap_target - tap_now
+            lv_after = vh * ratio * (1.0 + tap_target * tap_step_pct / 100.0)
+            q_comp = q_mvar - q_after
+            lv_after += 0.015 * q_comp
+
+            zone_map = {
+                ("低压区", "感性无功偏大"): "Ⅰ区（低压+感性）",
+                ("低压区", "无功正常区"): "Ⅱ区（低压+无功正常）",
+                ("低压区", "容性无功偏大"): "Ⅲ区（低压+容性）",
+                ("正常电压区", "感性无功偏大"): "Ⅳ区（电压正常+感性）",
+                ("正常电压区", "无功正常区"): "Ⅴ区（目标区）",
+                ("正常电压区", "容性无功偏大"): "Ⅵ区（电压正常+容性）",
+                ("高压区", "感性无功偏大"): "Ⅶ区（高压+感性）",
+                ("高压区", "无功正常区"): "Ⅷ区（高压+无功正常）",
+                ("高压区", "容性无功偏大"): "Ⅸ区（高压+容性）",
+            }
+            zone_name = zone_map[(v_zone, q_zone)]
+            result_text = (
+                f"══ AVC 9区策略模拟结果 ═══════════════════════\n"
+                f"当前分区：{zone_name}\n"
+                f"电压判据：{v_zone}（估算低压侧 Vlv={lv_est:.3f} kV，限值[{lv_min:.3f}, {lv_max:.3f}]）\n"
+                f"无功判据：{q_zone}（Q={q_mvar:.3f} Mvar，阈值±{q_abs_ref:.3f} Mvar）\n\n"
+                f"建议策略：\n  - " + "\n  - ".join(action_steps) + "\n\n"
+                f"调控后估算：\n"
+                f"  档位 {tap_now} → {tap_target}\n"
+                f"  无功 {q_mvar:.3f} → {q_after:.3f} Mvar\n"
+                f"  低压侧电压 {lv_est:.3f} → {lv_after:.3f} kV\n"
+                f"  无功补偿总动作量 = {q_comp:+.3f} Mvar\n"
+            )
+            self._set_text(self.avc_result, result_text)
+        except Exception as exc:
+            messagebox.showerror("计算错误", str(exc))
+
     def calculate_impact(self) -> None:
         try:
             delta_p = _safe_float(self.imp_dp.get(), "ΔPa")
             delta_t = _safe_float(self.imp_dt.get(), "Δt")
             f_d     = _safe_float(self.imp_fd.get(), "f_d")
-            pmax_post = _safe_float(self.imp_pmax.get(), "Pmax_post")
             pcur_text = self.imp_pcur.get().strip()
             pcur = _safe_float(pcur_text, "Pm") if pcur_text else None
             tj_text = self.imp_tj.get().strip()
             f0_text = self.imp_f0.get().strip()
 
-            summary = impact_method(delta_p, delta_t, f_d, pmax_post, pcur)
+            summary = impact_method(delta_p, delta_t, f_d, pcur)
 
             text = (
-                f"══ 冲击法快估 ══════════════════════\n"
+                f"══ 冲击法：功率振荡幅度快估 ═════════════\n"
                 f"冲击量 Dp = {summary.Dp_pu:.6f} pu\n"
-                f"暂稳极限 Pst = {summary.Pst_pu:.6f} pu\n"
+                f"估算第一摆功率振荡幅值 ΔP_osc ≈ {summary.osc_amp_pu:.6f} pu\n"
             )
             if summary.margin_pu is not None:
-                text += f"相对当前传输功率的裕度 = {summary.margin_pu:.6f} pu\n"
+                text += f"与当前功率幅值对比量 = {summary.margin_pu:.6f} pu\n"
             text += f"结论：{summary.status}\n"
 
             # ── 临界切除角快速估算 ────────────────────────────────────────
@@ -1204,6 +1842,7 @@ class ApproximationToolGUI(tk.Tk):
                     Pm_val  = _safe_float(pcur_text, "Pm")
                     Tj_val  = _safe_float(tj_text,   "T_j")
                     f0_val  = _safe_float(f0_text,   "f0")
+                    pmax_post = _safe_float(self.eac_ppost.get(), "Pmax_post")
                     ccs = critical_cut_angle_approx(Pm_val, pmax_post, Tj_val, f0_val, delta_t)
                     text += (
                         f"\n══ 临界切除角快速估算（§7.6） ══════\n"
@@ -1353,82 +1992,292 @@ class ApproximationToolGUI(tk.Tk):
 
 
     def _build_short_circuit_tab(self) -> None:
-        self.sc_tab.columnconfigure(1, weight=1)
+        self._sc_ui_ready = False
+        self._sc_neutral_auto_values: dict[str, float] = {}
+        self._sc_neutral_manual_flags = {
+            "left_rn": False,
+            "left_xn": False,
+            "right_rn": False,
+            "right_xn": False,
+        }
+
+        self.sc_tab.columnconfigure(0, weight=1)
         self.sc_tab.rowconfigure(0, weight=1)
 
-        left = ttk.Frame(self.sc_tab, padding=10)
-        right = ttk.Frame(self.sc_tab, padding=10)
-        left.grid(row=0, column=0, sticky="nsw")
-        right.grid(row=0, column=1, sticky="nsew")
+        shell = ttk.Frame(self.sc_tab, padding=8, style="Surface.TFrame")
+        shell.grid(row=0, column=0, sticky="nsew")
+        shell.columnconfigure(0, weight=0, minsize=620)
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(0, weight=1)
+
+        left_outer, left, _left_canvas = self._create_scrollable_card(shell, padding=16)
+        left_outer.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        right = ttk.Frame(shell, padding=16, style="Card.TFrame")
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=1)
+        right.rowconfigure(3, weight=1)
+        left.columnconfigure(0, weight=1)
 
-        ttk.Label(left, text="短路电流计算（系统+线路串联，故障在线路末端）", font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        ttk.Label(left, text="短路电流计算", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            left,
+            text="页面按“系统与故障—线路参数—中性点与开断校核—显示设置”重构；左侧改为滚动表单，右侧增加关键指标摘要与更明亮的向量图。",
+            style="Muted.TLabel", justify="left", wraplength=470,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
+
+        basic = ttk.LabelFrame(left, text="系统与故障设定", style="Card.TLabelframe", padding=10)
+        basic.grid(row=2, column=0, sticky="ew")
+        basic.columnconfigure(1, weight=1, minsize=112)
+        basic.columnconfigure(3, weight=1, minsize=112)
+
+        ttk.Label(basic, text="网络模式", style="Form.TLabel").grid(row=0, column=0, sticky="w", padx=4, pady=4)
+        self.sc_mode = ttk.Combobox(basic, state="readonly", width=22, style="Input.TCombobox", values=["单电源", "双电源"])
+        self.sc_mode.grid(row=0, column=1, sticky="ew", padx=4, pady=4)
+        self.sc_mode.set("单电源")
+
+        ttk.Label(basic, text="故障类型", style="Form.TLabel").grid(row=0, column=2, sticky="w", padx=4, pady=4)
+        self.sc_fault_type = ttk.Combobox(
+            basic,
+            state="readonly",
+            width=22,
+            style="Input.TCombobox",
+            values=["A相接地", "B相接地", "C相接地", "AB两相接地", "BC两相接地", "CA两相接地", "AB两相短路", "BC两相短路", "CA两相短路", "三相接地"],
         )
-
-        self.sc_fault_type = ttk.Combobox(left, state="readonly", width=18,
-                                          values=["A相接地", "B相接地", "C相接地", "AB两相接地", "BC两相接地", "CA两相接地", "AB两相短路", "BC两相短路", "CA两相短路", "三相接地"])
-        ttk.Label(left, text="故障类型").grid(row=1, column=0, sticky="w", padx=4, pady=4)
-        self.sc_fault_type.grid(row=1, column=1, sticky="ew", padx=4, pady=4)
+        self.sc_fault_type.grid(row=0, column=3, sticky="ew", padx=4, pady=4)
         self.sc_fault_type.set("A相接地")
 
-        self.sc_u = self._add_entry(left, 2, "系统电压 U / kV（线电压）", "110")
-        self.sc_ssc = self._add_entry(left, 3, "系统短路容量 S_sc / MVA", "2000")
-        self.sc_xr = self._add_entry(left, 4, "系统 X/R 比", "10")
-        self.sc_len = self._add_entry(left, 5, "线路长度 / km", "30")
-        self.sc_r1 = self._add_entry(left, 6, "线路正序电阻 R1 / (Ω/km)", "0.05")
-        self.sc_x1 = self._add_entry(left, 7, "线路正序电抗 X1 / (Ω/km)", "0.40")
-        self.sc_r0 = self._add_entry(left, 8, "线路零序电阻 R0 / (Ω/km)", "0.15")
-        self.sc_x0 = self._add_entry(left, 9, "线路零序电抗 X0 / (Ω/km)", "1.20")
-        self.sc_rf = self._add_entry(left, 10, "过渡电阻 Rf / Ω", "0.0")
+        self.sc_u = self._add_entry(basic, 1, "系统电压 U / kV（线电压）", "110", column=0)
+        self.sc_fault_pos = self._add_entry(basic, 1, "故障点距左侧百分比 / %", "50", column=2)
+        self.sc_ssc = self._add_entry(basic, 2, "左侧系统短路容量 S_sc / MVA", "2000", column=0)
+        self.sc_xr = self._add_entry(basic, 2, "左侧系统 X/R 比", "10", column=2)
+        self.sc_ssc_r = self._add_entry(basic, 3, "右侧系统短路容量 S_sc,R / MVA", "2000", column=0)
+        self.sc_xr_r = self._add_entry(basic, 3, "右侧系统 X/R 比", "10", column=2)
+        self.sc_e_left = self._add_entry(basic, 4, "左侧预故障电势 E_L / pu", "1.00", column=0)
+        self.sc_delta_left = self._add_entry(basic, 4, "左侧预故障相角 δL / °", "0.0", column=2)
+        self.sc_e_right = self._add_entry(basic, 5, "右侧预故障电势 E_R / pu", "1.00", column=0)
+        self.sc_delta_right = self._add_entry(basic, 5, "右侧预故障相角 δR / °", "0.0", column=2)
 
-        self.sc_neutral_mode = ttk.Combobox(left, state="readonly", width=18,
+        line = ttk.LabelFrame(left, text="线路与序参数", style="Card.TLabelframe", padding=10)
+        line.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        line.columnconfigure(1, weight=1, minsize=112)
+        line.columnconfigure(3, weight=1, minsize=112)
+        self.sc_len = self._add_entry(line, 0, "线路长度 / km", "30", column=0)
+        self.sc_rf = self._add_entry(line, 0, "过渡电阻 Rf / Ω", "0.0", column=2)
+        self.sc_r1 = self._add_entry(line, 1, "线路正序电阻 R1 / (Ω/km)", "0.05", column=0)
+        self.sc_x1 = self._add_entry(line, 1, "线路正序电抗 X1 / (Ω/km)", "0.40", column=2)
+        self.sc_r0 = self._add_entry(line, 2, "线路零序电阻 R0 / (Ω/km)", "0.15", column=0)
+        self.sc_x0 = self._add_entry(line, 2, "线路零序电抗 X0 / (Ω/km)", "1.20", column=2)
+        ttk.Label(line, text="零序参数变化会联动刷新默认中性点参数；若已手工改写，则不会被再次覆盖。",
+                  style="Muted.TLabel", justify="left", wraplength=450).grid(
+            row=3, column=0, columnspan=4, sticky="w", padx=4, pady=(6, 0)
+        )
+
+        neutral = ttk.LabelFrame(left, text="中性点与开断校核", style="Card.TLabelframe", padding=10)
+        neutral.grid(row=4, column=0, sticky="ew", pady=(10, 0))
+        neutral.columnconfigure(1, weight=1, minsize=112)
+        neutral.columnconfigure(3, weight=1, minsize=112)
+
+        ttk.Label(neutral, text="左侧中性点方式", style="Form.TLabel").grid(row=0, column=0, sticky="w", padx=4, pady=4)
+        self.sc_neutral_mode = ttk.Combobox(neutral, state="readonly", width=22, style="Input.TCombobox",
                                             values=["直接接地", "中性点不接地", "经消弧线圈接地", "经电阻接地"])
-        ttk.Label(left, text="系统中性点方式").grid(row=11, column=0, sticky="w", padx=4, pady=4)
-        self.sc_neutral_mode.grid(row=11, column=1, sticky="ew", padx=4, pady=4)
+        self.sc_neutral_mode.grid(row=0, column=1, sticky="ew", padx=4, pady=4)
         self.sc_neutral_mode.set("直接接地")
+        ttk.Label(neutral, text="右侧中性点方式", style="Form.TLabel").grid(row=0, column=2, sticky="w", padx=4, pady=4)
+        self.sc_neutral_mode_r = ttk.Combobox(neutral, state="readonly", width=22, style="Input.TCombobox",
+                                              values=["直接接地", "中性点不接地", "经消弧线圈接地", "经电阻接地"])
+        self.sc_neutral_mode_r.grid(row=0, column=3, sticky="ew", padx=4, pady=4)
+        self.sc_neutral_mode_r.set("直接接地")
 
-        self.sc_rn = self._add_entry(left, 12, "中性点电阻 Rn / Ω", "1.5")
-        self.sc_xn = self._add_entry(left, 13, "中性点电抗 Xn / Ω（消弧线圈）", "12.0")
+        self.sc_rn = self._add_entry(neutral, 1, "左侧中性点电阻 Rn,L / Ω", "1.5", column=0)
+        self.sc_xn = self._add_entry(neutral, 1, "左侧中性点电抗 Xn,L / Ω", "12.0", column=2)
+        self.sc_rn_r = self._add_entry(neutral, 2, "右侧中性点电阻 Rn,R / Ω", "1.5", column=0)
+        self.sc_xn_r = self._add_entry(neutral, 2, "右侧中性点电抗 Xn,R / Ω", "12.0", column=2)
+        self.sc_brk = self._add_entry(neutral, 3, "断路器额定开断电流 Ik / kA（可留空）", "31.5", column=0)
+        self.sc_cycles = self._add_entry(neutral, 3, "仿真周波数（波形）", "10", column=2)
 
+        display = ttk.LabelFrame(left, text="显示与交互", style="Card.TLabelframe", padding=10)
+        display.grid(row=5, column=0, sticky="ew", pady=(10, 0))
+        display.columnconfigure(0, weight=1)
+        self.sc_vector_labels_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(display, text="向量图显示数值标签", variable=self.sc_vector_labels_var,
+                        command=self.calculate_short_circuit, style="Card.TCheckbutton").grid(
+            row=0, column=0, sticky="w", padx=4, pady=(0, 4)
+        )
+        ttk.Label(display, text="故障点位置滑条（双电源）", style="Form.TLabel").grid(row=1, column=0, sticky="w", padx=4, pady=(2, 2))
+        self.sc_fault_slider = ttk.Scale(display, from_=0.0, to=100.0, orient=tk.HORIZONTAL,
+                                         command=self._on_sc_fault_slider, style="Accent.Horizontal.TScale")
+        self.sc_fault_slider.grid(row=2, column=0, sticky="ew", padx=4, pady=(0, 4))
+        ttk.Label(display, text="单电源模式自动锁定在 100%，双电源模式可拖动定位故障点。",
+                  style="Muted.TLabel", justify="left", wraplength=450).grid(
+            row=3, column=0, sticky="w", padx=4, pady=(0, 6)
+        )
+        ttk.Button(display, text="计算并绘图", command=self.calculate_short_circuit, style="Accent.TButton").grid(
+            row=4, column=0, sticky="ew", padx=4, pady=(2, 0)
+        )
+
+        ttk.Label(left, text="详细结果", style="SectionTitle.TLabel").grid(row=6, column=0, sticky="w", pady=(12, 4))
+        self.sc_result = ScrolledText(left, width=58, height=18, wrap=tk.WORD)
+        self.sc_result.grid(row=7, column=0, sticky="ew")
+        self.sc_result.configure(state="disabled")
+
+        for entry, key in (
+            (self.sc_rn, "left_rn"),
+            (self.sc_xn, "left_xn"),
+            (self.sc_rn_r, "right_rn"),
+            (self.sc_xn_r, "right_xn"),
+        ):
+            entry.bind("<KeyRelease>", lambda _e, field_key=key: self._mark_sc_neutral_manual(field_key))
+
+        self.sc_mode.bind("<<ComboboxSelected>>", self._on_sc_mode_change)
+        self.sc_fault_type.bind("<<ComboboxSelected>>", lambda _e: self.calculate_short_circuit())
         self.sc_neutral_mode.bind("<<ComboboxSelected>>", self._on_sc_neutral_mode_change)
+        self.sc_neutral_mode_r.bind("<<ComboboxSelected>>", self._on_sc_neutral_mode_change)
         self.sc_len.bind("<FocusOut>", self._on_sc_neutral_mode_change)
         self.sc_r0.bind("<FocusOut>", self._on_sc_neutral_mode_change)
         self.sc_x0.bind("<FocusOut>", self._on_sc_neutral_mode_change)
-        self._on_sc_neutral_mode_change()
-        self.sc_brk = self._add_entry(left, 14, "断路器额定开断电流 Ik / kA（可留空）", "31.5")
-        self.sc_cycles = self._add_entry(left, 15, "仿真周波数（波形）", "10")
 
-        ttk.Button(left, text="计算并绘图", command=self.calculate_short_circuit).grid(
-            row=16, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
-        )
+        ttk.Label(right, text="故障点波形与向量图", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            right,
+            text="右侧结果区增加关键指标摘要，并将原有极坐标向量图改为浅底高对比版本，使表格、波形与相量关系更容易同时辨认。",
+            style="Muted.TLabel", justify="left", wraplength=880,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
 
-        self.sc_result = ScrolledText(left, width=58, height=20, wrap=tk.WORD)
-        self.sc_result.grid(row=17, column=0, columnspan=2, sticky="nsew", padx=4, pady=4)
-        self.sc_result.configure(state="disabled")
+        summary = ttk.Frame(right, style="Card.TFrame")
+        summary.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        for col in range(4):
+            summary.columnconfigure(col, weight=1)
+        self.sc_summary_fault_var = tk.StringVar(value="—")
+        self.sc_summary_peak_var = tk.StringVar(value="—")
+        self.sc_summary_break_var = tk.StringVar(value="—")
+        self.sc_summary_tau_var = tk.StringVar(value="—")
+        for col, (title, var) in enumerate((
+            ("故障模式", self.sc_summary_fault_var),
+            ("最大相电流", self.sc_summary_peak_var),
+            ("开断校核电流", self.sc_summary_break_var),
+            ("直流时间常数", self.sc_summary_tau_var),
+        )):
+            card = ttk.Frame(summary, style="Metric.TFrame", padding=10)
+            card.grid(row=0, column=col, sticky="nsew", padx=(0 if col == 0 else 6, 0))
+            ttk.Label(card, text=title, style="MetricTitle.TLabel").pack(anchor="w")
+            ttk.Label(card, textvariable=var, style="MetricValue.TLabel").pack(anchor="w", pady=(6, 0))
 
-        ttk.Label(right, text="短路点电流波形", font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, sticky="w", pady=(0, 8)
-        )
+        self.sc_plot_notebook = ttk.Notebook(right)
+        self.sc_plot_notebook.grid(row=3, column=0, sticky="nsew")
+        self.sc_plot_current_tab = ttk.Frame(self.sc_plot_notebook, style="Card.TFrame")
+        self.sc_plot_voltage_tab = ttk.Frame(self.sc_plot_notebook, style="Card.TFrame")
+        self.sc_plot_notebook.add(self.sc_plot_current_tab, text="电流与向量图")
+        self.sc_plot_notebook.add(self.sc_plot_voltage_tab, text="电压与向量图")
+        self.sc_plot_current_tab.columnconfigure(0, weight=1)
+        self.sc_plot_current_tab.rowconfigure(0, weight=1)
+        self.sc_plot_voltage_tab.columnconfigure(0, weight=1)
+        self.sc_plot_voltage_tab.rowconfigure(0, weight=1)
 
-        self.sc_fig = Figure(figsize=(8.4, 5.4), dpi=100)
-        self.sc_ax_phase = self.sc_fig.add_subplot(211)
-        self.sc_ax_seq = self.sc_fig.add_subplot(212)
+        self.sc_fig = Figure(figsize=(10.8, 7.0), dpi=100)
+        gs = self.sc_fig.add_gridspec(2, 2, hspace=0.30, wspace=0.24)
+        self.sc_ax_phase = self.sc_fig.add_subplot(gs[0, 0])
+        self.sc_ax_seq = self.sc_fig.add_subplot(gs[1, 0])
+        self.sc_ax_i_table = self.sc_fig.add_subplot(gs[0, 1])
+        self.sc_ax_i_vector = self.sc_fig.add_subplot(gs[1, 1], projection="polar")
         self.sc_ax_phase.set_ylabel("i_abc / A")
         self.sc_ax_seq.set_ylabel("i_012 / A")
         self.sc_ax_seq.set_xlabel("t / s")
-        self.sc_ax_phase.grid(True, alpha=0.4)
-        self.sc_ax_seq.grid(True, alpha=0.4)
+        self.sc_ax_phase.grid(True, alpha=0.45)
+        self.sc_ax_seq.grid(True, alpha=0.45)
+        self._draw_short_circuit_vector_axis(self.sc_ax_i_vector, {}, "故障点电流向量图", table_ax=self.sc_ax_i_table)
 
-        self.sc_canvas = FigureCanvasTkAgg(self.sc_fig, master=right)
-        self.sc_canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
-        self.sc_toolbar = NavigationToolbar2Tk(self.sc_canvas, right, pack_toolbar=False)
+        self.sc_canvas = FigureCanvasTkAgg(self.sc_fig, master=self.sc_plot_current_tab)
+        self.sc_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self.sc_toolbar = NavigationToolbar2Tk(self.sc_canvas, self.sc_plot_current_tab, pack_toolbar=False)
         self.sc_toolbar.update()
-        self.sc_toolbar.grid(row=2, column=0, sticky="ew")
+        self.sc_toolbar.grid(row=1, column=0, sticky="ew")
 
+        self.sc_v_fig = Figure(figsize=(10.8, 7.0), dpi=100)
+        gs_v = self.sc_v_fig.add_gridspec(2, 2, hspace=0.30, wspace=0.24)
+        self.sc_v_ax_phase = self.sc_v_fig.add_subplot(gs_v[0, 0])
+        self.sc_v_ax_seq = self.sc_v_fig.add_subplot(gs_v[1, 0])
+        self.sc_v_ax_table = self.sc_v_fig.add_subplot(gs_v[0, 1])
+        self.sc_v_ax_vector = self.sc_v_fig.add_subplot(gs_v[1, 1], projection="polar")
+        self.sc_v_ax_phase.set_ylabel("u_abc / V")
+        self.sc_v_ax_seq.set_ylabel("u_012 / V")
+        self.sc_v_ax_seq.set_xlabel("t / s")
+        self.sc_v_ax_phase.grid(True, alpha=0.45)
+        self.sc_v_ax_seq.grid(True, alpha=0.45)
+        self._draw_short_circuit_vector_axis(self.sc_v_ax_vector, {}, "故障点电压向量图", table_ax=self.sc_v_ax_table)
+        self.sc_v_canvas = FigureCanvasTkAgg(self.sc_v_fig, master=self.sc_plot_voltage_tab)
+        self.sc_v_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self.sc_v_toolbar = NavigationToolbar2Tk(self.sc_v_canvas, self.sc_plot_voltage_tab, pack_toolbar=False)
+        self.sc_v_toolbar.update()
+        self.sc_v_toolbar.grid(row=1, column=0, sticky="ew")
+
+        self.sc_fault_slider.set(50.0)
+        self._on_sc_neutral_mode_change()
+        self._on_sc_mode_change()
+        self._sc_ui_ready = True
         self.calculate_short_circuit()
 
+    def _mark_sc_neutral_manual(self, key: str) -> None:
+        entry_map = {
+            "left_rn": self.sc_rn,
+            "left_xn": self.sc_xn,
+            "right_rn": self.sc_rn_r,
+            "right_xn": self.sc_xn_r,
+        }
+        entry = entry_map[key]
+        auto = self._sc_neutral_auto_values.get(key)
+        self._sc_neutral_manual_flags[key] = not self._sc_entry_matches_auto(entry.get().strip(), auto)
+
+    @staticmethod
+    def _sc_entry_matches_auto(value: str, auto_value: float | None) -> bool:
+        if auto_value is None:
+            return False
+        try:
+            return math.isclose(float(value), float(auto_value), rel_tol=1e-6, abs_tol=1e-6)
+        except Exception:
+            return value.strip() == f"{auto_value:.6g}"
+
+    @staticmethod
+    def _set_entry_text(entry: ttk.Entry, text: str) -> None:
+        state = str(entry.cget("state"))
+        if state == "disabled":
+            entry.configure(state="normal")
+        entry.delete(0, tk.END)
+        entry.insert(0, text)
+        if state == "disabled":
+            entry.configure(state="disabled")
+
+    def _sync_sc_neutral_entry(self, entry: ttk.Entry, key: str, value: float, *, force: bool = False) -> None:
+        previous_auto = self._sc_neutral_auto_values.get(key)
+        current = entry.get().strip()
+        should_apply = force or (not self._sc_neutral_manual_flags.get(key, False)) or self._sc_entry_matches_auto(current, previous_auto)
+        self._sc_neutral_auto_values[key] = value
+        if should_apply:
+            self._set_entry_text(entry, f"{value:.6g}")
+            self._sc_neutral_manual_flags[key] = False
+
+    def _update_sc_neutral_entry_states(self) -> None:
+        def _apply(mode_box: ttk.Combobox, rn_entry: ttk.Entry, xn_entry: ttk.Entry, *, enabled: bool) -> None:
+            if not enabled:
+                rn_entry.configure(state="disabled")
+                xn_entry.configure(state="disabled")
+                return
+            mode = mode_box.get().strip()
+            if mode in {"直接接地", "中性点不接地"}:
+                rn_entry.configure(state="disabled")
+                xn_entry.configure(state="disabled")
+            elif mode == "经电阻接地":
+                rn_entry.configure(state="normal")
+                xn_entry.configure(state="disabled")
+            elif mode == "经消弧线圈接地":
+                rn_entry.configure(state="disabled")
+                xn_entry.configure(state="normal")
+            else:
+                rn_entry.configure(state="normal")
+                xn_entry.configure(state="normal")
+
+        dual_on = self.sc_mode.get().strip() == "双电源"
+        _apply(self.sc_neutral_mode, self.sc_rn, self.sc_xn, enabled=True)
+        _apply(self.sc_neutral_mode_r, self.sc_rn_r, self.sc_xn_r, enabled=dual_on)
     def _on_sc_neutral_mode_change(self, _event: object | None = None) -> None:
         """根据线路零序参数给出与量级匹配的中性点参数默认值。"""
         try:
@@ -1440,30 +2289,187 @@ class ApproximationToolGUI(tk.Tk):
         except Exception:
             r0_total, x0_total = 4.5, 36.0
 
-        mode = self.sc_neutral_mode.get().strip()
-        if mode == "直接接地":
-            rn, xn = 0.0, 0.0
-        elif mode == "中性点不接地":
-            rn, xn = 1e9, 0.0
-        elif mode == "经消弧线圈接地":
-            rn, xn = 0.0, x0_total / 3.0
-        elif mode == "经电阻接地":
-            rn, xn = r0_total / 3.0, 0.0
-        else:
-            rn, xn = 0.0, 0.0
+        def _defaults(mode: str) -> tuple[float, float]:
+            if mode == "直接接地":
+                return 0.0, 0.0
+            if mode == "中性点不接地":
+                return 1e9, 0.0
+            if mode == "经消弧线圈接地":
+                return 0.0, x0_total / 3.0
+            if mode == "经电阻接地":
+                return r0_total / 3.0, 0.0
+            return 0.0, 0.0
 
-        self.sc_rn.delete(0, tk.END)
-        self.sc_rn.insert(0, f"{rn:.6g}")
-        self.sc_xn.delete(0, tk.END)
-        self.sc_xn.insert(0, f"{xn:.6g}")
+        force_left = _event is None or getattr(_event, "widget", None) is self.sc_neutral_mode
+        force_right = _event is None or getattr(_event, "widget", None) is self.sc_neutral_mode_r
+        rn_l, xn_l = _defaults(self.sc_neutral_mode.get().strip())
+        rn_r, xn_r = _defaults(self.sc_neutral_mode_r.get().strip())
+
+        self._sync_sc_neutral_entry(self.sc_rn, "left_rn", rn_l, force=force_left)
+        self._sync_sc_neutral_entry(self.sc_xn, "left_xn", xn_l, force=force_left)
+        self._sync_sc_neutral_entry(self.sc_rn_r, "right_rn", rn_r, force=force_right)
+        self._sync_sc_neutral_entry(self.sc_xn_r, "right_xn", xn_r, force=force_right)
+        self._update_sc_neutral_entry_states()
+
+    def _on_sc_fault_slider(self, value: str) -> None:
+        if not getattr(self, "_sc_ui_ready", False):
+            return
+        try:
+            v = float(value)
+        except Exception:
+            return
+        self.sc_fault_pos.configure(state="normal")
+        self.sc_fault_pos.delete(0, tk.END)
+        self.sc_fault_pos.insert(0, f"{v:.2f}")
+        if self.sc_mode.get().strip() != "双电源":
+            self.sc_fault_pos.configure(state="disabled")
+        self.calculate_short_circuit()
+
+    def _on_sc_mode_change(self, _event: object | None = None) -> None:
+        is_dual = self.sc_mode.get().strip() == "双电源"
+        state = "normal" if is_dual else "disabled"
+        dual_entries = (
+            self.sc_ssc_r, self.sc_xr_r, self.sc_fault_pos,
+            self.sc_e_right, self.sc_delta_right,
+        )
+        for entry in dual_entries:
+            entry.configure(state=state)
+        self.sc_neutral_mode_r.configure(state="readonly" if is_dual else "disabled")
+        self.sc_fault_slider.configure(state=state)
+        if not is_dual:
+            self.sc_fault_pos.configure(state="normal")
+            self._set_entry_text(self.sc_fault_pos, "100")
+            self.sc_fault_pos.configure(state="disabled")
+            self.sc_fault_slider.set(100.0)
+        else:
+            self.sc_fault_pos.configure(state="normal")
+            self._set_entry_text(self.sc_fault_pos, f"{self.sc_fault_slider.get():.2f}")
+        self._update_sc_neutral_entry_states()
+        if getattr(self, "_sc_ui_ready", False):
+            self.calculate_short_circuit()
+
+    def _draw_short_circuit_vector_axis(
+        self,
+        ax,
+        vectors: dict[str, complex],
+        title: str,
+        show_labels: bool = True,
+        table_ax=None,
+    ) -> None:
+        p = self._palette
+        ax.clear()
+        ax.set_theta_zero_location("E")
+        ax.set_theta_direction(1)
+        ax.set_facecolor("#fbfdff")
+        ax.set_title(title, color=p["text"], fontsize=10.8, pad=14, fontweight="bold")
+        if table_ax is not None:
+            table_ax.clear()
+            table_ax.axis("off")
+            table_ax.set_facecolor("#fbfdff")
+        colors = {
+            "A": "#3b82f6", "B": "#d4a017", "C": "#ef5b5b",
+            "1": "#22a06b", "2": "#5b6def", "0": "#9b6df2",
+        }
+        linestyles = {"A": "-", "B": "-", "C": "-", "1": "--", "2": "--", "0": "--"}
+        grid_color = "#d9e3ee"
+        if not vectors:
+            ax.set_ylim(0.0, 1.0)
+            ax.grid(color=grid_color, linestyle="-", linewidth=0.9, alpha=0.95)
+            ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+            ax.set_yticklabels(["0.25", "0.50", "0.75", "1.00"], color=p["muted"], fontsize=8)
+            ax.set_thetagrids(np.arange(0, 360, 45), color=p["muted"], fontsize=8.5)
+            ax.spines["polar"].set_color(p["border_strong"])
+            ax.spines["polar"].set_linewidth(1.0)
+            return
+        max_mag = max(1e-6, max(abs(v) for v in vectors.values()))
+        radial_max = max_mag * 1.15
+        ax.set_ylim(0.0, radial_max)
+        rings = np.linspace(radial_max / 4.0, radial_max, 4)
+        ax.set_yticks(rings)
+        ax.set_yticklabels([f"{tick:.3g}" for tick in rings], color=p["muted"], fontsize=8)
+        ax.set_thetagrids(np.arange(0, 360, 45), color=p["muted"], fontsize=8.5)
+        ax.grid(color=grid_color, linestyle="-", linewidth=0.9, alpha=0.95)
+        ax.spines["polar"].set_color(p["border_strong"])
+        ax.spines["polar"].set_linewidth(1.0)
+        for name, val in vectors.items():
+            theta = math.atan2(val.imag, val.real)
+            radius = abs(val)
+            color = colors.get(name, p["accent"])
+            linestyle = linestyles.get(name, "-")
+            ax.annotate(
+                "",
+                xy=(theta, radius),
+                xytext=(theta, 0.0),
+                arrowprops=dict(arrowstyle="-|>", color=color, linewidth=2.4, linestyle=linestyle, shrinkA=0, shrinkB=0),
+            )
+            if show_labels:
+                ang = math.degrees(theta)
+                ax.text(theta, min(radial_max, radius * 1.08), f"{name}\n{radius:.3g}∠{ang:.1f}°",
+                        color=color, fontsize=7.0, ha="center", va="center")
+        legend_order = [k for k in ("A", "B", "C", "1", "2", "0") if k in vectors]
+        if legend_order:
+            table_rows = []
+            for k in legend_order:
+                val = vectors[k]
+                angle = math.degrees(math.atan2(val.imag, val.real))
+                table_rows.append([
+                    k,
+                    f"{abs(val):.4g}",
+                    f"{angle:+.2f}",
+                    f"{val.real:.4g}",
+                    f"{val.imag:.4g}",
+                ])
+            if table_ax is not None:
+                table = table_ax.table(
+                    cellText=table_rows,
+                    colLabels=["名称", "幅值", "相角/°", "实部", "虚部"],
+                    loc="center",
+                    cellLoc="center",
+                )
+                table.auto_set_font_size(False)
+                table.set_fontsize(8.6)
+                table.scale(1.02, 1.16)
+                for (row, _col), cell in table.get_celld().items():
+                    cell.set_linewidth(0.8)
+                    cell.set_edgecolor(p["border_strong"])
+                    if row == 0:
+                        cell.set_facecolor("#eef4fb")
+                        cell.get_text().set_color(p["text"])
+                        cell.get_text().set_fontweight("bold")
+                    else:
+                        cell.set_facecolor("#ffffff")
+                        cell.get_text().set_color(p["text"])
+            handles = [
+                Line2D([0], [0], color=colors[k], linestyle=linestyles[k], linewidth=2.4, label=k)
+                for k in legend_order
+            ]
+            ax.legend(
+                handles=handles,
+                loc="upper left",
+                bbox_to_anchor=(0.02, 1.05),
+                ncol=min(3, len(handles)),
+                fontsize=7.6,
+                framealpha=0.98,
+                facecolor="#ffffff",
+                edgecolor=p["border_strong"],
+                labelcolor=p["text"],
+            )
 
     def calculate_short_circuit(self) -> None:
         try:
+            mode = self.sc_mode.get().strip()
             fault_type = self.sc_fault_type.get().strip()
             neutral_mode = self.sc_neutral_mode.get().strip()
             U = _safe_float(self.sc_u.get(), "U")
             Ssc = _safe_float(self.sc_ssc.get(), "S_sc")
             xr = _safe_float(self.sc_xr.get(), "X/R")
+            Ssc_r = _safe_float(self.sc_ssc_r.get(), "S_sc,R")
+            xr_r = _safe_float(self.sc_xr_r.get(), "X/R,R")
+            e_left = _safe_float(self.sc_e_left.get(), "E_L")
+            d_left = _safe_float(self.sc_delta_left.get(), "δL")
+            e_right = _safe_float(self.sc_e_right.get(), "E_R")
+            d_right = _safe_float(self.sc_delta_right.get(), "δR")
+            fault_pos_pct = _safe_float(self.sc_fault_pos.get(), "故障点百分比")
             length = _safe_float(self.sc_len.get(), "线路长度")
             R1 = _safe_float(self.sc_r1.get(), "R1")
             X1 = _safe_float(self.sc_x1.get(), "X1")
@@ -1472,12 +2478,21 @@ class ApproximationToolGUI(tk.Tk):
             Rf = _safe_float(self.sc_rf.get(), "Rf")
             Rn = _safe_float(self.sc_rn.get(), "Rn")
             Xn = _safe_float(self.sc_xn.get(), "Xn")
+            neutral_mode_right = self.sc_neutral_mode_r.get().strip()
+            Rn_r = _safe_float(self.sc_rn_r.get(), "Rn,R")
+            Xn_r = _safe_float(self.sc_xn_r.get(), "Xn,R")
             cycles = max(1.0, _safe_float(self.sc_cycles.get(), "仿真周波数"))
             brk_txt = self.sc_brk.get().strip()
             brk = _safe_float(brk_txt, "Ik") if brk_txt else None
 
             r = short_circuit_capacity(U, fault_type, Ssc, xr, length, R1, X1, R0, X0,
-                                       neutral_mode, Rn, Xn, Rf, brk)
+                                       neutral_mode, Rn, Xn, Rf, brk,
+                                       network_mode=mode, s_sc_right_mva=Ssc_r, xr_sys_right=xr_r,
+                                       fault_pos_from_left_pct=fault_pos_pct,
+                                       e_left_pu=e_left, e_right_pu=e_right,
+                                       delta_left_deg=d_left, delta_right_deg=d_right,
+                                       neutral_mode_right=neutral_mode_right,
+                                       neutral_rn_right_ohm=Rn_r, neutral_xn_right_ohm=Xn_r)
 
             def _pa(z: complex) -> str:
                 return f"{abs(z):.2f}∠{math.degrees(math.atan2(z.imag, z.real)):.1f}°"
@@ -1487,10 +2502,18 @@ class ApproximationToolGUI(tk.Tk):
             else:
                 check = "匹配：额定开断电流 ≥ 计算开断电流。" if r.breaker_ok else "不匹配：额定开断电流 < 计算开断电流。"
 
+            peak_phase_ka = max(abs(r.Ia_A), abs(r.Ib_A), abs(r.Ic_A)) / 1000.0
+            self.sc_summary_fault_var.set(f"{r.network_mode} · {r.fault_type}")
+            self.sc_summary_peak_var.set(f"{peak_phase_ka:.3f} kA")
+            self.sc_summary_break_var.set(f"{r.I_break_kA:.3f} kA")
+            self.sc_summary_tau_var.set(f"{r.tau_dc_s:.4f} s")
+
             text = (
                 f"══ 复合序网计算结果 ═════════════════════════════\n"
+                f"  网络模式：{r.network_mode}\n"
                 f"  故障类型：{r.fault_type}，中性点：{r.neutral_mode}\n"
                 f"  U = {r.U_kV:.4g} kV，线路长度 = {r.line_len_km:.4g} km，Rf = {r.Rf_ohm:.4g} Ω\n"
+                f"  故障点位置（距左侧）= {r.fault_pos_from_left_pct:.3g}%\n"
                 f"  Z1 = {r.Z1_ohm.real:.4f}+j{r.Z1_ohm.imag:.4f} Ω\n"
                 f"  Z2 = {r.Z2_ohm.real:.4f}+j{r.Z2_ohm.imag:.4f} Ω\n"
                 f"  Z0 = {r.Z0_ohm.real:.4f}+j{r.Z0_ohm.imag:.4f} Ω\n"
@@ -1501,6 +2524,16 @@ class ApproximationToolGUI(tk.Tk):
                 f"  Ia = {_pa(r.Ia_A)} A\n"
                 f"  Ib = {_pa(r.Ib_A)} A\n"
                 f"  Ic = {_pa(r.Ic_A)} A\n"
+                f"  V1 = {_pa(r.V1_V)} V\n"
+                f"  V2 = {_pa(r.V2_V)} V\n"
+                f"  V0 = {_pa(r.V0_V)} V\n"
+                f"  Va = {_pa(r.Va_V)} V\n"
+                f"  Vb = {_pa(r.Vb_V)} V\n"
+                f"  Vc = {_pa(r.Vc_V)} V\n"
+                f"  左侧支路 Ia/Ib/Ic = {_pa(r.Ia_from_left_A)} / {_pa(r.Ib_from_left_A)} / {_pa(r.Ic_from_left_A)} A\n"
+                f"  右侧支路 Ia/Ib/Ic = {_pa(r.Ia_from_right_A)} / {_pa(r.Ib_from_right_A)} / {_pa(r.Ic_from_right_A)} A\n"
+                f"  左侧开断校核电流 Ibreak,L = {r.I_break_left_kA:.4f} kA\n"
+                f"  右侧开断校核电流 Ibreak,R = {r.I_break_right_kA:.4f} kA\n"
                 f"  开断校核电流 Ibreak = {r.I_break_kA:.4f} kA\n"
                 f"  直流偏置时间常数 τ = {r.tau_dc_s:.6f} s\n"
                 f"\n══ 断路器匹配 ═════════════════════════════════════\n"
@@ -1521,18 +2554,30 @@ class ApproximationToolGUI(tk.Tk):
                 idc = -amp * math.sin(phi) * np.exp(-t / max(r.tau_dc_s, 1e-4))
                 return iac + idc
 
+            def uwave(Uv: complex) -> np.ndarray:
+                amp = math.sqrt(2.0) * abs(Uv)
+                phi = math.atan2(Uv.imag, Uv.real)
+                return amp * np.sin(w * t + phi)
+
             ia = iwave(r.Ia_A)
             ib = iwave(r.Ib_A)
             ic = iwave(r.Ic_A)
             i1 = iwave(r.I1_A)
             i2 = iwave(r.I2_A)
             i0 = iwave(r.I0_A)
+            va = uwave(r.Va_V)
+            vb = uwave(r.Vb_V)
+            vc = uwave(r.Vc_V)
+            v1 = uwave(r.V1_V)
+            v2 = uwave(r.V2_V)
+            v0 = uwave(r.V0_V)
 
             self.sc_ax_phase.clear()
             self.sc_ax_seq.clear()
             self.sc_ax_phase.plot(t, ia, label="iA", lw=1.2)
             self.sc_ax_phase.plot(t, ib, label="iB", lw=1.2)
             self.sc_ax_phase.plot(t, ic, label="iC", lw=1.2)
+            self.sc_ax_phase.set_title("故障相电流")
             self.sc_ax_phase.set_ylabel("i_abc / A")
             self.sc_ax_phase.grid(True, alpha=0.35)
             self.sc_ax_phase.legend(loc="upper right", ncol=3, fontsize=8)
@@ -1540,13 +2585,47 @@ class ApproximationToolGUI(tk.Tk):
             self.sc_ax_seq.plot(t, i1, label="i1(正序)", lw=1.2)
             self.sc_ax_seq.plot(t, i2, label="i2(负序)", lw=1.2)
             self.sc_ax_seq.plot(t, i0, label="i0(零序)", lw=1.2)
+            self.sc_ax_seq.set_title("故障序电流")
             self.sc_ax_seq.set_ylabel("i_012 / A")
             self.sc_ax_seq.set_xlabel("t / s")
             self.sc_ax_seq.grid(True, alpha=0.35)
             self.sc_ax_seq.legend(loc="upper right", ncol=3, fontsize=8)
 
-            self.sc_fig.tight_layout()
+            self.sc_v_ax_phase.clear()
+            self.sc_v_ax_seq.clear()
+            self.sc_v_ax_phase.plot(t, va, label="uA", lw=1.2)
+            self.sc_v_ax_phase.plot(t, vb, label="uB", lw=1.2)
+            self.sc_v_ax_phase.plot(t, vc, label="uC", lw=1.2)
+            self.sc_v_ax_phase.set_title("故障相电压")
+            self.sc_v_ax_phase.set_ylabel("u_abc / V")
+            self.sc_v_ax_phase.grid(True, alpha=0.35)
+            self.sc_v_ax_phase.legend(loc="upper right", ncol=3, fontsize=8)
+
+            self.sc_v_ax_seq.plot(t, v1, label="u1(正序)", lw=1.2)
+            self.sc_v_ax_seq.plot(t, v2, label="u2(负序)", lw=1.2)
+            self.sc_v_ax_seq.plot(t, v0, label="u0(零序)", lw=1.2)
+            self.sc_v_ax_seq.set_title("故障序电压")
+            self.sc_v_ax_seq.set_ylabel("u_012 / V")
+            self.sc_v_ax_seq.set_xlabel("t / s")
+            self.sc_v_ax_seq.grid(True, alpha=0.35)
+            self.sc_v_ax_seq.legend(loc="upper right", ncol=3, fontsize=8)
+
+            show_labels = bool(self.sc_vector_labels_var.get())
+            i_vectors = {"A": r.Ia_A, "B": r.Ib_A, "C": r.Ic_A, "1": r.I1_A, "2": r.I2_A, "0": r.I0_A}
+            v_vectors = {"A": r.Va_V, "B": r.Vb_V, "C": r.Vc_V, "1": r.V1_V, "2": r.V2_V, "0": r.V0_V}
+            self._draw_short_circuit_vector_axis(
+                self.sc_ax_i_vector, i_vectors, "故障点电流向量图（ABC+012）",
+                show_labels=show_labels, table_ax=self.sc_ax_i_table
+            )
+            self._draw_short_circuit_vector_axis(
+                self.sc_v_ax_vector, v_vectors, "故障点电压向量图（ABC+012）",
+                show_labels=show_labels, table_ax=self.sc_v_ax_table
+            )
+
+            self.sc_fig.subplots_adjust(left=0.07, right=0.98, top=0.94, bottom=0.08, wspace=0.28, hspace=0.36)
             self.sc_canvas.draw()
+            self.sc_v_fig.subplots_adjust(left=0.07, right=0.98, top=0.94, bottom=0.08, wspace=0.28, hspace=0.36)
+            self.sc_v_canvas.draw()
 
         except Exception as exc:
             messagebox.showerror("计算错误", str(exc))
@@ -1580,128 +2659,197 @@ class ApproximationToolGUI(tk.Tk):
 
     def _build_line_param_sub(self) -> None:
         f = self._ptab_line
-        f.columnconfigure(1, weight=1)
+        f.columnconfigure(0, weight=1)
+        f.rowconfigure(0, weight=1)
 
-        ttk.Label(f, text="架空线路参数校核与标幺值转换（π 型等值）",
-                  font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(8, 4))
+        shell = ttk.Frame(f, padding=8, style="Surface.TFrame")
+        shell.grid(row=0, column=0, sticky="nsew")
+        shell.columnconfigure(0, weight=0, minsize=470)
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(0, weight=1)
 
-        hint = ("典型范围参考（§3.3/3.4）：R₁ 0.005~0.65 Ω/km，"
-                "X₁ 0.20~0.42 Ω/km，C₁ 0.008~0.014 μF/km，"
-                "Zc 240~420 Ω；超高压取下限，配电取上限。点击“线路参数计算”可由导线几何、土壤与地线数据反算 R₁/X₁/R₀/X₀/C₁/C₀。")
-        ttk.Label(f, text=hint, wraplength=620, foreground="#555555").grid(
-            row=1, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 6))
+        left = ttk.Frame(shell, padding=16, style="Card.TFrame")
+        right = ttk.Frame(shell, padding=16, style="Card.TFrame")
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, 6))
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        left.columnconfigure(0, weight=1)
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(2, weight=1)
 
-        self.lp_r1    = self._add_entry(f,  2, "单位长度电阻 R₁ / (Ω/km)", "0.028")
-        self.lp_x1    = self._add_entry(f,  3, "单位长度电抗 X₁ / (Ω/km)", "0.299")
-        self.lp_c1    = self._add_entry(f,  4, "单位长度电容 C₁ / (μF/km)", "0.013")
-        self.lp_len   = self._add_entry(f,  5, "线路长度 / km", "200")
-        self.lp_sbase = self._add_entry(f,  6, "基准容量 Sbase / MVA", "100")
-        self.lp_ubase = self._add_entry(f,  7, "基准电压 Ubase / kV（线电压）", "500")
+        ttk.Label(left, text="架空线路参数校核与标幺值转换（π 型等值）", style="PageTitle.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        hint = (
+            "典型范围参考（§3.3/3.4）：R₁ 0.005~0.65 Ω/km，X₁ 0.20~0.42 Ω/km，C₁ 0.008~0.014 μF/km，"
+            "Zc 240~420 Ω；超高压取下限，配电取上限。点击“线路参数计算”可由导线几何、土壤与地线数据反算 R₁/X₁/R₀/X₀/C₁/C₀。"
+        )
+        ttk.Label(left, text=hint, style="Muted.TLabel", justify="left", wraplength=440).grid(
+            row=1, column=0, sticky="ew", pady=(4, 10)
+        )
 
-        button_row = ttk.Frame(f)
-        button_row.grid(row=8, column=0, columnspan=2, sticky="ew", padx=8, pady=(8, 4))
+        form = ttk.LabelFrame(left, text="输入参数", style="Card.TLabelframe", padding=10)
+        form.grid(row=2, column=0, sticky="ew")
+        form.columnconfigure(1, weight=1)
+        self.lp_r1    = self._add_entry(form, 0, "单位长度电阻 R₁ / (Ω/km)", "0.028")
+        self.lp_x1    = self._add_entry(form, 1, "单位长度电抗 X₁ / (Ω/km)", "0.299")
+        self.lp_c1    = self._add_entry(form, 2, "单位长度电容 C₁ / (μF/km)", "0.013")
+        self.lp_len   = self._add_entry(form, 3, "线路长度 / km", "200")
+        self.lp_sbase = self._add_entry(form, 4, "基准容量 Sbase / MVA", "100")
+        self.lp_ubase = self._add_entry(form, 5, "基准电压 Ubase / kV（线电压）", "500")
+
+        button_row = ttk.Frame(left, style="Card.TFrame")
+        button_row.grid(row=3, column=0, sticky="ew", pady=(10, 0))
         button_row.columnconfigure(0, weight=1)
         button_row.columnconfigure(1, weight=1)
         button_row.columnconfigure(2, weight=1)
-
-        ttk.Button(button_row, text="计算并校核", command=self.calculate_line_param).grid(
-            row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(button_row, text="计算并校核", command=self.calculate_line_param, style="Accent.TButton").grid(
+            row=0, column=0, sticky="ew", padx=(0, 4)
+        )
         ttk.Button(button_row, text="线路参数计算", command=self.open_line_geometry_calculator).grid(
-            row=0, column=1, sticky="ew", padx=4)
+            row=0, column=1, sticky="ew", padx=4
+        )
         ttk.Button(button_row, text="典型参数", command=self.show_line_param_reference).grid(
-            row=0, column=2, sticky="ew", padx=(4, 0))
+            row=0, column=2, sticky="ew", padx=(4, 0)
+        )
 
-        self.lp_result = ScrolledText(f, width=85, height=20, wrap=tk.WORD)
-        self.lp_result.grid(row=9, column=0, columnspan=2, sticky="nsew", padx=8, pady=4)
-        f.rowconfigure(9, weight=1)
+        ttk.Label(right, text="计算结果", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            right,
+            text="右侧结果区整理有名值、标幺值与参数校核结论。线路几何反算与典型参数窗口可作为辅助资料页。",
+            style="Muted.TLabel", justify="left", wraplength=760,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
+        self.lp_result = ScrolledText(right, width=88, height=24, wrap=tk.WORD)
+        self.lp_result.grid(row=2, column=0, sticky="nsew")
+        right.rowconfigure(2, weight=1)
         self.lp_result.configure(state="disabled")
         self.calculate_line_param()
 
-    # ── 两绕组变压器子页 ─────────────────────────────────────────────────────
-
     def _build_2wt_sub(self) -> None:
         f = self._ptab_2wt
-        f.columnconfigure(1, weight=1)
+        f.columnconfigure(0, weight=1)
+        f.rowconfigure(0, weight=1)
 
-        ttk.Label(f, text="两绕组变压器参数校核与标幺值转换",
-                  font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(8, 4))
+        shell = ttk.Frame(f, padding=8, style="Surface.TFrame")
+        shell.grid(row=0, column=0, sticky="nsew")
+        shell.columnconfigure(0, weight=0, minsize=470)
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(0, weight=1)
 
-        hint = ("典型范围（§3.5）：Uk% 4~18%（特高压主变 18~24%），"
-                "I₀% 0.1~5%，短路损耗 1~7 kW/MVA，空载损耗 0.1~3 kW/MVA。")
-        ttk.Label(f, text=hint, wraplength=620, foreground="#555555").grid(
-            row=1, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 6))
+        left = ttk.Frame(shell, padding=16, style="Card.TFrame")
+        right = ttk.Frame(shell, padding=16, style="Card.TFrame")
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, 6))
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        left.columnconfigure(0, weight=1)
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(2, weight=1)
 
-        self.tx2_pk    = self._add_entry(f,  2, "短路损耗 Pk / kW", "290")
-        self.tx2_uk    = self._add_entry(f,  3, "短路电压 Uk / %", "11.73")
-        self.tx2_p0    = self._add_entry(f,  4, "空载损耗 P0 / kW", "51.3")
-        self.tx2_i0    = self._add_entry(f,  5, "空载电流 I₀ / %", "0.3")
-        self.tx2_sn    = self._add_entry(f,  6, "额定容量 SN / MVA", "20")
-        self.tx2_un    = self._add_entry(f,  7, "高压侧额定电压 UN / kV", "35")
-        self.tx2_sbase = self._add_entry(f,  8, "基准容量 Sbase / MVA", "100")
-        self.tx2_ubase = self._add_entry(f,  9, "基准电压 Ubase / kV（通常 = UN）", "35")
+        ttk.Label(left, text="两绕组变压器参数校核与标幺值转换", style="PageTitle.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        hint = (
+            "典型范围（§3.5）：Uk% 4~18%（特高压主变 18~24%），I₀% 0.1~5%，短路损耗 1~7 kW/MVA，空载损耗 0.1~3 kW/MVA。"
+        )
+        ttk.Label(left, text=hint, style="Muted.TLabel", justify="left", wraplength=440).grid(
+            row=1, column=0, sticky="ew", pady=(4, 10)
+        )
 
-        ttk.Button(f, text="计算并校核", command=self.calculate_2wt).grid(
-            row=10, column=0, columnspan=2, sticky="ew", padx=8, pady=(8, 4))
+        form = ttk.LabelFrame(left, text="输入参数", style="Card.TLabelframe", padding=10)
+        form.grid(row=2, column=0, sticky="ew")
+        form.columnconfigure(1, weight=1)
+        self.tx2_pk    = self._add_entry(form, 0, "短路损耗 Pk / kW", "290")
+        self.tx2_uk    = self._add_entry(form, 1, "短路电压 Uk / %", "11.73")
+        self.tx2_p0    = self._add_entry(form, 2, "空载损耗 P0 / kW", "51.3")
+        self.tx2_i0    = self._add_entry(form, 3, "空载电流 I₀ / %", "0.3")
+        self.tx2_sn    = self._add_entry(form, 4, "额定容量 SN / MVA", "20")
+        self.tx2_un    = self._add_entry(form, 5, "高压侧额定电压 UN / kV", "35")
+        self.tx2_sbase = self._add_entry(form, 6, "基准容量 Sbase / MVA", "100")
+        self.tx2_ubase = self._add_entry(form, 7, "基准电压 Ubase / kV（通常 = UN）", "35")
+        ttk.Button(left, text="计算并校核", command=self.calculate_2wt, style="Accent.TButton").grid(
+            row=3, column=0, sticky="ew", pady=(10, 0)
+        )
 
-        self.tx2_result = ScrolledText(f, width=85, height=18, wrap=tk.WORD)
-        self.tx2_result.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=8, pady=4)
-        f.rowconfigure(11, weight=1)
+        ttk.Label(right, text="计算结果", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            right,
+            text="右侧统一展示折算阻抗、励磁支路与参数校核结果，便于与铭牌试验数据进行快速比对。",
+            style="Muted.TLabel", justify="left", wraplength=760,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
+        self.tx2_result = ScrolledText(right, width=88, height=24, wrap=tk.WORD)
+        self.tx2_result.grid(row=2, column=0, sticky="nsew")
         self.tx2_result.configure(state="disabled")
         self.calculate_2wt()
 
-    # ── 三绕组变压器子页 ─────────────────────────────────────────────────────
-
     def _build_3wt_sub(self) -> None:
         f = self._ptab_3wt
-        f.columnconfigure(1, weight=1)
-        f.columnconfigure(3, weight=1)
+        f.columnconfigure(0, weight=1)
+        f.rowconfigure(0, weight=1)
 
-        ttk.Label(f, text="三绕组变压器参数校核与标幺值转换",
-                  font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, columnspan=4, sticky="w", padx=8, pady=(8, 4))
+        shell = ttk.Frame(f, padding=8, style="Surface.TFrame")
+        shell.grid(row=0, column=0, sticky="nsew")
+        shell.columnconfigure(0, weight=0, minsize=580)
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(0, weight=1)
 
-        hint = ("输入约定：Pk 为两两短路试验损耗（kW），Uk% 为两两短路电压（%）。"
-                "Pk_HL、Uk_HL 若测试是在低压侧额定电流下做的，"
-                "程序会自动按 SN_H/SN_L 折算到高压侧额定电流基准。")
-        ttk.Label(f, text=hint, wraplength=900, foreground="#555555").grid(
-            row=1, column=0, columnspan=4, sticky="w", padx=8, pady=(0, 6))
+        left_outer, left, _left_canvas = self._create_scrollable_card(shell, padding=16)
+        left_outer.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        right = ttk.Frame(shell, padding=16, style="Card.TFrame")
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        left.columnconfigure(0, weight=1)
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(2, weight=1)
 
-        row = 2
-        self.tx3_pk_hm  = self._add_entry(f, row,   "短路损耗 Pk_HM / kW",    "503.6",  column=0)
-        self.tx3_uk_hm  = self._add_entry(f, row,   "Uk_HM / %",              "17.5",   column=2)
-        row += 1
-        self.tx3_pk_hl  = self._add_entry(f, row,   "短路损耗 Pk_HL / kW",    "129.0",  column=0)
-        self.tx3_uk_hl  = self._add_entry(f, row,   "Uk_HL / %",              "11.0",   column=2)
-        row += 1
-        self.tx3_pk_ml  = self._add_entry(f, row,   "短路损耗 Pk_ML / kW",    "120.7",  column=0)
-        self.tx3_uk_ml  = self._add_entry(f, row,   "Uk_ML / %",              "6.0",    column=2)
-        row += 1
-        self.tx3_p0     = self._add_entry(f, row,   "空载损耗 P0 / kW",       "76.1",   column=0)
-        self.tx3_i0     = self._add_entry(f, row,   "空载电流 I₀ / %",        "0.07",   column=2)
-        row += 1
-        self.tx3_sn_h   = self._add_entry(f, row,   "高压侧额定容量 SN_H / MVA", "180", column=0)
-        self.tx3_un_h   = self._add_entry(f, row,   "高压侧额定电压 UN_H / kV",  "220", column=2)
-        row += 1
-        self.tx3_sn_m   = self._add_entry(f, row,   "中压侧额定容量 SN_M / MVA", "180", column=0)
-        self.tx3_sn_l   = self._add_entry(f, row,   "低压侧额定容量 SN_L / MVA", "90",  column=2)
-        row += 1
-        self.tx3_sbase  = self._add_entry(f, row,   "基准容量 Sbase / MVA",    "100",   column=0)
-        self.tx3_ubase  = self._add_entry(f, row,   "基准电压 Ubase / kV",     "220",   column=2)
+        ttk.Label(left, text="三绕组变压器参数校核与标幺值转换", style="PageTitle.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        hint = (
+            "输入约定：Pk 为两两短路试验损耗（kW），Uk% 为两两短路电压（%）。Pk_HL、Uk_HL 若测试是在低压侧额定电流下做的，"
+            "程序会自动按 SN_H/SN_L 折算到高压侧额定电流基准。"
+        )
+        ttk.Label(left, text=hint, style="Muted.TLabel", justify="left", wraplength=530).grid(
+            row=1, column=0, sticky="ew", pady=(4, 10)
+        )
 
-        row += 1
-        ttk.Button(f, text="计算并校核", command=self.calculate_3wt).grid(
-            row=row, column=0, columnspan=4, sticky="ew", padx=8, pady=(8, 4))
+        form = ttk.LabelFrame(left, text="输入参数", style="Card.TLabelframe", padding=10)
+        form.grid(row=2, column=0, sticky="ew")
+        form.columnconfigure(1, weight=1, minsize=120)
+        form.columnconfigure(3, weight=1, minsize=120)
 
+        row = 0
+        self.tx3_pk_hm  = self._add_entry(form, row,   "短路损耗 Pk_HM / kW",    "503.6",  column=0)
+        self.tx3_uk_hm  = self._add_entry(form, row,   "Uk_HM / %",              "17.5",   column=2)
         row += 1
-        self.tx3_result = ScrolledText(f, width=95, height=18, wrap=tk.WORD)
-        self.tx3_result.grid(row=row, column=0, columnspan=4, sticky="nsew", padx=8, pady=4)
-        f.rowconfigure(row, weight=1)
+        self.tx3_pk_hl  = self._add_entry(form, row,   "短路损耗 Pk_HL / kW",    "129.0",  column=0)
+        self.tx3_uk_hl  = self._add_entry(form, row,   "Uk_HL / %",              "11.0",   column=2)
+        row += 1
+        self.tx3_pk_ml  = self._add_entry(form, row,   "短路损耗 Pk_ML / kW",    "120.7",  column=0)
+        self.tx3_uk_ml  = self._add_entry(form, row,   "Uk_ML / %",              "6.0",    column=2)
+        row += 1
+        self.tx3_p0     = self._add_entry(form, row,   "空载损耗 P0 / kW",       "76.1",   column=0)
+        self.tx3_i0     = self._add_entry(form, row,   "空载电流 I₀ / %",        "0.07",   column=2)
+        row += 1
+        self.tx3_sn_h   = self._add_entry(form, row,   "高压侧额定容量 SN_H / MVA", "180", column=0)
+        self.tx3_un_h   = self._add_entry(form, row,   "高压侧额定电压 UN_H / kV",  "220", column=2)
+        row += 1
+        self.tx3_sn_m   = self._add_entry(form, row,   "中压侧额定容量 SN_M / MVA", "180", column=0)
+        self.tx3_sn_l   = self._add_entry(form, row,   "低压侧额定容量 SN_L / MVA", "90",  column=2)
+        row += 1
+        self.tx3_sbase  = self._add_entry(form, row,   "基准容量 Sbase / MVA",    "100",   column=0)
+        self.tx3_ubase  = self._add_entry(form, row,   "基准电压 Ubase / kV",     "220",   column=2)
+
+        ttk.Button(left, text="计算并校核", command=self.calculate_3wt, style="Accent.TButton").grid(
+            row=3, column=0, sticky="ew", pady=(10, 0)
+        )
+
+        ttk.Label(right, text="计算结果", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            right,
+            text="结果区统一展示折算到高压侧的 T 型等值参数、标幺阻抗与励磁支路校核结论，便于工程核对。",
+            style="Muted.TLabel", justify="left", wraplength=760,
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
+        self.tx3_result = ScrolledText(right, width=92, height=24, wrap=tk.WORD)
+        self.tx3_result.grid(row=2, column=0, sticky="nsew")
         self.tx3_result.configure(state="disabled")
         self.calculate_3wt()
-
-    # ── 参数校核计算处理函数 ─────────────────────────────────────────────────
 
     def show_line_param_reference(self) -> None:
         """弹出架空线路典型参数窗口（按电压等级展示）。"""
@@ -1806,8 +2954,8 @@ class ApproximationToolGUI(tk.Tk):
 
         left = ttk.Frame(container, padding=6)
         right = ttk.Frame(container, padding=6)
-        left.grid(row=0, column=0, sticky="nsw")
-        right.grid(row=0, column=1, sticky="nsew")
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, 6), pady=8)
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=8)
         right.columnconfigure(0, weight=1)
         right.rowconfigure(1, weight=1)
         right.rowconfigure(2, weight=2)
@@ -2265,22 +3413,25 @@ class ApproximationToolGUI(tk.Tk):
         self.loop_tab.columnconfigure(1, weight=1)
         self.loop_tab.rowconfigure(0, weight=1)
 
-        left = ttk.Frame(self.loop_tab, padding=10)
-        right = ttk.Frame(self.loop_tab, padding=10)
-        left.grid(row=0, column=0, sticky="nsw")
-        right.grid(row=0, column=1, sticky="nsew")
+        left = ttk.Frame(self.loop_tab, padding=16, style="Card.TFrame")
+        right = ttk.Frame(self.loop_tab, padding=16, style="Card.TFrame")
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, 6), pady=8)
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=8)
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=1)
-        right.rowconfigure(3, weight=2)
+        right.rowconfigure(2, weight=1)
+        right.rowconfigure(4, weight=2)
 
-        basic = ttk.LabelFrame(left, text="合环近似参数", padding=8)
+        ttk.Label(left, text="配电网合环分析", style="PageTitle.TLabel").pack(anchor="w")
+        ttk.Label(left, text="输入区分为参数、连接点表与线段比例三部分，图形区则拆成稳态点位图与冲击暂态电流两页。", style="Muted.TLabel", justify="left", wraplength=430).pack(fill="x", pady=(4, 10))
+
+        basic = ttk.LabelFrame(left, text="合环近似参数", style="Card.TLabelframe", padding=10)
         basic.pack(fill="x", expand=False, pady=(0, 8))
-        basic.columnconfigure(1, weight=1)
-        basic.columnconfigure(3, weight=1)
+        basic.columnconfigure(1, weight=1, minsize=112)
+        basic.columnconfigure(3, weight=1, minsize=112)
 
         self.loop_n = self._add_entry(basic, 0, "连接点数量 N", "7", column=0)
-        ttk.Label(basic, text="合环点编号").grid(row=0, column=2, sticky="w", padx=4, pady=4)
-        self.loop_closure = ttk.Combobox(basic, state="readonly", width=10)
+        ttk.Label(basic, text="合环点编号", style="Form.TLabel").grid(row=0, column=2, sticky="w", padx=4, pady=4)
+        self.loop_closure = ttk.Combobox(basic, state="readonly", width=10, style="Input.TCombobox")
         self.loop_closure.grid(row=0, column=3, sticky="ew", padx=4, pady=4)
         self.loop_closure.bind("<<ComboboxSelected>>", self._refresh_loop_closure_indicator)
 
@@ -2293,8 +3444,8 @@ class ApproximationToolGUI(tk.Tk):
         self.loop_total_len = self._add_entry(basic, 4, "总线路长度 / km", "11", column=0)
         self.loop_pf = self._add_entry(basic, 4, "统一功率因数 cosφ", "0.99", column=2)
 
-        ttk.Label(basic, text="功率因数类型").grid(row=5, column=0, sticky="w", padx=4, pady=4)
-        self.loop_pf_mode = ttk.Combobox(basic, state="readonly", values=["滞后", "超前"], width=10)
+        ttk.Label(basic, text="功率因数类型", style="Form.TLabel").grid(row=5, column=0, sticky="w", padx=4, pady=4)
+        self.loop_pf_mode = ttk.Combobox(basic, state="readonly", values=["滞后", "超前"], width=10, style="Input.TCombobox")
         self.loop_pf_mode.grid(row=5, column=1, sticky="ew", padx=4, pady=4)
         self.loop_pf_mode.set("滞后")
         self.loop_ampacity = self._add_entry(basic, 5, "额定载流量 / A", "442", column=2)
@@ -2302,19 +3453,19 @@ class ApproximationToolGUI(tk.Tk):
         self.loop_tclose = self._add_entry(basic, 6, "合环时刻 / s", "0.10", column=2)
         self.loop_tend = self._add_entry(basic, 7, "波形结束时刻 / s", "0.30", column=0)
 
-        tools = ttk.Frame(basic)
+        tools = ttk.Frame(basic, style="Card.TFrame")
         tools.grid(row=8, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 2))
         ttk.Button(tools, text="按 N 重建表格", command=self._rebuild_loop_closure_rows).pack(side="left", padx=(0, 6))
         ttk.Button(tools, text="加载默认值", command=self._apply_loop_closure_appendix_defaults).pack(side="left", padx=(0, 6))
-        ttk.Button(tools, text="计算并绘图", command=self.calculate_loop_closure).pack(side="left")
+        ttk.Button(tools, text="计算并绘图", command=self.calculate_loop_closure, style="Accent.TButton").pack(side="left")
 
         hint = (
             "输入约定：每个连接点填写净线电流（A）。正值表示负荷，负值表示分布式电源回送，0 表示空点。"
             " 合环点必须对应空点。线段比例默认均匀分布；若输入自定义比例，则按 N+1 个线段比例自动归一。"
         )
-        ttk.Label(left, text=hint, justify="left", wraplength=430).pack(fill="x", pady=(0, 6))
+        ttk.Label(left, text=hint, justify="left", wraplength=430, style="Muted.TLabel").pack(fill="x", pady=(0, 8))
 
-        table_box = ttk.LabelFrame(left, text="连接点表", padding=6)
+        table_box = ttk.LabelFrame(left, text="连接点表", style="Card.TLabelframe", padding=8)
         table_box.pack(fill="both", expand=True, pady=(0, 8))
 
         self.loop_table_canvas = tk.Canvas(table_box, height=265, highlightthickness=0)
@@ -2328,7 +3479,7 @@ class ApproximationToolGUI(tk.Tk):
         self.loop_table_frame.bind("<Configure>", lambda e: self.loop_table_canvas.configure(scrollregion=self.loop_table_canvas.bbox("all")))
         self.loop_table_canvas.bind("<Configure>", lambda e: self.loop_table_canvas.itemconfigure(self._loop_table_window, width=e.width))
 
-        ratio_box = ttk.LabelFrame(left, text="线段比例（N+1 段）", padding=6)
+        ratio_box = ttk.LabelFrame(left, text="线段比例（N+1 段）", style="Card.TLabelframe", padding=8)
         ratio_box.pack(fill="x", expand=False)
         self.loop_ratio_frame = ttk.Frame(ratio_box)
         self.loop_ratio_frame.pack(fill="x", expand=True)
@@ -2339,16 +3490,17 @@ class ApproximationToolGUI(tk.Tk):
         self.loop_ratio_entries: list[ttk.Entry] = []
         self._last_loop_result = None
 
-        ttk.Label(right, text="计算结果", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
+        ttk.Label(right, text="计算结果", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(right, text="右侧统一收纳摘要、点位图与冲击暂态电流波形。", style="Muted.TLabel", justify="left", wraplength=760).grid(row=1, column=0, sticky="ew", pady=(4, 8))
         self.loop_result = ScrolledText(right, width=82, height=18, wrap=tk.WORD, font="TkFixedFont")
-        self.loop_result.grid(row=1, column=0, sticky="nsew")
+        self.loop_result.grid(row=2, column=0, sticky="nsew")
         self.loop_result.configure(state="disabled")
 
         plot_nb = ttk.Notebook(right)
-        plot_nb.grid(row=3, column=0, sticky="nsew", pady=(10, 0))
+        plot_nb.grid(row=4, column=0, sticky="nsew", pady=(10, 0))
 
-        profile_page = ttk.Frame(plot_nb, padding=4)
-        wave_page = ttk.Frame(plot_nb, padding=4)
+        profile_page = ttk.Frame(plot_nb, padding=4, style="Card.TFrame")
+        wave_page = ttk.Frame(plot_nb, padding=4, style="Card.TFrame")
         plot_nb.add(profile_page, text="点位图与稳态电流")
         plot_nb.add(wave_page, text="冲击暂态电流")
         profile_page.columnconfigure(0, weight=1)
@@ -2422,15 +3574,15 @@ class ApproximationToolGUI(tk.Tk):
 
         for i in range(n):
             ttk.Label(self.loop_table_frame, text=str(i + 1)).grid(row=i + 1, column=0, sticky="w", padx=3, pady=2)
-            label_entry = ttk.Entry(self.loop_table_frame, width=10)
+            label_entry = ttk.Entry(self.loop_table_frame, width=10, style="Input.TEntry")
             label_entry.grid(row=i + 1, column=1, sticky="ew", padx=3, pady=2)
             label_entry.insert(0, old_labels[i] if i < len(old_labels) else f"点{i + 1}")
 
-            current_entry = ttk.Entry(self.loop_table_frame, width=12)
+            current_entry = ttk.Entry(self.loop_table_frame, width=12, style="Input.TEntry")
             current_entry.grid(row=i + 1, column=2, sticky="ew", padx=3, pady=2)
             current_entry.insert(0, old_currents[i] if i < len(old_currents) else "0")
 
-            note_lbl = ttk.Label(self.loop_table_frame, text="")
+            note_lbl = ttk.Label(self.loop_table_frame, text="", style="Muted.TLabel")
             note_lbl.grid(row=i + 1, column=3, sticky="w", padx=3, pady=2)
 
             self.loop_node_label_entries.append(label_entry)
@@ -2449,7 +3601,7 @@ class ApproximationToolGUI(tk.Tk):
             row = 1 + idx // 4
             col = (idx % 4) * 2
             ttk.Label(self.loop_ratio_frame, text=f"r{r}").grid(row=row, column=col, sticky="w", padx=3, pady=2)
-            entry = ttk.Entry(self.loop_ratio_frame, width=8)
+            entry = ttk.Entry(self.loop_ratio_frame, width=8, style="Input.TEntry")
             entry.grid(row=row, column=col + 1, sticky="w", padx=3, pady=2)
             entry.insert(0, old_ratios[idx] if idx < len(old_ratios) else "1")
             self.loop_ratio_entries.append(entry)
@@ -2686,10 +3838,10 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_tab.columnconfigure(1, weight=1)
         self.comtrade_tab.rowconfigure(0, weight=1)
 
-        left = ttk.Frame(self.comtrade_tab, padding=10)
-        right = ttk.Frame(self.comtrade_tab, padding=10)
-        left.grid(row=0, column=0, sticky="nsw")
-        right.grid(row=0, column=1, sticky="nsew")
+        left = ttk.Frame(self.comtrade_tab, padding=14, style="Card.TFrame")
+        right = ttk.Frame(self.comtrade_tab, padding=14, style="Card.TFrame")
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, 6), pady=8)
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=8)
         left.columnconfigure(0, weight=1)
         left.columnconfigure(1, weight=1)
         left.columnconfigure(2, weight=1)
@@ -2698,7 +3850,8 @@ class ApproximationToolGUI(tk.Tk):
         right.columnconfigure(0, weight=1)
         right.rowconfigure(3, weight=1)
 
-        ttk.Label(left, text="录波曲线（COMTRADE / Yokogawa WVF/WDF）", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 6))
+        ttk.Label(left, text="录波曲线（COMTRADE / Yokogawa WVF/WDF）", style="PageTitle.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 2))
+        ttk.Label(left, text="保持录波页原有的深色浏览风格，同时将左侧控制区整理为更清晰的白色操作面板。", style="Muted.TLabel", justify="left", wraplength=420).grid(row=1, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
         self.comtrade_path_var = tk.StringVar(value="")
         ttk.Entry(left, textvariable=self.comtrade_path_var, width=42).grid(row=2, column=0, columnspan=3, sticky="ew", padx=(0, 4), pady=2)
@@ -2707,7 +3860,7 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Button(left, text="序量分析", command=self._open_sequence_analysis_window).grid(row=3, column=1, sticky="ew", pady=(4, 4), padx=(0, 4))
         ttk.Button(left, text="多通道同图", command=self._open_comtrade_overlay_window).grid(row=3, column=2, columnspan=2, sticky="ew", pady=(4, 4))
 
-        ttk.Label(left, text="通道选择（Ctrl/Shift 多选）").grid(row=4, column=0, columnspan=4, sticky="w", pady=(4, 2))
+        ttk.Label(left, text="通道选择（Ctrl/Shift 多选）", style="SectionTitle.TLabel").grid(row=4, column=0, columnspan=4, sticky="w", pady=(4, 2))
         self.comtrade_channel_list = tk.Listbox(left, selectmode=tk.EXTENDED, width=42, height=12, exportselection=False)
         self.comtrade_channel_list.grid(row=5, column=0, columnspan=4, sticky="ew")
         self.comtrade_channel_list.bind("<<ListboxSelect>>", lambda _e: self._refresh_comtrade_plot())
@@ -2733,12 +3886,12 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Button(left, text="分析选中通道", command=self._analyze_comtrade_selection).grid(row=8, column=2, sticky="ew", pady=(6, 2), padx=(0, 4))
         ttk.Button(left, text="全选通道", command=self._select_all_comtrade_channels).grid(row=8, column=3, sticky="ew", pady=(6, 2))
 
-        self.comtrade_analysis_host = ttk.Frame(left)
+        self.comtrade_analysis_host = ttk.Frame(left, style="Card.TFrame")
         self.comtrade_analysis_host.grid(row=9, column=0, columnspan=4, sticky="nsew", pady=(8, 0))
         self.comtrade_analysis_host.columnconfigure(0, weight=1)
         self.comtrade_analysis_host.rowconfigure(0, weight=1)
 
-        self.comtrade_overview_frame = ttk.Frame(self.comtrade_analysis_host)
+        self.comtrade_overview_frame = ttk.Frame(self.comtrade_analysis_host, style="Card.TFrame")
         self.comtrade_overview_frame.grid(row=0, column=0, sticky="nsew")
         self.comtrade_overview_frame.columnconfigure(0, weight=1)
         self.comtrade_overview_frame.rowconfigure(0, weight=1)
@@ -2746,7 +3899,7 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_info.grid(row=0, column=0, sticky="nsew")
         self.comtrade_info.configure(state="disabled")
 
-        self.comtrade_sequence_frame = ttk.Frame(self.comtrade_analysis_host)
+        self.comtrade_sequence_frame = ttk.Frame(self.comtrade_analysis_host, style="Card.TFrame")
         self.comtrade_sequence_frame.columnconfigure(0, weight=1)
         self.comtrade_sequence_frame.rowconfigure(2, weight=1)
         self.comtrade_sequence_frame.rowconfigure(4, weight=1)
@@ -2754,7 +3907,7 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_sequence_frame.grid_remove()
         self._build_embedded_sequence_panel()
 
-        ttk.Label(right, text="录波浏览区", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
+        ttk.Label(right, text="录波浏览区", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
         self.comtrade_time_label = ttk.Label(right, text="未加载文件")
         self.comtrade_time_label.grid(row=1, column=0, sticky="w", pady=(0, 2))
         self.comtrade_cursor_label = tk.Text(right, height=4, wrap=tk.WORD)
@@ -2765,7 +3918,7 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_fig = Figure(figsize=(9.0, 6.2), dpi=100, facecolor="#101010")
         self.comtrade_ax = self.comtrade_fig.add_subplot(111)
         self._style_comtrade_axis(self.comtrade_ax)
-        plot_host = ttk.Frame(right)
+        plot_host = ttk.Frame(right, style="Card.TFrame")
         plot_host.grid(row=3, column=0, sticky="nsew")
         plot_host.columnconfigure(0, weight=1)
         plot_host.rowconfigure(0, weight=1)
@@ -2777,11 +3930,11 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_toolbar.update()
         self.comtrade_toolbar.grid(row=4, column=0, sticky="ew")
 
-        slider_frame = ttk.Frame(right)
+        slider_frame = ttk.Frame(right, style="Card.TFrame")
         slider_frame.grid(row=2, column=0, sticky="ew", pady=(0, 4))
         slider_frame.columnconfigure(0, weight=1)
         ttk.Label(slider_frame, text="时间拖动").grid(row=0, column=0, sticky="w")
-        zoom_bar = ttk.Frame(slider_frame)
+        zoom_bar = ttk.Frame(slider_frame, style="Card.TFrame")
         zoom_bar.grid(row=0, column=1, sticky="e")
         ttk.Button(zoom_bar, text="纵向放大", command=lambda: self._zoom_comtrade_vertical(1.2)).pack(side="left", padx=(0, 4))
         ttk.Button(zoom_bar, text="纵向缩小", command=lambda: self._zoom_comtrade_vertical(1 / 1.2)).pack(side="left", padx=(0, 8))
