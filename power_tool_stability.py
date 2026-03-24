@@ -23,32 +23,30 @@ from power_tool_common import (
 def impact_method(delta_p: float,
                   delta_t_s: float,
                   f_d_hz: float,
-                  pmax_post_pu: float,
                   p_current_pu: Optional[float]) -> ImpactMethodSummary:
-    """暂态稳定冲击法快估。"""
+    """冲击法快估功率振荡幅度。"""
     _validate_positive("ΔP", delta_p)
     _validate_positive("Δt", delta_t_s)
     _validate_positive("f_d", f_d_hz)
-    _validate_positive("P_max^post", pmax_post_pu)
 
     dp = delta_p * delta_t_s * 2.0 * math.pi * f_d_hz
-    pst = pmax_post_pu - dp
+    amp = dp
 
     margin = None
     if p_current_pu is not None:
-        margin = pst - p_current_pu
-        status = "近似可接受" if margin >= 0 else "第一摆稳定裕度不足"
+        margin = amp - abs(p_current_pu)
+        status = "振荡幅值可接受" if margin <= 0 else "振荡幅值偏大"
     else:
-        status = "未输入当前传输功率，无法给出裕度判据"
+        status = "未输入当前传输功率，无法给出相对幅值判据"
 
     notes = (
-        "冲击法强调“故障加速功率 × 持续时间”形成的速度冲量，是工程快估而非严格等面积法。"
-        " 当故障期间角度偏移不可忽略、后故障平衡点改变明显或接近临界切除时，应改用正式暂态稳定仿真。"
+        "冲击法在此仅用于估算第一摆功率振荡幅度（ΔP_osc≈ΔP·Δt·2πf_d），"
+        "不再用于极限功率判断。若需稳定极限应采用等面积法或时域仿真。"
     )
 
     return ImpactMethodSummary(
         Dp_pu=dp,
-        Pst_pu=pst,
+        osc_amp_pu=amp,
         margin_pu=margin,
         status=status,
         notes=notes,

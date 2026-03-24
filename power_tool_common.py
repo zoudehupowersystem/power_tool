@@ -99,7 +99,7 @@ class NaturalPowerSummary:
 @dataclass
 class ImpactMethodSummary:
     Dp_pu: float
-    Pst_pu: float
+    osc_amp_pu: float
     margin_pu: Optional[float]
     status: str
     notes: str

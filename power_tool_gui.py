@@ -442,7 +442,7 @@ class ApproximationToolGUI(tk.Tk):
             header = f"电压无功子标签: {current}"
             return header + "\n" + "\n".join(f"{name}: {entry.get().strip()}" for name, entry in pairs)
         elif tab == "暂稳评估":
-            pairs = [("冲击法 ΔPa / pu", self.imp_dp), ("冲击法 Δt / s", self.imp_dt), ("冲击法 f_d / Hz", self.imp_fd), ("冲击法 Pmax_post / pu", self.imp_pmax),
+            pairs = [("冲击法 ΔPa / pu", self.imp_dp), ("冲击法 Δt / s", self.imp_dt), ("冲击法 f_d / Hz", self.imp_fd),
                      ("冲击法 Pm / pu", self.imp_pcur), ("等面积法 Pm / pu", self.eac_pm), ("等面积法 Pmax_pre / pu", self.eac_ppre),
                      ("等面积法 Pmax_fault / pu", self.eac_pf), ("等面积法 Pmax_post / pu", self.eac_ppost), ("等面积法 Δt / s", self.eac_dt)]
         elif tab == "小扰动分析（SMIB）":
@@ -721,17 +721,16 @@ class ApproximationToolGUI(tk.Tk):
         self.imp_dp   = self._add_entry(imp_frame, 0, "故障加速功率 ΔPa / pu", "0.9")
         self.imp_dt   = self._add_entry(imp_frame, 1, "故障切除时间 Δt / s", "0.12")
         self.imp_fd   = self._add_entry(imp_frame, 2, "故障后振荡频率 f_d / Hz", "1.106")
-        self.imp_pmax = self._add_entry(imp_frame, 3, "故障后最大传输功率 Pmax_post / pu", "1.65")
-        self.imp_pcur = self._add_entry(imp_frame, 4, "当前传输功率 Pm / pu（冲击法裕度 & 临界切除用）", "0.90")
-        self.imp_tj   = self._add_entry(imp_frame, 5, "惯性时间常数 T_j / s（临界切除用）", "9")
-        self.imp_f0   = self._add_entry(imp_frame, 6, "额定频率 f0 / Hz（临界切除用）", "50")
+        self.imp_pcur = self._add_entry(imp_frame, 3, "当前传输功率 Pm / pu（用于振幅对比 & 临界切除）", "0.90")
+        self.imp_tj   = self._add_entry(imp_frame, 4, "惯性时间常数 T_j / s（临界切除用）", "9")
+        self.imp_f0   = self._add_entry(imp_frame, 5, "额定频率 f0 / Hz（临界切除用）", "50")
 
         ttk.Button(imp_frame, text="计算", command=self.calculate_impact).grid(
-            row=7, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 2)
+            row=6, column=0, columnspan=2, sticky="ew", padx=4, pady=(6, 2)
         )
 
         self.imp_result = ScrolledText(imp_frame, width=50, height=12, wrap=tk.WORD)
-        self.imp_result.grid(row=8, column=0, columnspan=2, sticky="nsew", padx=2, pady=4)
+        self.imp_result.grid(row=7, column=0, columnspan=2, sticky="nsew", padx=2, pady=4)
         self.imp_result.configure(state="disabled")
 
         # ══════════════════════════════════════════════════════════════════
@@ -802,6 +801,7 @@ class ApproximationToolGUI(tk.Tk):
                   font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 6))
         intro = (
             "采用 Kundur 经典 SMIB 示例的六阶同步机模型；可切换“机组”“机组+AVR”“机组+AVR+PSS”三种配置。"
+            " 新增“1型AVR/PSS模型”参数页（按教材框图）用于控制环节频域校核。"
             " 程序先由给定运行点构造平衡点，再对非线性模型数值线性化并求取特征值。"
         )
         ttk.Label(left, text=intro, style="Card.TLabel", justify="left",
@@ -826,12 +826,14 @@ class ApproximationToolGUI(tk.Tk):
         page_machine = ttk.Frame(nb, padding=8)
         page_avr = ttk.Frame(nb, padding=8)
         page_pss = ttk.Frame(nb, padding=8)
+        page_type1 = ttk.Frame(nb, padding=8)
         nb.add(page_case, text="工况与网络")
         nb.add(page_machine, text="六阶机组")
         nb.add(page_avr, text="AVR III")
         nb.add(page_pss, text="PSS II")
+        nb.add(page_type1, text="1型 AVR/PSS")
 
-        for page in (page_case, page_machine, page_avr, page_pss):
+        for page in (page_case, page_machine, page_avr, page_pss, page_type1):
             page.columnconfigure(1, weight=1)
             page.columnconfigure(3, weight=1)
 
@@ -906,6 +908,28 @@ class ApproximationToolGUI(tk.Tk):
         self.smib_pss_canvas.get_tk_widget().grid(row=5, column=0, columnspan=4, sticky="nsew", padx=4, pady=(8, 0))
         self.smib_pss_canvas.draw()
 
+        self.smib_type1_entries: dict[str, ttk.Entry] = {}
+        def add_type1(key: str, row: int, label: str, default: str, column: int = 0) -> None:
+            self.smib_type1_entries[key] = self._add_entry(page_type1, row, label, default, column=column, width=11)
+
+        add_type1("Kr", 0, "Kr", "1.0", 0); add_type1("Tr", 0, "Tr / s", "0.02", 2)
+        add_type1("Ka", 1, "Ka", "200", 0); add_type1("Ta", 1, "Ta / s", "0.05", 2)
+        add_type1("Kf", 2, "Kf", "0.05", 0); add_type1("Tf", 2, "Tf / s", "1.0", 2)
+        add_type1("Te", 3, "Te / s", "0.5", 0); add_type1("Efd_max", 3, "Efd_max / pu", "6.0", 2)
+        add_type1("Efd_min", 4, "Efd_min / pu", "-6.0", 0)
+        add_type1("Kq1", 5, "Kq1", "10", 0); add_type1("Kq2", 5, "Kq2", "2", 2)
+        add_type1("Kq3", 6, "Kq3", "1", 0); add_type1("Kpss", 6, "K", "10", 2)
+        add_type1("Tq", 7, "Tq / s", "0.1", 0); add_type1("T1e", 7, "T1e / s", "0.15", 2)
+        add_type1("T2e", 8, "T2e / s", "0.03", 0); add_type1("T3e", 8, "T3e / s", "0.15", 2)
+        add_type1("T4e", 9, "T4e / s", "0.03", 0); add_type1("Vsmax", 9, "Vsmax / pu", "0.2", 2)
+        add_type1("Vsmin", 10, "Vsmin / pu", "-0.2", 0); add_type1("f_eval", 10, "评估频率 / Hz", "1.0", 2)
+        ttk.Button(page_type1, text="计算1型 AVR/PSS 指标", command=self.calculate_type1_avr_pss).grid(
+            row=11, column=0, columnspan=4, sticky="ew", padx=4, pady=(8, 4)
+        )
+        self.smib_type1_result = ScrolledText(page_type1, width=56, height=8, wrap=tk.WORD)
+        self.smib_type1_result.grid(row=12, column=0, columnspan=4, sticky="nsew", padx=4, pady=(2, 2))
+        self.smib_type1_result.configure(state="disabled")
+
         ttk.Label(right, text="模态结果", style="Card.TLabel",
                   font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
         self.smib_result = ScrolledText(right, width=78, height=18, wrap=tk.WORD, font="TkFixedFont")
@@ -927,6 +951,57 @@ class ApproximationToolGUI(tk.Tk):
         self.smib_toolbar.grid(row=4, column=0, sticky="ew")
 
         self._apply_smib_defaults()
+
+    def calculate_type1_avr_pss(self) -> None:
+        try:
+            p = {k: _safe_float(v.get(), k) for k, v in self.smib_type1_entries.items()}
+            for key in ("Tr", "Ta", "Tf", "Te", "Tq", "T1e", "T2e", "T3e", "T4e"):
+                _validate_positive(key, p[key])
+            _validate_positive("评估频率", p["f_eval"])
+            if p["Efd_min"] >= p["Efd_max"]:
+                raise InputError("Efd_min 必须小于 Efd_max。")
+            if p["Vsmin"] >= p["Vsmax"]:
+                raise InputError("Vsmin 必须小于 Vsmax。")
+
+            w = 2.0 * math.pi * p["f_eval"]
+            s = complex(0.0, w)
+            avr_meas = p["Kr"] / (1.0 + s * p["Tr"])
+            avr_amp = p["Ka"] / (1.0 + s * p["Ta"])
+            avr_exc = 1.0 / (1.0 + s * p["Te"])
+            avr_fb = s * p["Kf"] / (1.0 + s * p["Tf"])
+            avr_open = avr_meas * avr_amp * avr_exc
+            avr_closed = avr_open / (1.0 + avr_open * avr_fb)
+
+            pss_in = p["Kq1"] + p["Kq2"] + p["Kq3"]
+            pss_core = (p["Kpss"] + s) / (1.0 + s * p["Tq"])
+            lead1 = (1.0 + s * p["T1e"]) / (1.0 + s * p["T2e"])
+            lead2 = (1.0 + s * p["T3e"]) / (1.0 + s * p["T4e"])
+            pss_tf = pss_in * pss_core * lead1 * lead2
+            vs_est = max(p["Vsmin"], min(p["Vsmax"], pss_tf.real))
+
+            def _fmt(z: complex) -> str:
+                return f"{abs(z):.4f}∠{math.degrees(math.atan2(z.imag, z.real)):+.2f}°"
+
+            text = (
+                "══ 1型 AVR/PSS 模型校核 ═════════════════\n"
+                f"评估频率：{p['f_eval']:.4f} Hz\n\n"
+                "【AVR】\n"
+                f"Gm(s)=Kr/(1+sTr) = {_fmt(avr_meas)}\n"
+                f"Ga(s)=Ka/(1+sTa) = {_fmt(avr_amp)}\n"
+                f"Ge(s)=1/(1+sTe) = {_fmt(avr_exc)}\n"
+                f"Gf(s)=sKf/(1+sTf) = {_fmt(avr_fb)}\n"
+                f"开环 Gavr = {_fmt(avr_open)}\n"
+                f"闭环 Gavr_cl = {_fmt(avr_closed)}\n"
+                f"Efd 限幅区间 = [{p['Efd_min']:.3f}, {p['Efd_max']:.3f}] pu\n\n"
+                "【PSS】\n"
+                f"输入加权 Kq1+Kq2+Kq3 = {pss_in:.4f}\n"
+                f"Gpss(s) = {_fmt(pss_tf)}\n"
+                f"Vs 估算（实部限幅）= {vs_est:.4f} pu，限值[{p['Vsmin']:.3f}, {p['Vsmax']:.3f}]\n\n"
+                "说明：该页按截图中的1型 AVR/PSS 传函进行环节校核，用于小扰动控制参数整定参考。"
+            )
+            self._set_text(self.smib_type1_result, text)
+        except Exception as exc:
+            messagebox.showerror("计算错误", str(exc))
 
     def _apply_smib_defaults(self) -> None:
         defaults = kundur_smib_defaults()
@@ -1326,21 +1401,20 @@ class ApproximationToolGUI(tk.Tk):
             delta_p = _safe_float(self.imp_dp.get(), "ΔPa")
             delta_t = _safe_float(self.imp_dt.get(), "Δt")
             f_d     = _safe_float(self.imp_fd.get(), "f_d")
-            pmax_post = _safe_float(self.imp_pmax.get(), "Pmax_post")
             pcur_text = self.imp_pcur.get().strip()
             pcur = _safe_float(pcur_text, "Pm") if pcur_text else None
             tj_text = self.imp_tj.get().strip()
             f0_text = self.imp_f0.get().strip()
 
-            summary = impact_method(delta_p, delta_t, f_d, pmax_post, pcur)
+            summary = impact_method(delta_p, delta_t, f_d, pcur)
 
             text = (
-                f"══ 冲击法快估 ══════════════════════\n"
+                f"══ 冲击法：功率振荡幅度快估 ═════════════\n"
                 f"冲击量 Dp = {summary.Dp_pu:.6f} pu\n"
-                f"暂稳极限 Pst = {summary.Pst_pu:.6f} pu\n"
+                f"估算第一摆功率振荡幅值 ΔP_osc ≈ {summary.osc_amp_pu:.6f} pu\n"
             )
             if summary.margin_pu is not None:
-                text += f"相对当前传输功率的裕度 = {summary.margin_pu:.6f} pu\n"
+                text += f"与当前功率幅值对比量 = {summary.margin_pu:.6f} pu\n"
             text += f"结论：{summary.status}\n"
 
             # ── 临界切除角快速估算 ────────────────────────────────────────
@@ -1349,6 +1423,7 @@ class ApproximationToolGUI(tk.Tk):
                     Pm_val  = _safe_float(pcur_text, "Pm")
                     Tj_val  = _safe_float(tj_text,   "T_j")
                     f0_val  = _safe_float(f0_text,   "f0")
+                    pmax_post = _safe_float(self.eac_ppost.get(), "Pmax_post")
                     ccs = critical_cut_angle_approx(Pm_val, pmax_post, Tj_val, f0_val, delta_t)
                     text += (
                         f"\n══ 临界切除角快速估算（§7.6） ══════\n"
