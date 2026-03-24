@@ -54,7 +54,7 @@ from power_tool_approximations import (
 from power_tool_faults import short_circuit_capacity
 
 
-from power_tool_stability import critical_cut_angle_approx, equal_area_criterion, impact_method
+from power_tool_stability import equal_area_criterion, impact_method
 
 
 from power_tool_smib import (
@@ -637,7 +637,7 @@ class ApproximationToolGUI(tk.Tk):
             return header + "\n" + "\n".join(f"{name}: {entry.get().strip()}" for name, entry in pairs)
         elif tab == "暂稳评估":
             pairs = [("冲击法 ΔPa / pu", self.imp_dp), ("冲击法 Δt / s", self.imp_dt), ("冲击法 f_d / Hz", self.imp_fd),
-                     ("冲击法 Pm / pu", self.imp_pcur), ("等面积法 Pm / pu", self.eac_pm), ("等面积法 Pmax_pre / pu", self.eac_ppre),
+                     ("等面积法 Pm / pu", self.eac_pm), ("等面积法 Pmax_pre / pu", self.eac_ppre),
                      ("等面积法 Pmax_fault / pu", self.eac_pf), ("等面积法 Pmax_post / pu", self.eac_ppost), ("等面积法 Δt / s", self.eac_dt)]
         elif tab == "小扰动分析":
             lines = [f"模型配置: {self.smib_config.get().strip()}"]
@@ -1081,28 +1081,12 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Label(left, text="暂稳评估", style="PageTitle.TLabel").pack(anchor="w")
         ttk.Label(
             left,
-            text="左侧统一收纳冲击法与等面积法。上框侧重切除时间与振荡指标，下框侧重 P-δ 曲线及临界清除判断。",
+            text="左侧统一收纳等面积法与冲击法。上框侧重 P-δ 曲线及临界清除判断，下框用于快估功率振荡幅度。",
             style="Muted.TLabel", justify="left", wraplength=430,
         ).pack(fill="x", pady=(4, 10))
 
-        imp_frame = ttk.LabelFrame(left, text="冲击法快估", style="Card.TLabelframe", padding=10)
-        imp_frame.pack(fill="x", expand=False, pady=(0, 10))
-        imp_frame.columnconfigure(1, weight=1)
-        self.imp_dp   = self._add_entry(imp_frame, 0, "故障加速功率 ΔPa / pu", "0.9")
-        self.imp_dt   = self._add_entry(imp_frame, 1, "故障切除时间 Δt / s", "0.12")
-        self.imp_fd   = self._add_entry(imp_frame, 2, "故障后振荡频率 f_d / Hz", "1.106")
-        self.imp_pcur = self._add_entry(imp_frame, 3, "当前传输功率 Pm / pu（用于振幅对比 & 临界切除）", "0.90")
-        self.imp_tj   = self._add_entry(imp_frame, 4, "惯性时间常数 T_j / s（临界切除用）", "9")
-        self.imp_f0   = self._add_entry(imp_frame, 5, "额定频率 f0 / Hz（临界切除用）", "50")
-        ttk.Button(imp_frame, text="计算冲击法", command=self.calculate_impact, style="Accent.TButton").grid(
-            row=6, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
-        )
-        self.imp_result = ScrolledText(imp_frame, width=50, height=11, wrap=tk.WORD)
-        self.imp_result.grid(row=7, column=0, columnspan=2, sticky="nsew", padx=2, pady=4)
-        self.imp_result.configure(state="disabled")
-
         eac_frame = ttk.LabelFrame(left, text="等面积法（单机无穷大）", style="Card.TLabelframe", padding=10)
-        eac_frame.pack(fill="both", expand=True)
+        eac_frame.pack(fill="both", expand=True, pady=(0, 10))
         eac_frame.columnconfigure(1, weight=1)
         eac_frame.rowconfigure(8, weight=1)
         self.eac_pm    = self._add_entry(eac_frame, 0, "机械功率 Pm / pu", "0.90")
@@ -1118,6 +1102,19 @@ class ApproximationToolGUI(tk.Tk):
         self.eac_result = ScrolledText(eac_frame, width=50, height=13, wrap=tk.WORD)
         self.eac_result.grid(row=8, column=0, columnspan=2, sticky="nsew", padx=2, pady=4)
         self.eac_result.configure(state="disabled")
+
+        imp_frame = ttk.LabelFrame(left, text="冲击法快估", style="Card.TLabelframe", padding=10)
+        imp_frame.pack(fill="x", expand=False)
+        imp_frame.columnconfigure(1, weight=1)
+        self.imp_dp   = self._add_entry(imp_frame, 0, "故障加速功率 ΔPa / pu", "0.9")
+        self.imp_dt   = self._add_entry(imp_frame, 1, "故障切除时间 Δt / s", "0.12")
+        self.imp_fd   = self._add_entry(imp_frame, 2, "故障后振荡频率 f_d / Hz", "1.106")
+        ttk.Button(imp_frame, text="计算冲击法", command=self.calculate_impact, style="Accent.TButton").grid(
+            row=3, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
+        )
+        self.imp_result = ScrolledText(imp_frame, width=50, height=8, wrap=tk.WORD)
+        self.imp_result.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=2, pady=4)
+        self.imp_result.configure(state="disabled")
 
         ttk.Label(right, text="功角曲线（等面积法）", style="PageTitle.TLabel").grid(
             row=0, column=0, sticky="w"
@@ -1820,51 +1817,15 @@ class ApproximationToolGUI(tk.Tk):
             delta_p = _safe_float(self.imp_dp.get(), "ΔPa")
             delta_t = _safe_float(self.imp_dt.get(), "Δt")
             f_d     = _safe_float(self.imp_fd.get(), "f_d")
-            pcur_text = self.imp_pcur.get().strip()
-            pcur = _safe_float(pcur_text, "Pm") if pcur_text else None
-            tj_text = self.imp_tj.get().strip()
-            f0_text = self.imp_f0.get().strip()
 
-            summary = impact_method(delta_p, delta_t, f_d, pcur)
+            summary = impact_method(delta_p, delta_t, f_d)
 
             text = (
                 f"══ 冲击法：功率振荡幅度快估 ═════════════\n"
                 f"冲击量 Dp = {summary.Dp_pu:.6f} pu\n"
                 f"估算第一摆功率振荡幅值 ΔP_osc ≈ {summary.osc_amp_pu:.6f} pu\n"
+                f"\n说明：\n{summary.notes}"
             )
-            if summary.margin_pu is not None:
-                text += f"与当前功率幅值对比量 = {summary.margin_pu:.6f} pu\n"
-            text += f"结论：{summary.status}\n"
-
-            # ── 临界切除角快速估算 ────────────────────────────────────────
-            if pcur_text and tj_text and f0_text:
-                try:
-                    Pm_val  = _safe_float(pcur_text, "Pm")
-                    Tj_val  = _safe_float(tj_text,   "T_j")
-                    f0_val  = _safe_float(f0_text,   "f0")
-                    pmax_post = _safe_float(self.eac_ppost.get(), "Pmax_post")
-                    ccs = critical_cut_angle_approx(Pm_val, pmax_post, Tj_val, f0_val, delta_t)
-                    text += (
-                        f"\n══ 临界切除角快速估算（§7.6） ══════\n"
-                        f"初始平衡角   δ0  = {ccs.delta0_deg:.3f}°\n"
-                        f"临界切除角   δcr = {ccs.delta_cr_deg:.3f}°\n"
-                        f"临界切除时间 tcr = {ccs.t_cr_s:.4f} s\n"
-                        f"当前切除时间 Δt  = {delta_t:.4f} s  "
-                        f"({'< tcr OK' if delta_t < ccs.t_cr_s else '>= tcr NG'})\n"
-                    )
-                    if ccs.margin_pct is not None:
-                        text += f"时间裕量 = {ccs.margin_pct:+.1f} %\n"
-                    text += f"结论：{ccs.status}\n"
-                    text += f"\n说明（冲击法）：\n{summary.notes}\n"
-                    text += f"\n说明（临界切除）：\n{ccs.notes}"
-                except InputError as ie:
-                    text += f"\n临界切除角估算：{ie}\n"
-                    text += f"\n说明：\n{summary.notes}"
-            else:
-                text += (
-                    "\n（如需临界切除角快速估算，请同时填写 Pm、T_j 和 f0）\n"
-                    f"\n说明：\n{summary.notes}"
-                )
 
             self._set_text(self.imp_result, text)
 
