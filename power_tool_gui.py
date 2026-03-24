@@ -1658,6 +1658,7 @@ class ApproximationToolGUI(tk.Tk):
 
 
     def _build_short_circuit_tab(self) -> None:
+        self._sc_ui_ready = False
         self.sc_tab.columnconfigure(1, weight=1)
         self.sc_tab.rowconfigure(0, weight=1)
 
@@ -1734,8 +1735,6 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Label(left, text="故障点位置滑条（双电源）").grid(row=28, column=0, sticky="w", padx=4, pady=(2, 2))
         self.sc_fault_slider = ttk.Scale(left, from_=0.0, to=100.0, orient=tk.HORIZONTAL, command=self._on_sc_fault_slider)
         self.sc_fault_slider.grid(row=28, column=1, sticky="ew", padx=4, pady=(2, 2))
-        self.sc_fault_slider.set(50.0)
-
         ttk.Button(left, text="计算并绘图", command=self.calculate_short_circuit).grid(
             row=29, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 4)
         )
@@ -1743,6 +1742,7 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_result = ScrolledText(left, width=58, height=20, wrap=tk.WORD)
         self.sc_result.grid(row=30, column=0, columnspan=2, sticky="nsew", padx=4, pady=4)
         self.sc_result.configure(state="disabled")
+        self.sc_fault_slider.set(50.0)
 
         ttk.Label(right, text="短路点电流波形", font=("TkDefaultFont", 11, "bold")).grid(
             row=0, column=0, sticky="w", pady=(0, 8)
@@ -1769,6 +1769,7 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_toolbar.grid(row=2, column=0, sticky="ew")
 
         self._on_sc_mode_change()
+        self._sc_ui_ready = True
         self.calculate_short_circuit()
 
     def _on_sc_neutral_mode_change(self, _event: object | None = None) -> None:
@@ -1806,6 +1807,8 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_xn_r.insert(0, f"{xn_r:.6g}")
 
     def _on_sc_fault_slider(self, value: str) -> None:
+        if not getattr(self, "_sc_ui_ready", False):
+            return
         try:
             v = float(value)
         except Exception:
