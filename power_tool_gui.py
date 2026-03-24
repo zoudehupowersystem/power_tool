@@ -1757,6 +1757,7 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_plot_voltage_tab.rowconfigure(0, weight=1)
 
         self.sc_fig = Figure(figsize=(10.6, 6.8), dpi=100)
+        self.sc_fig.subplots_adjust(top=0.84)
         gs = self.sc_fig.add_gridspec(2, 2, width_ratios=[1.7, 1.0], hspace=0.26, wspace=0.18)
         self.sc_ax_phase = self.sc_fig.add_subplot(gs[0, 0])
         self.sc_ax_seq = self.sc_fig.add_subplot(gs[1, 0])
@@ -1775,6 +1776,7 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_toolbar.grid(row=1, column=0, sticky="ew")
 
         self.sc_v_fig = Figure(figsize=(10.6, 6.8), dpi=100)
+        self.sc_v_fig.subplots_adjust(top=0.84)
         gs_v = self.sc_v_fig.add_gridspec(2, 2, width_ratios=[1.7, 1.0], hspace=0.26, wspace=0.18)
         self.sc_v_ax_phase = self.sc_v_fig.add_subplot(gs_v[0, 0])
         self.sc_v_ax_seq = self.sc_v_fig.add_subplot(gs_v[1, 0])
@@ -1867,7 +1869,7 @@ class ApproximationToolGUI(tk.Tk):
         ax.set_theta_zero_location("E")
         ax.set_theta_direction(1)
         ax.set_facecolor("#11161d")
-        ax.set_title(title, color="#f5f7fa", fontsize=10, pad=10)
+        ax.set_title(title, color="#f5f7fa", fontsize=10, pad=28)
         colors = {
             "A": "#7ec8ff", "B": "#ffe082", "C": "#ff8a80",
             "1": "#66bb6a", "2": "#42a5f5", "0": "#b388ff",
@@ -1910,26 +1912,24 @@ class ApproximationToolGUI(tk.Tk):
                         color=color, fontsize=7, ha="center", va="center")
         legend_order = [k for k in ("A", "B", "C", "1", "2", "0") if k in vectors]
         if legend_order:
-            table_rows = []
+            info_lines = []
             for k in legend_order:
                 val = vectors[k]
-                table_rows.append([k, f"{abs(val):.4g}", f"{math.degrees(math.atan2(val.imag, val.real)):+.2f}"])
-            table_ax = ax.inset_axes([0.01, 1.23, 0.98, 0.28], transform=ax.transAxes)
-            table_ax.axis("off")
-            table = table_ax.table(
-                cellText=table_rows,
-                colLabels=["向量", "幅值", "角度(°)"],
-                loc="center",
-                cellLoc="center",
+                angle = math.degrees(math.atan2(val.imag, val.real))
+                info_lines.append(f"{k:>2}: {abs(val):>10.4g}  ∠ {angle:+7.2f}°")
+            ax.text(
+                0.02,
+                1.02,
+                "\n".join(info_lines),
+                transform=ax.transAxes,
+                ha="left",
+                va="bottom",
+                fontsize=8.2,
+                color="#e6edf5",
+                family="monospace",
+                clip_on=False,
+                bbox=dict(boxstyle="round,pad=0.28", facecolor="#0f1722", edgecolor="#7c8794", alpha=0.92),
             )
-            table.auto_set_font_size(False)
-            table.set_fontsize(7)
-            table.scale(1.0, 0.9)
-            for (_row, _col), cell in table.get_celld().items():
-                cell.set_edgecolor("#7c8794")
-                cell.set_linewidth(0.6)
-                cell.set_facecolor("#11161d")
-                cell.get_text().set_color("#d7dfe7")
             handles = [
                 Line2D([0], [0], color=colors[k], linestyle=linestyles[k], linewidth=2.2, label=k)
                 for k in legend_order
@@ -1937,10 +1937,10 @@ class ApproximationToolGUI(tk.Tk):
             ax.legend(
                 handles=handles,
                 loc="upper center",
-                bbox_to_anchor=(0.5, 1.10),
+                bbox_to_anchor=(0.5, 1.17),
                 ncol=min(3, len(handles)),
-                fontsize=8,
-                framealpha=0.35,
+                fontsize=8.5,
+                framealpha=0.45,
                 labelcolor="#d7dfe7",
             )
 
