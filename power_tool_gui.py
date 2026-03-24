@@ -1667,7 +1667,7 @@ class ApproximationToolGUI(tk.Tk):
         left.grid(row=0, column=0, sticky="nsw")
         right.grid(row=0, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=1)
+        right.rowconfigure(0, weight=1)
 
         ttk.Label(left, text="短路电流计算（支持单电源/双电源+线路故障点）", font=("TkDefaultFont", 11, "bold")).grid(
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
@@ -1744,11 +1744,19 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_result.configure(state="disabled")
         self.sc_fault_slider.set(50.0)
 
-        ttk.Label(right, text="短路点电流波形", font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, sticky="w", pady=(0, 8)
-        )
+        self.sc_plot_notebook = ttk.Notebook(right)
+        self.sc_plot_notebook.grid(row=0, column=0, sticky="nsew")
+        self.sc_plot_current_tab = ttk.Frame(self.sc_plot_notebook)
+        self.sc_plot_voltage_tab = ttk.Frame(self.sc_plot_notebook)
+        self.sc_plot_notebook.add(self.sc_plot_current_tab, text="电流与向量图")
+        self.sc_plot_notebook.add(self.sc_plot_voltage_tab, text="电压波形")
+        self.sc_plot_current_tab.columnconfigure(0, weight=1)
+        self.sc_plot_current_tab.rowconfigure(0, weight=1)
+        self.sc_plot_current_tab.rowconfigure(1, weight=0)
+        self.sc_plot_voltage_tab.columnconfigure(0, weight=1)
+        self.sc_plot_voltage_tab.rowconfigure(0, weight=1)
 
-        self.sc_fig = Figure(figsize=(10.8, 7.0), dpi=100)
+        self.sc_fig = Figure(figsize=(10.6, 6.8), dpi=100)
         gs = self.sc_fig.add_gridspec(2, 2, width_ratios=[1.7, 1.0], hspace=0.26, wspace=0.18)
         self.sc_ax_phase = self.sc_fig.add_subplot(gs[0, 0])
         self.sc_ax_seq = self.sc_fig.add_subplot(gs[1, 0])
@@ -1762,11 +1770,25 @@ class ApproximationToolGUI(tk.Tk):
         self._draw_short_circuit_vector_axis(self.sc_ax_i_vector, {}, "故障点电流向量图")
         self._draw_short_circuit_vector_axis(self.sc_ax_v_vector, {}, "故障点电压向量图")
 
-        self.sc_canvas = FigureCanvasTkAgg(self.sc_fig, master=right)
-        self.sc_canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
-        self.sc_toolbar = NavigationToolbar2Tk(self.sc_canvas, right, pack_toolbar=False)
+        self.sc_canvas = FigureCanvasTkAgg(self.sc_fig, master=self.sc_plot_current_tab)
+        self.sc_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self.sc_toolbar = NavigationToolbar2Tk(self.sc_canvas, self.sc_plot_current_tab, pack_toolbar=False)
         self.sc_toolbar.update()
-        self.sc_toolbar.grid(row=2, column=0, sticky="ew")
+        self.sc_toolbar.grid(row=1, column=0, sticky="ew")
+
+        self.sc_v_fig = Figure(figsize=(8.4, 6.8), dpi=100)
+        self.sc_v_ax_phase = self.sc_v_fig.add_subplot(211)
+        self.sc_v_ax_seq = self.sc_v_fig.add_subplot(212)
+        self.sc_v_ax_phase.set_ylabel("u_abc / V")
+        self.sc_v_ax_seq.set_ylabel("u_012 / V")
+        self.sc_v_ax_seq.set_xlabel("t / s")
+        self.sc_v_ax_phase.grid(True, alpha=0.4)
+        self.sc_v_ax_seq.grid(True, alpha=0.4)
+        self.sc_v_canvas = FigureCanvasTkAgg(self.sc_v_fig, master=self.sc_plot_voltage_tab)
+        self.sc_v_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self.sc_v_toolbar = NavigationToolbar2Tk(self.sc_v_canvas, self.sc_plot_voltage_tab, pack_toolbar=False)
+        self.sc_v_toolbar.update()
+        self.sc_v_toolbar.grid(row=1, column=0, sticky="ew")
 
         self._on_sc_mode_change()
         self._sc_ui_ready = True
@@ -1974,12 +1996,23 @@ class ApproximationToolGUI(tk.Tk):
                 idc = -amp * math.sin(phi) * np.exp(-t / max(r.tau_dc_s, 1e-4))
                 return iac + idc
 
+            def uwave(Uv: complex) -> np.ndarray:
+                amp = math.sqrt(2.0) * abs(Uv)
+                phi = math.atan2(Uv.imag, Uv.real)
+                return amp * np.sin(w * t + phi)
+
             ia = iwave(r.Ia_A)
             ib = iwave(r.Ib_A)
             ic = iwave(r.Ic_A)
             i1 = iwave(r.I1_A)
             i2 = iwave(r.I2_A)
             i0 = iwave(r.I0_A)
+            va = uwave(r.Va_V)
+            vb = uwave(r.Vb_V)
+            vc = uwave(r.Vc_V)
+            v1 = uwave(r.V1_V)
+            v2 = uwave(r.V2_V)
+            v0 = uwave(r.V0_V)
 
             self.sc_ax_phase.clear()
             self.sc_ax_seq.clear()
@@ -1998,6 +2031,23 @@ class ApproximationToolGUI(tk.Tk):
             self.sc_ax_seq.grid(True, alpha=0.35)
             self.sc_ax_seq.legend(loc="upper right", ncol=3, fontsize=8)
 
+            self.sc_v_ax_phase.clear()
+            self.sc_v_ax_seq.clear()
+            self.sc_v_ax_phase.plot(t, va, label="uA", lw=1.2)
+            self.sc_v_ax_phase.plot(t, vb, label="uB", lw=1.2)
+            self.sc_v_ax_phase.plot(t, vc, label="uC", lw=1.2)
+            self.sc_v_ax_phase.set_ylabel("u_abc / V")
+            self.sc_v_ax_phase.grid(True, alpha=0.35)
+            self.sc_v_ax_phase.legend(loc="upper right", ncol=3, fontsize=8)
+
+            self.sc_v_ax_seq.plot(t, v1, label="u1(正序)", lw=1.2)
+            self.sc_v_ax_seq.plot(t, v2, label="u2(负序)", lw=1.2)
+            self.sc_v_ax_seq.plot(t, v0, label="u0(零序)", lw=1.2)
+            self.sc_v_ax_seq.set_ylabel("u_012 / V")
+            self.sc_v_ax_seq.set_xlabel("t / s")
+            self.sc_v_ax_seq.grid(True, alpha=0.35)
+            self.sc_v_ax_seq.legend(loc="upper right", ncol=3, fontsize=8)
+
             asym_faults = {"A相接地", "B相接地", "C相接地", "AB两相接地", "BC两相接地", "CA两相接地", "AB两相短路", "BC两相短路", "CA两相短路"}
             show_labels = bool(self.sc_vector_labels_var.get())
             if r.fault_type in asym_faults:
@@ -2011,6 +2061,8 @@ class ApproximationToolGUI(tk.Tk):
 
             self.sc_fig.tight_layout()
             self.sc_canvas.draw()
+            self.sc_v_fig.tight_layout()
+            self.sc_v_canvas.draw()
 
         except Exception as exc:
             messagebox.showerror("计算错误", str(exc))
