@@ -1107,6 +1107,9 @@ class ApproximationToolGUI(tk.Tk):
         self.avc_rea_each = self._add_entry(avc_form, 12, "每组电抗器容量 / Mvar", "10")
         self.avc_p = self._add_entry(avc_form, 13, "高压侧有功潮流 P / MW", "160")
         self.avc_q = self._add_entry(avc_form, 14, "高压侧无功潮流 Q / Mvar（感性为正）", "45")
+        self.avc_sys_sc_mva = self._add_entry(avc_form, 15, "高压侧系统容量 Ssc / MVA", "6000")
+        self.avc_tx_mva = self._add_entry(avc_form, 16, "变压器容量 SN / MVA", "180")
+        self.avc_tx_uk_pct = self._add_entry(avc_form, 17, "变压器短路电压 Uk / %", "12")
         ttk.Button(avc_left, text="执行9区策略模拟", command=self.calculate_avc_strategy, style="Accent.TButton").grid(
             row=3, column=0, sticky="ew", pady=(10, 0)
         )
@@ -1816,6 +1819,29 @@ class ApproximationToolGUI(tk.Tk):
 
     def calculate_avc_strategy(self) -> None:
         """按简化9区策略给出档位+无功补偿调控建议与调后结果。"""
+        def _solve_avc_power_flow(vh_kv: float, tap: int, p_load_mw: float, q_load_mvar: float) -> tuple[float, float, float, float, float]:
+            tap_factor = 1.0 + tap * tap_step_pct / 100.0
+            v_source_pu = (vh_kv / hv_base) * tap_factor
+            s_load_pu = complex(p_load_mw, q_load_mvar) / tx_mva
+            v_lv = complex(max(v_source_pu, 1e-4), 0.0)
+            for _ in range(30):
+                if abs(v_lv) < 1e-8:
+                    v_lv = complex(1e-4, 0.0)
+                i_line = (s_load_pu / v_lv).conjugate()
+                v_next = complex(v_source_pu, 0.0) - 1j * x_total_pu * i_line
+                if abs(v_next - v_lv) < 1e-8:
+                    v_lv = v_next
+                    break
+                v_lv = v_next
+            i_line = (s_load_pu / v_lv).conjugate()
+            s_source_pu = complex(v_source_pu, 0.0) * i_line.conjugate()
+            i_pu = abs(i_line)
+            v_lv_kv = abs(v_lv) * lv_base
+            p_source_mw = s_source_pu.real * tx_mva
+            q_source_mvar = s_source_pu.imag * tx_mva
+            q_drop_mvar = x_total_pu * (i_pu ** 2) * tx_mva
+            return v_lv_kv, p_source_mw, q_source_mvar, q_drop_mvar, i_pu
+
         try:
             hv_base = _safe_float(self.avc_hv_kv.get(), "高压额定电压")
             lv_base = _safe_float(self.avc_lv_kv.get(), "低压额定电压")
@@ -1832,6 +1858,9 @@ class ApproximationToolGUI(tk.Tk):
             rea_each = max(0.0, _safe_float(self.avc_rea_each.get(), "每组电抗容量"))
             p_mw = _safe_float(self.avc_p.get(), "有功潮流")
             q_mvar = _safe_float(self.avc_q.get(), "无功潮流")
+            sys_sc_mva = _safe_float(self.avc_sys_sc_mva.get(), "高压侧系统容量")
+            tx_mva = _safe_float(self.avc_tx_mva.get(), "变压器容量")
+            tx_uk_pct = _safe_float(self.avc_tx_uk_pct.get(), "变压器短路电压")
 
             if tap_min > tap_max:
                 raise InputError("最小档位不能大于最大档位。")
@@ -1839,18 +1868,47 @@ class ApproximationToolGUI(tk.Tk):
             _validate_positive("高压侧额定电压", hv_base)
             _validate_positive("低压侧额定电压", lv_base)
             _validate_positive("单档调节率", tap_step_pct)
+            _validate_positive("高压侧系统容量", sys_sc_mva)
+            _validate_positive("变压器容量", tx_mva)
+            _validate_positive("变压器短路电压", tx_uk_pct)
 
-            # 当前低压估算：基于变比与当前档位（正档升压）
-            ratio = lv_base / hv_base
-            tap_gain = 1.0 + tap_now * tap_step_pct / 100.0
-            lv_est = vh * ratio * tap_gain
-            lv_mid = 0.5 * (lv_min + lv_max)
+            x_sys_pu = tx_mva / sys_sc_mva
+            x_tx_pu = tx_uk_pct / 100.0
+            x_total_pu = x_sys_pu + x_tx_pu
+
+            # 当前运行点：两节点潮流迭代（考虑系统短路容量与变压器短路电压）
+            lv_est, p_src_now, q_src_now, q_drop_now, i_now = _solve_avc_power_flow(vh, tap_now, p_mw, q_mvar)
 
             q_cap_total = cap_num * cap_each
             q_rea_total = rea_num * rea_each
             q_after = q_mvar
             tap_target = tap_now
             action_steps: list[str] = []
+
+            def _score_voltage(lv_kv: float, q_trial: float) -> float:
+                under = max(0.0, lv_min - lv_kv)
+                over = max(0.0, lv_kv - lv_max)
+                band_penalty = 8.0 * (under + over)
+                return abs(lv_kv - 0.5 * (lv_min + lv_max)) + band_penalty + 0.03 * abs(q_trial)
+
+            def _pick_compensation(initial_q: float, tap_eval: int, is_capacitor: bool) -> tuple[float, int, float]:
+                steps = cap_num if is_capacitor else rea_num
+                step_mvar = cap_each if is_capacitor else rea_each
+                direction = -1.0 if is_capacitor else 1.0
+                best_q = initial_q
+                best_steps = 0
+                best_lv, *_ = _solve_avc_power_flow(vh, tap_eval, p_mw, best_q)
+                best_score = _score_voltage(best_lv, best_q)
+                for n in range(1, steps + 1):
+                    q_trial = initial_q + direction * n * step_mvar
+                    lv_trial, *_ = _solve_avc_power_flow(vh, tap_eval, p_mw, q_trial)
+                    score = _score_voltage(lv_trial, q_trial)
+                    if score < best_score - 1e-9:
+                        best_score = score
+                        best_q = q_trial
+                        best_steps = n
+                        best_lv = lv_trial
+                return best_q, best_steps, best_lv
 
             # 9区策略（简化）：电压3区×无功3区
             if lv_est < lv_min:
@@ -1872,35 +1930,45 @@ class ApproximationToolGUI(tk.Tk):
                 if tap_target < tap_max:
                     tap_target += 1
                     action_steps.append("升高变压器档位 +1")
-                if q_after > 0 and q_cap_total > 0:
-                    dq = min(q_after, q_cap_total)
-                    q_after -= dq
-                    action_steps.append(f"投入电容器（最多 {q_cap_total:.2f} Mvar，实际补偿 {dq:.2f} Mvar）")
+                if q_cap_total > 0:
+                    q_prev = q_after
+                    q_after, cap_steps, lv_trial = _pick_compensation(q_after, tap_target, is_capacitor=True)
+                    if cap_steps > 0:
+                        dq = q_prev - q_after
+                        action_steps.append(
+                            f"投入电容器 {cap_steps} 组（{dq:.2f} Mvar），估算低压侧电压可到 {lv_trial:.3f} kV"
+                        )
             elif v_zone == "高压区":
                 if tap_target > tap_min:
                     tap_target -= 1
                     action_steps.append("降低变压器档位 -1")
-                if q_after < 0 and q_rea_total > 0:
-                    dq = min(-q_after, q_rea_total)
-                    q_after += dq
-                    action_steps.append(f"投入电抗器（最多 {q_rea_total:.2f} Mvar，实际吸收 {dq:.2f} Mvar）")
+                if q_rea_total > 0:
+                    q_prev = q_after
+                    q_after, rea_steps, lv_trial = _pick_compensation(q_after, tap_target, is_capacitor=False)
+                    if rea_steps > 0:
+                        dq = q_after - q_prev
+                        action_steps.append(
+                            f"投入电抗器 {rea_steps} 组（{dq:.2f} Mvar），估算低压侧电压可到 {lv_trial:.3f} kV"
+                        )
             else:
                 if q_zone == "感性无功偏大" and q_cap_total > 0:
-                    dq = min(q_after, q_cap_total)
-                    q_after -= dq
-                    action_steps.append(f"正常电压下优先投电容器，补偿 {dq:.2f} Mvar")
+                    q_prev = q_after
+                    q_after, cap_steps, lv_trial = _pick_compensation(q_after, tap_target, is_capacitor=True)
+                    if cap_steps > 0:
+                        dq = q_prev - q_after
+                        action_steps.append(f"正常电压下投电容器 {cap_steps} 组（补偿 {dq:.2f} Mvar，V≈{lv_trial:.3f} kV）")
                 elif q_zone == "容性无功偏大" and q_rea_total > 0:
-                    dq = min(-q_after, q_rea_total)
-                    q_after += dq
-                    action_steps.append(f"正常电压下优先投电抗器，吸收 {dq:.2f} Mvar")
+                    q_prev = q_after
+                    q_after, rea_steps, lv_trial = _pick_compensation(q_after, tap_target, is_capacitor=False)
+                    if rea_steps > 0:
+                        dq = q_after - q_prev
+                        action_steps.append(f"正常电压下投电抗器 {rea_steps} 组（吸收 {dq:.2f} Mvar，V≈{lv_trial:.3f} kV）")
                 else:
                     action_steps.append("保持当前档位与无功补偿状态")
 
-            # 调后电压估算（简单线性灵敏度）
-            tap_delta = tap_target - tap_now
-            lv_after = vh * ratio * (1.0 + tap_target * tap_step_pct / 100.0)
+            # 调后运行点：按目标档位和无功补偿后负荷重新潮流计算
             q_comp = q_mvar - q_after
-            lv_after += 0.015 * q_comp
+            lv_after, p_src_after, q_src_after, q_drop_after, i_after = _solve_avc_power_flow(vh, tap_target, p_mw, q_after)
 
             zone_map = {
                 ("低压区", "感性无功偏大"): "Ⅰ区（低压+感性）",
@@ -1925,6 +1993,12 @@ class ApproximationToolGUI(tk.Tk):
                 f"  无功 {q_mvar:.3f} → {q_after:.3f} Mvar\n"
                 f"  低压侧电压 {lv_est:.3f} → {lv_after:.3f} kV\n"
                 f"  无功补偿总动作量 = {q_comp:+.3f} Mvar\n"
+                f"\n相对准确潮流计算（当前 / 动作后）：\n"
+                f"  等值电抗 Xsys={x_sys_pu:.4f} pu，Xtx={x_tx_pu:.4f} pu，XΣ={x_total_pu:.4f} pu\n"
+                f"  支路电流 |I| = {i_now:.4f} → {i_after:.4f} pu\n"
+                f"  高压侧注入有功 P = {p_src_now:.3f} → {p_src_after:.3f} MW\n"
+                f"  高压侧注入无功 Q = {q_src_now:.3f} → {q_src_after:.3f} Mvar\n"
+                f"  串联电抗附加无功压降 = {q_drop_now:.3f} → {q_drop_after:.3f} Mvar\n"
             )
             self._set_text(self.avc_result, result_text)
         except Exception as exc:

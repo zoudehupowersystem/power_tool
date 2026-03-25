@@ -114,9 +114,20 @@ def _parse_float(text: str, default: float = 0.0) -> float:
     return float(text)
 
 
+def _read_text_with_fallback_encodings(path: Path, encodings: tuple[str, ...] = ('utf-8-sig', 'gb2312')) -> str:
+    last_error: UnicodeDecodeError | None = None
+    for encoding in encodings:
+        try:
+            return path.read_text(encoding=encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+    names = ', '.join(encodings)
+    raise ValueError(f'文件编码不受支持：{path.name}（已尝试：{names}）') from last_error
+
+
 def parse_cfg(cfg_path: str | Path) -> dict:
     path = Path(cfg_path)
-    lines = [line.strip() for line in path.read_text(encoding='utf-8-sig', errors='ignore').splitlines() if line.strip()]
+    lines = [line.strip() for line in _read_text_with_fallback_encodings(path).splitlines() if line.strip()]
     if len(lines) < 6:
         raise ValueError('CFG 文件内容不足，无法解析。')
 
@@ -459,7 +470,7 @@ def _resolve_companion_file(path: Path, suffix: str) -> Path:
 def _parse_yokogawa_hdr(hdr_path: Path) -> dict:
     sections: dict[str, dict[str, object]] = {}
     current = None
-    for raw_line in hdr_path.read_text(encoding='utf-8', errors='ignore').splitlines():
+    for raw_line in _read_text_with_fallback_encodings(hdr_path).splitlines():
         line = raw_line.strip()
         if not line:
             continue
@@ -552,7 +563,7 @@ def _read_ascii_dat(dat_path: Path, cfg: dict):
     digital_count = cfg['digital_count']
     timemult = cfg['timemult']
     rows = []
-    for raw in dat_path.read_text(encoding='utf-8-sig', errors='ignore').splitlines():
+    for raw in _read_text_with_fallback_encodings(dat_path).splitlines():
         line = raw.strip()
         if not line:
             continue
