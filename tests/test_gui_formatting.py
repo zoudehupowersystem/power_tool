@@ -175,3 +175,13 @@ def test_manual_doc_path_matches_current_tab_and_subtab() -> None:
     dummy.param_notebook = _FakeNotebook("架空线路")
     path = ApproximationToolGUI._manual_doc_path(dummy)
     assert path.name == "电压无功分析_AVC策略模拟.md"
+
+
+def test_estimate_nonperiodic_components_returns_decay_parameters() -> None:
+    fs = 2000.0
+    t = np.arange(0.0, 0.2, 1.0 / fs)
+    signal = 1.2 + 2.5 * np.exp(-t / 0.05) + 0.1 * np.sin(2 * np.pi * 50 * t)
+    dc_const, dc_decay, tau = ApproximationToolGUI._estimate_nonperiodic_components(signal, fs)
+    assert 0.9 < dc_const < 1.7
+    assert 2.0 < abs(dc_decay) < 3.0
+    assert 0.02 < tau < 0.10

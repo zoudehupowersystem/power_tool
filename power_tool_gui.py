@@ -3957,6 +3957,9 @@ class ApproximationToolGUI(tk.Tk):
         self._comtrade_popup = None
         self._comtrade_popup_canvas = None
         self._comtrade_popup_fig = None
+        self._harmonic_popup = None
+        self._harmonic_popup_fig = None
+        self._harmonic_popup_canvas = None
         self._sequence_channel_vars: dict[str, tk.StringVar] = {}
         self._sequence_result_text = None
         self._sequence_numeric_text = None
@@ -4105,7 +4108,7 @@ class ApproximationToolGUI(tk.Tk):
         filename = filedialog.askopenfilename(
             title="选择录波文件",
             filetypes=[
-                ("录波文件", "*.cfg *.wdf *.wvf *.hdr"),
+                ("录波文件", "*.cfg *.wdf *.wvf *.hdr *.mat"),
                 ("COMTRADE CFG", "*.cfg"),
                 ("MATLAB MAT", "*.mat"),
                 ("Yokogawa WDF", "*.wdf"),
@@ -4542,15 +4545,33 @@ class ApproximationToolGUI(tk.Tk):
             lines = [self._format_comtrade_overview(), "", f"══ 当前窗口分析（{start_s:.6f}s ~ {end_s:.6f}s）══"]
             primary = selection[0]
             ch = record.analog_channels[primary]
-            summary = fourier_summary(record.analog_values[idx, primary], sample_rate, fundamental_hz=fundamental, max_order=10)
+            signal = np.asarray(record.analog_values[idx, primary], dtype=float)
+            if signal.size < 4:
+                raise InputError("当前时间窗采样点不足，无法分析。")
+            summary = fourier_summary(signal, sample_rate, fundamental_hz=fundamental, max_order=19)
+            min_idx = int(np.argmin(signal))
+            max_idx = int(np.argmax(signal))
+            min_val = float(signal[min_idx])
+            max_val = float(signal[max_idx])
+            min_time = float(record.time_s[idx][min_idx])
+            max_time = float(record.time_s[idx][max_idx])
+            dc_const, dc_decay_amp, dc_tau = self._estimate_nonperiodic_components(signal, sample_rate)
             lines.append(f"傅里叶分析通道：{ch.name} ({ch.unit or '-'})")
             lines.append(f"DC = {summary.dc:.6g}，THD = {summary.thd_percent:.3f}%")
+            lines.append(f"最小值：{min_val:.6g} @ t={min_time:.6f}s")
+            lines.append(f"最大值：{max_val:.6g} @ t={max_time:.6f}s")
+            lines.append(
+                "非周期分量："
+                f"恒定直流={dc_const:.6g}，"
+                f"衰减直流={dc_decay_amp:.6g}，"
+                f"衰减时间常数={dc_tau:.6g}s"
+            )
             lines.append("阶次   频率/Hz   幅值(pk)    RMS       相角/°")
             lines.append("-" * 48)
-            for item in summary.harmonics[:8]:
+            for item in summary.harmonics[:10]:
                 lines.append(f"{item.order:>2d}   {item.frequency_hz:>8.3f}   {item.amplitude:>9.5g}   {item.rms:>8.5g}   {item.phase_deg:>8.2f}")
             try:
-                prony = prony_like_summary(record.analog_values[idx, primary], sample_rate)
+                prony = prony_like_summary(signal, sample_rate)
                 lines.append("")
                 lines.append(f"Prony 类估计：主振荡频率 {prony.dominant_frequency_hz:.4f} Hz，阻尼比 {prony.damping_ratio_percent:.3f}%，时间常数 {prony.decay_time_constant_s:.5g} s")
             except Exception as exc:
@@ -4564,8 +4585,105 @@ class ApproximationToolGUI(tk.Tk):
                 lines.append("")
                 lines.append("序分量提取：请选择至少 3 个相量/电流同类通道。")
             self._set_text(self.comtrade_info, "\n".join(lines))
+            self._open_harmonic_analysis_window(signal, sample_rate, fundamental, ch.name, ch.unit or "-")
         except Exception as exc:
             messagebox.showerror("录波分析失败", str(exc))
+
+    @staticmethod
+    def _estimate_nonperiodic_components(signal: np.ndarray, sample_rate: float) -> tuple[float, float, float]:
+        x = np.asarray(signal, dtype=float).reshape(-1)
+        if x.size < 8 or sample_rate <= 0:
+            return float(np.mean(x) if x.size else 0.0), 0.0, 0.0
+        tail_count = max(4, int(round(x.size * 0.15)))
+        dc_const = float(np.mean(x[-tail_count:]))
+        resid = x - dc_const
+        amp = float(resid[0])
+        env = np.abs(resid)
+        floor = max(1e-9, float(np.max(env)) * 1e-5)
+        mask = env > floor
+        if np.count_nonzero(mask) < 3:
+            return dc_const, amp, 0.0
+        t = np.arange(x.size, dtype=float) / sample_rate
+        coeff = np.polyfit(t[mask], np.log(env[mask]), 1)
+        sigma = float(coeff[0])
+        tau = float(-1.0 / sigma) if sigma < -1e-12 else 0.0
+        return dc_const, amp, tau
+
+    def _open_harmonic_analysis_window(
+        self,
+        signal: np.ndarray,
+        sample_rate: float,
+        fundamental_hz: float,
+        channel_name: str,
+        channel_unit: str,
+    ) -> None:
+        if self._harmonic_popup is not None and self._harmonic_popup.winfo_exists():
+            self._harmonic_popup.destroy()
+        win = tk.Toplevel(self)
+        win.title(f"谐波分析 - {channel_name}")
+        win.geometry("840x420")
+        self._harmonic_popup = win
+
+        host = ttk.Frame(win, padding=8)
+        host.pack(fill="both", expand=True)
+        host.columnconfigure(1, weight=1)
+        host.rowconfigure(1, weight=1)
+
+        top = ttk.Frame(host)
+        top.grid(row=0, column=0, columnspan=2, sticky="ew")
+        ttk.Label(top, text="谐波分析最高次数").pack(side="left")
+        order_var = tk.IntVar(value=19)
+        spin = tk.Spinbox(top, from_=3, to=50, increment=1, textvariable=order_var, width=6)
+        spin.pack(side="left", padx=(6, 8))
+        ttk.Label(top, text=f"通道：{channel_name} ({channel_unit})").pack(side="left", padx=(8, 0))
+
+        table_frame = ttk.Frame(host)
+        table_frame.grid(row=1, column=0, sticky="nsw", padx=(0, 8))
+        cols = ("order", "amp", "ratio")
+        tree = ttk.Treeview(table_frame, columns=cols, show="headings", height=16)
+        tree.heading("order", text="谐波")
+        tree.heading("amp", text="含有量")
+        tree.heading("ratio", text="含有率")
+        tree.column("order", width=78, anchor="center")
+        tree.column("amp", width=118, anchor="e")
+        tree.column("ratio", width=100, anchor="e")
+        yscroll = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=yscroll.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        yscroll.grid(row=0, column=1, sticky="ns")
+
+        fig = Figure(figsize=(6.2, 3.2), dpi=100)
+        ax = fig.add_subplot(111)
+        ax.grid(True, axis="y", alpha=0.25)
+        self._harmonic_popup_fig = fig
+        self._harmonic_popup_canvas = FigureCanvasTkAgg(fig, master=host)
+        self._harmonic_popup_canvas.get_tk_widget().grid(row=1, column=1, sticky="nsew")
+
+        def _refresh_view() -> None:
+            max_order = max(2, int(order_var.get()))
+            summary = fourier_summary(signal, sample_rate, fundamental_hz=fundamental_hz, max_order=max_order)
+            tree.delete(*tree.get_children())
+            base_amp = summary.harmonics[0].amplitude if summary.harmonics else 0.0
+            tree.insert("", "end", values=("基波", f"{base_amp:.4f}", "100.00%"))
+            tree.insert("", "end", values=("直流分量", f"{summary.dc:.4f}", f"{(abs(summary.dc) / max(base_amp, 1e-9) * 100.0):.2f}%"))
+            orders = []
+            percents = []
+            for item in summary.harmonics[1:]:
+                ratio = item.amplitude / max(base_amp, 1e-12) * 100.0
+                tree.insert("", "end", values=(f"{item.order}次谐波", f"{item.amplitude:.4f}", f"{ratio:.2f}%"))
+                orders.append(item.order)
+                percents.append(ratio)
+            ax.clear()
+            ax.bar(orders, percents, width=0.6, color="#7d7d7d")
+            ax.set_xlabel("谐波次数")
+            ax.set_ylabel("含有率 / %")
+            ax.set_title("谐波含有率柱状图")
+            ax.set_xticks(orders if len(orders) <= 20 else orders[::2])
+            ax.grid(True, axis="y", alpha=0.3)
+            self._harmonic_popup_canvas.draw()
+
+        ttk.Button(top, text="刷新", command=_refresh_view).pack(side="left", padx=(8, 0))
+        _refresh_view()
 
     def _build_embedded_sequence_panel(self) -> None:
         top = ttk.Frame(self.comtrade_sequence_frame)
