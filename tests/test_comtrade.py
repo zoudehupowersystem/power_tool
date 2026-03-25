@@ -14,8 +14,10 @@ if str(ROOT) not in sys.path:
 
 from power_tool_comtrade import (
     estimate_sampling_rate,
+    export_waveform_record,
     fourier_summary,
     parse_comtrade,
+    parse_mat_waveform,
     parse_waveform_file,
     sequence_phasors,
     single_frequency_phasor,
@@ -224,6 +226,46 @@ def test_parse_embedded_wdf_samples() -> None:
         assert record.analog_channels[-1].name == "CH11"
         assert np.isclose(record.time_s[0], -5.00498)
         assert np.isclose(record.time_s[1] - record.time_s[0], 2e-5)
+
+
+def test_export_csv_mat_and_reimport_mat(tmp_path: Path) -> None:
+    cfg = tmp_path / "sample.cfg"
+    dat = tmp_path / "sample.dat"
+    _write_cfg(cfg, "ASCII")
+    dat.write_text(
+        "1,0,1,2,3,0\n"
+        "2,1000,4,5,6,0\n",
+        encoding="utf-8",
+    )
+    record = parse_comtrade(cfg)
+
+    csv_paths = export_waveform_record(record, [0, 2], tmp_path / "wave_out.csv", "CSV")
+    csv_text = csv_paths[0].read_text(encoding="utf-8-sig")
+    assert "time_s,IA [A],IC [A]" in csv_text
+    assert "0,1,3" in csv_text
+
+    mat_paths = export_waveform_record(record, [1], tmp_path / "wave_mat.mat", "MATLAB")
+    mat_record = parse_mat_waveform(mat_paths[0])
+    assert mat_record.file_type == "MATLAB"
+    assert mat_record.analog_channels[0].name == "IB"
+    assert np.allclose(mat_record.time_s, record.time_s)
+    assert np.allclose(mat_record.analog_values[:, 0], record.analog_values[:, 1])
+
+
+def test_export_comtrade_keeps_channel_names(tmp_path: Path) -> None:
+    cfg = tmp_path / "sample.cfg"
+    dat = tmp_path / "sample.dat"
+    _write_cfg(cfg, "ASCII")
+    dat.write_text(
+        "1,0,10,20,30,0\n"
+        "2,1000,11,21,31,0\n",
+        encoding="utf-8",
+    )
+    record = parse_comtrade(cfg)
+    out_files = export_waveform_record(record, [0, 1], tmp_path / "reexp.cfg", "COMTRADE")
+    reloaded = parse_comtrade(out_files[0], out_files[1])
+    assert [c.name for c in reloaded.analog_channels] == ["IA", "IB"]
+    assert np.allclose(reloaded.analog_values[:, 0], [10.0, 11.0])
 
 def test_fourier_summary_extracts_fundamental() -> None:
     fs = 2000.0
