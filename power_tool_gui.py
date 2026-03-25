@@ -619,7 +619,7 @@ class ApproximationToolGUI(tk.Tk):
         panel = ttk.Frame(self, padding=10, style="Card.TFrame")
         panel.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
         panel.columnconfigure(0, weight=1)
-        panel.rowconfigure(4, weight=1)
+        panel.rowconfigure(5, weight=1)
 
         ttk.Label(panel, text="PowerTool AI", style="Card.TLabel",
                   font=("TkDefaultFont", 12, "bold")).grid(row=0, column=0, sticky="w")
@@ -633,28 +633,33 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Label(panel, textvariable=self.ai_status_var, style="Card.TLabel", justify="left",
                   wraplength=360).grid(row=2, column=0, sticky="ew", pady=(0, 8))
 
-        ttk.Label(panel, text="提问", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=3, column=0, sticky="w", pady=(4, 4))
+        doc_bar = ttk.Frame(panel, style="Card.TFrame")
+        doc_bar.grid(row=3, column=0, sticky="ew", pady=(2, 2))
+        doc_bar.columnconfigure(0, weight=1)
+        ttk.Button(doc_bar, text="使用手册", command=self._open_manual_popup).grid(row=0, column=0, sticky="w")
+
+        ttk.Label(panel, text="提问", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=4, column=0, sticky="w", pady=(4, 4))
         self.ai_think_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(panel, text="启用思考模式", variable=self.ai_think_var).grid(row=3, column=0, sticky="e", pady=(4, 4))
+        ttk.Checkbutton(panel, text="启用思考模式", variable=self.ai_think_var).grid(row=4, column=0, sticky="e", pady=(4, 4))
         self.ai_question = ScrolledText(panel, width=44, height=9, wrap=tk.WORD)
-        self.ai_question.grid(row=4, column=0, sticky="nsew")
+        self.ai_question.grid(row=5, column=0, sticky="nsew")
         self.ai_question_placeholder = "请结合当前界面，解释这个算例的意义、关键结果和下一步建议。"
         self.ai_question.insert("1.0", self.ai_question_placeholder)
 
         action = ttk.Frame(panel, style="Card.TFrame")
-        action.grid(row=5, column=0, sticky="ew", pady=(8, 6))
+        action.grid(row=6, column=0, sticky="ew", pady=(8, 6))
         action.columnconfigure(0, weight=1)
         action.columnconfigure(1, weight=1)
         ttk.Button(action, text="发送到 PowerTool AI", command=self._ask_power_tool_ai).grid(row=0, column=0, sticky="ew", padx=(0, 4))
         ttk.Button(action, text="填入当前算例摘要", command=self._insert_current_case_summary).grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
-        ttk.Label(panel, text="AI 回复", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=6, column=0, sticky="w", pady=(4, 4))
+        ttk.Label(panel, text="AI 回复", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=7, column=0, sticky="w", pady=(4, 4))
         self.ai_answer = ScrolledText(panel, width=44, height=18, wrap=tk.WORD)
-        self.ai_answer.grid(row=7, column=0, sticky="nsew")
+        self.ai_answer.grid(row=8, column=0, sticky="nsew")
         self.ai_answer.insert("1.0", "PowerTool AI 已就绪。")
         self.ai_answer.configure(state="disabled")
 
-        panel.rowconfigure(7, weight=1)
+        panel.rowconfigure(8, weight=1)
 
 
     def _clear_ai_context(self) -> None:
@@ -674,6 +679,80 @@ class ApproximationToolGUI(tk.Tk):
             f"当前模式：{self.ai_config.provider.mode}\n"
             f"{api_key_status(self.ai_config)}"
         )
+
+    def _manual_doc_path(self) -> Path:
+        base = Path(__file__).resolve().parent / "manuals"
+        tab = self._current_tab_name()
+        if tab == "电压无功分析":
+            sub = self._vr_notebook.tab(self._vr_notebook.select(), "text")
+            mapping = {
+                "静态电压稳定": "电压无功分析_静态电压稳定.md",
+                "线路自然功率与无功": "电压无功分析_线路自然功率与无功.md",
+                "AVC策略模拟": "电压无功分析_AVC策略模拟.md",
+            }
+            name = mapping.get(sub, "电压无功分析.md")
+        elif tab == "参数校核与标幺值":
+            sub = self.param_notebook.tab(self.param_notebook.select(), "text")
+            mapping = {
+                "架空线路": "参数校核与标幺值_架空线路.md",
+                "两绕组变压器": "参数校核与标幺值_两绕组变压器.md",
+                "三绕组变压器": "参数校核与标幺值_三绕组变压器.md",
+            }
+            name = mapping.get(sub, "参数校核与标幺值.md")
+        else:
+            mapping = {
+                "频率动态": "频率动态.md",
+                "机电振荡": "机电振荡.md",
+                "暂稳评估": "暂稳评估.md",
+                "小扰动分析": "小扰动分析.md",
+                "配电网合环分析": "配电网合环分析.md",
+                "短路电流计算": "短路电流计算.md",
+                "录波曲线": "录波曲线.md",
+            }
+            name = mapping.get(tab, "总览.md")
+        return base / name
+
+    def _render_markdown_to_text(self, widget: ScrolledText, markdown: str) -> None:
+        widget.configure(state="normal")
+        widget.delete("1.0", tk.END)
+        widget.tag_configure("h1", font=("TkDefaultFont", 13, "bold"), spacing1=8, spacing3=6)
+        widget.tag_configure("h2", font=("TkDefaultFont", 11, "bold"), spacing1=6, spacing3=4)
+        widget.tag_configure("bullet", lmargin1=12, lmargin2=24)
+        widget.tag_configure("code", font=("TkFixedFont", 10))
+        in_code = False
+        for raw in markdown.splitlines():
+            line = raw.rstrip("\n")
+            if line.strip().startswith("```"):
+                in_code = not in_code
+                continue
+            if in_code:
+                widget.insert(tk.END, line + "\n", ("code",))
+                continue
+            if line.startswith("# "):
+                widget.insert(tk.END, line[2:].strip() + "\n", ("h1",))
+            elif line.startswith("## "):
+                widget.insert(tk.END, line[3:].strip() + "\n", ("h2",))
+            elif line.startswith("- "):
+                widget.insert(tk.END, f"• {line[2:].strip()}\n", ("bullet",))
+            else:
+                widget.insert(tk.END, line + "\n")
+        widget.configure(state="disabled")
+
+    def _open_manual_popup(self) -> None:
+        path = self._manual_doc_path()
+        if not path.exists():
+            messagebox.showwarning("使用手册", f"未找到当前页面手册：{path.name}")
+            return
+        popup = tk.Toplevel(self)
+        popup.title(f"使用手册 - {path.stem}")
+        popup.geometry("900x700")
+        popup.transient(self)
+        popup.columnconfigure(0, weight=1)
+        popup.rowconfigure(0, weight=1)
+        text = ScrolledText(popup, wrap=tk.WORD)
+        text.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        markdown = path.read_text(encoding="utf-8")
+        self._render_markdown_to_text(text, markdown)
 
     def _reload_ai_config(self) -> None:
         self.ai_config = load_ai_config()

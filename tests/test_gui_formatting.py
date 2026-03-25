@@ -166,3 +166,12 @@ def test_on_ai_context_changed_clears_question_and_answer_immediately() -> None:
     assert dummy.ai_answer.text == ""
     assert dummy.ai_answer.state == "disabled"
     assert dummy.ai_status_var.value == "状态已刷新"
+
+
+def test_manual_doc_path_matches_current_tab_and_subtab() -> None:
+    dummy = type("Dummy", (), {})()
+    dummy._current_tab_name = lambda: "电压无功分析"
+    dummy._vr_notebook = _FakeNotebook("AVC策略模拟")
+    dummy.param_notebook = _FakeNotebook("架空线路")
+    path = ApproximationToolGUI._manual_doc_path(dummy)
+    assert path.name == "电压无功分析_AVC策略模拟.md"
