@@ -298,6 +298,91 @@ def _read_mat_level4(path: Path) -> dict[str, np.ndarray]:
     return out
 
 
+def _mat5_pad(length: int) -> int:
+    return (8 - (length % 8)) % 8
+
+
+def _read_mat_level5(path: Path) -> dict[str, np.ndarray]:
+    data = path.read_bytes()
+    if len(data) < 128:
+        raise ValueError('MATLAB v5 文件头长度不足。')
+    if data[126:128] == b'IM':
+        endian = '<'
+    elif data[126:128] == b'MI':
+        endian = '>'
+    else:
+        raise ValueError('无法识别 MATLAB v5 字节序。')
+
+    miINT8 = 1
+    miUINT16 = 4
+    miINT32 = 5
+    miUINT32 = 6
+    miDOUBLE = 9
+    miMATRIX = 14
+    mxCHAR_CLASS = 4
+
+    pos = 128
+    out: dict[str, np.ndarray] = {}
+    while pos + 8 <= len(data):
+        dt, nbytes = struct.unpack_from(f'{endian}II', data, pos)
+        pos += 8
+        if nbytes == 0:
+            break
+        if pos + nbytes > len(data):
+            break
+        payload = data[pos:pos + nbytes]
+        pos += nbytes + _mat5_pad(nbytes)
+        if dt != miMATRIX:
+            continue
+
+        cur = 0
+        # array flags
+        sdt, sn = struct.unpack_from(f'{endian}II', payload, cur)
+        cur += 8
+        flags = payload[cur:cur + sn]
+        cur += sn + _mat5_pad(sn)
+        if sdt != miUINT32 or len(flags) < 8:
+            continue
+        mx_class = struct.unpack_from(f'{endian}I', flags, 0)[0] & 0xFF
+
+        # dimensions
+        sdt, sn = struct.unpack_from(f'{endian}II', payload, cur)
+        cur += 8
+        dims_raw = payload[cur:cur + sn]
+        cur += sn + _mat5_pad(sn)
+        if sdt != miINT32 or len(dims_raw) < 8:
+            continue
+        dims = struct.unpack_from(f'{endian}{sn // 4}i', dims_raw, 0)
+        mrows = int(dims[0]) if dims else 0
+        ncols = int(dims[1]) if len(dims) > 1 else 1
+        if mrows <= 0 or ncols <= 0:
+            continue
+
+        # name
+        sdt, sn = struct.unpack_from(f'{endian}II', payload, cur)
+        cur += 8
+        name_raw = payload[cur:cur + sn]
+        cur += sn + _mat5_pad(sn)
+        if sdt != miINT8:
+            continue
+        name = name_raw.decode('utf-8', errors='ignore').strip('\x00').strip() or f'var{len(out)+1}'
+
+        # real data
+        sdt, sn = struct.unpack_from(f'{endian}II', payload, cur)
+        cur += 8
+        real_raw = payload[cur:cur + sn]
+        if mx_class == mxCHAR_CLASS and sdt == miUINT16:
+            arr = np.frombuffer(real_raw, dtype=np.dtype(np.uint16).newbyteorder(endian)).copy()
+            out[name] = arr.reshape((mrows, ncols), order='F')
+            continue
+        if sdt == miDOUBLE:
+            arr = np.frombuffer(real_raw, dtype=np.dtype(np.float64).newbyteorder(endian)).copy()
+            out[name] = arr.reshape((mrows, ncols), order='F')
+    if not out:
+        raise ValueError('未识别到 MATLAB v5 变量。')
+    return out
+
+
 def _encode_names_to_uint16(names: list[str]) -> np.ndarray:
     width = max((len(name) for name in names), default=1)
     matrix = np.zeros((len(names), width), dtype=np.uint16)
@@ -320,7 +405,10 @@ def _decode_uint16_names(matrix: np.ndarray) -> list[str]:
 
 def parse_mat_waveform(path: str | Path) -> ComtradeRecord:
     source_path = Path(path)
-    vars_map = _read_mat_level4(source_path)
+    try:
+        vars_map = _read_mat_level5(source_path)
+    except Exception:
+        vars_map = _read_mat_level4(source_path)
     normalized = {k.lower(): v for k, v in vars_map.items()}
     time = None
     for key in ('time_s', 'time', 't', 'x'):
@@ -860,6 +948,53 @@ def _write_mat_level4(path: Path, variables: dict[str, np.ndarray]) -> None:
             f.write(np.asfortranarray(mat).tobytes(order='F'))
 
 
+def _mat5_data_element(data_type: int, payload: bytes) -> bytes:
+    return struct.pack('<II', data_type, len(payload)) + payload + (b'\x00' * _mat5_pad(len(payload)))
+
+
+def _pack_mat5_variable(name: str, arr: np.ndarray) -> bytes:
+    miINT8 = 1
+    miUINT16 = 4
+    miINT32 = 5
+    miUINT32 = 6
+    miDOUBLE = 9
+    miMATRIX = 14
+    mxDOUBLE_CLASS = 6
+    mxCHAR_CLASS = 4
+
+    mat = np.asarray(arr)
+    if mat.ndim == 1:
+        mat = mat.reshape((-1, 1))
+    name_bytes = name.encode('utf-8')
+    dims = np.array(mat.shape, dtype=np.int32).tobytes(order='C')
+    if mat.dtype == np.uint16:
+        mx_class = mxCHAR_CLASS
+        data_type = miUINT16
+        payload = np.asfortranarray(mat.astype(np.uint16)).tobytes(order='F')
+    else:
+        mx_class = mxDOUBLE_CLASS
+        data_type = miDOUBLE
+        payload = np.asfortranarray(mat.astype(np.float64)).tobytes(order='F')
+
+    flags = struct.pack('<II', mx_class, 0)
+    content = b''.join([
+        _mat5_data_element(miUINT32, flags),
+        _mat5_data_element(miINT32, dims),
+        _mat5_data_element(miINT8, name_bytes),
+        _mat5_data_element(data_type, payload),
+    ])
+    return _mat5_data_element(miMATRIX, content)
+
+
+def _write_mat_level5(path: Path, variables: dict[str, np.ndarray]) -> None:
+    header_text = b'MATLAB 5.0 MAT-file, Platform: GLNXA64, Created by power_tool'
+    header = header_text.ljust(116, b' ') + (b'\x00' * 8) + struct.pack('<H', 0x0100) + b'IM'
+    with path.open('wb') as f:
+        f.write(header)
+        for name, arr in variables.items():
+            f.write(_pack_mat5_variable(name, arr))
+
+
 def export_waveform_record(
     record: ComtradeRecord,
     channel_indices: list[int],
@@ -897,7 +1032,7 @@ def export_waveform_record(
             'channel_names': _encode_names_to_uint16([ch.name for ch in channels]),
             'channel_units': _encode_names_to_uint16([ch.unit for ch in channels]),
         }
-        _write_mat_level4(out, vars_map)
+        _write_mat_level5(out, vars_map)
         return [out]
 
     if fmt == 'COMTRADE':
