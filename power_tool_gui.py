@@ -364,8 +364,39 @@ class ApproximationToolGUI(tk.Tk):
         self._build_short_circuit_tab()
         self._build_comtrade_tab()
         self._build_ai_sidebar()
+        self._hide_tab_muted_explanations()
         self._apply_global_aesthetics()
         self.main_notebook.bind("<<NotebookTabChanged>>", self._on_ai_context_changed)
+
+    def _hide_tab_muted_explanations(self) -> None:
+        tab_roots = [
+            self.freq_tab,
+            self.osc_tab,
+            self.volt_tab,
+            self.impact_tab,
+            self.smib_tab,
+            self.loop_tab,
+            self.param_tab,
+            self.sc_tab,
+            self.comtrade_tab,
+        ]
+
+        def walk(widget: tk.Widget) -> None:
+            if isinstance(widget, ttk.Label) and str(widget.cget("style")) == "Muted.TLabel":
+                try:
+                    if widget.winfo_manager() == "grid":
+                        widget.grid_remove()
+                    elif widget.winfo_manager() == "pack":
+                        widget.pack_forget()
+                    elif widget.winfo_manager() == "place":
+                        widget.place_forget()
+                except Exception:
+                    pass
+            for child in widget.winfo_children():
+                walk(child)
+
+        for root in tab_roots:
+            walk(root)
 
     @staticmethod
     def _add_entry(parent: ttk.Frame,
