@@ -79,6 +79,64 @@ def test_parse_binary_comtrade(tmp_path: Path) -> None:
     assert record.digital_values[:, 0].tolist() == [1, 0, 1, 0]
 
 
+def test_parse_ascii_comtrade_gb2312_cfg(tmp_path: Path) -> None:
+    cfg = tmp_path / "sample_gb2312.cfg"
+    dat = tmp_path / "sample_gb2312.dat"
+    cfg.write_text(
+        "变电站,记录器,1999\n"
+        "2,1A,1D\n"
+        "1,电流A,A,,A,1,0,0,-32768,32767,1,1,P\n"
+        "1,跳闸,0\n"
+        "50\n"
+        "1\n"
+        "1000,2\n"
+        "01/01/2025,00:00:00.000000\n"
+        "01/01/2025,00:00:00.000000\n"
+        "ASCII\n"
+        "1\n",
+        encoding="gb2312",
+    )
+    dat.write_text(
+        "1,0,100,0\n"
+        "2,1000,120,1\n",
+        encoding="utf-8",
+    )
+    record = parse_comtrade(cfg)
+    assert record.station_name == "变电站"
+    assert record.analog_channels[0].name == "电流A"
+    assert record.digital_channel_names[0] == "跳闸"
+    assert record.digital_values[:, 0].tolist() == [0, 1]
+
+
+def test_parse_yokogawa_hdr_gb2312(tmp_path: Path) -> None:
+    base = tmp_path / "capture_cn"
+    hdr = base.with_suffix(".HDR")
+    wvf = base.with_suffix(".WVF")
+    hdr.write_text(
+        "$PublicInfo\n"
+        "Format WVF\n"
+        "Endian Little\n"
+        "DataOffset 0\n"
+        "$Group1\n"
+        "BlockNumber 1\n"
+        "TraceName 电压A\n"
+        "BlockSize 4\n"
+        "HOffset 0\n"
+        "HResolution 0.001\n"
+        "HUnit s\n"
+        "VOffset 0\n"
+        "VResolution 0.1\n"
+        "VUnit V\n"
+        "VDataType IS2\n",
+        encoding="gb2312",
+    )
+    with wvf.open("wb") as f:
+        f.write(struct.pack("<hhhh", 0, 1, 2, 3))
+    record = parse_waveform_file(wvf)
+    assert record.analog_channels[0].name == "电压A"
+    assert np.allclose(record.analog_values[:, 0], [0.0, 0.1, 0.2, 0.3])
+
+
 def _write_yokogawa_pair(base: Path) -> None:
     hdr = base.with_suffix(".HDR")
     wvf = base.with_suffix(".WVF")

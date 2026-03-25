@@ -70,6 +70,7 @@ from power_tool_smib import (
 from power_tool_line_geometry import calculate_overhead_line_sequence
 from power_tool_ai import PowerToolAIError, api_key_status, ask_ai, config_path, load_ai_config
 from power_tool_loop_closure import loop_closure_analysis
+from power_tool_avc import simulate_avc_strategy
 from power_tool_comtrade import (
     estimate_sampling_rate,
     fourier_summary,
@@ -363,8 +364,39 @@ class ApproximationToolGUI(tk.Tk):
         self._build_short_circuit_tab()
         self._build_comtrade_tab()
         self._build_ai_sidebar()
+        self._hide_tab_muted_explanations()
         self._apply_global_aesthetics()
         self.main_notebook.bind("<<NotebookTabChanged>>", self._on_ai_context_changed)
+
+    def _hide_tab_muted_explanations(self) -> None:
+        tab_roots = [
+            self.freq_tab,
+            self.osc_tab,
+            self.volt_tab,
+            self.impact_tab,
+            self.smib_tab,
+            self.loop_tab,
+            self.param_tab,
+            self.sc_tab,
+            self.comtrade_tab,
+        ]
+
+        def walk(widget: tk.Widget) -> None:
+            if isinstance(widget, ttk.Label) and str(widget.cget("style")) == "Muted.TLabel":
+                try:
+                    if widget.winfo_manager() == "grid":
+                        widget.grid_remove()
+                    elif widget.winfo_manager() == "pack":
+                        widget.pack_forget()
+                    elif widget.winfo_manager() == "place":
+                        widget.place_forget()
+                except Exception:
+                    pass
+            for child in widget.winfo_children():
+                walk(child)
+
+        for root in tab_roots:
+            walk(root)
 
     @staticmethod
     def _add_entry(parent: ttk.Frame,
@@ -618,7 +650,7 @@ class ApproximationToolGUI(tk.Tk):
         panel = ttk.Frame(self, padding=10, style="Card.TFrame")
         panel.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
         panel.columnconfigure(0, weight=1)
-        panel.rowconfigure(4, weight=1)
+        panel.rowconfigure(5, weight=1)
 
         ttk.Label(panel, text="PowerTool AI", style="Card.TLabel",
                   font=("TkDefaultFont", 12, "bold")).grid(row=0, column=0, sticky="w")
@@ -632,28 +664,33 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Label(panel, textvariable=self.ai_status_var, style="Card.TLabel", justify="left",
                   wraplength=360).grid(row=2, column=0, sticky="ew", pady=(0, 8))
 
-        ttk.Label(panel, text="提问", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=3, column=0, sticky="w", pady=(4, 4))
+        doc_bar = ttk.Frame(panel, style="Card.TFrame")
+        doc_bar.grid(row=3, column=0, sticky="ew", pady=(2, 2))
+        doc_bar.columnconfigure(0, weight=1)
+        ttk.Button(doc_bar, text="使用手册", command=self._open_manual_popup).grid(row=0, column=0, sticky="w")
+
+        ttk.Label(panel, text="提问", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=4, column=0, sticky="w", pady=(4, 4))
         self.ai_think_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(panel, text="启用思考模式", variable=self.ai_think_var).grid(row=3, column=0, sticky="e", pady=(4, 4))
+        ttk.Checkbutton(panel, text="启用思考模式", variable=self.ai_think_var).grid(row=4, column=0, sticky="e", pady=(4, 4))
         self.ai_question = ScrolledText(panel, width=44, height=9, wrap=tk.WORD)
-        self.ai_question.grid(row=4, column=0, sticky="nsew")
+        self.ai_question.grid(row=5, column=0, sticky="nsew")
         self.ai_question_placeholder = "请结合当前界面，解释这个算例的意义、关键结果和下一步建议。"
         self.ai_question.insert("1.0", self.ai_question_placeholder)
 
         action = ttk.Frame(panel, style="Card.TFrame")
-        action.grid(row=5, column=0, sticky="ew", pady=(8, 6))
+        action.grid(row=6, column=0, sticky="ew", pady=(8, 6))
         action.columnconfigure(0, weight=1)
         action.columnconfigure(1, weight=1)
         ttk.Button(action, text="发送到 PowerTool AI", command=self._ask_power_tool_ai).grid(row=0, column=0, sticky="ew", padx=(0, 4))
         ttk.Button(action, text="填入当前算例摘要", command=self._insert_current_case_summary).grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
-        ttk.Label(panel, text="AI 回复", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=6, column=0, sticky="w", pady=(4, 4))
+        ttk.Label(panel, text="AI 回复", style="Card.TLabel", font=("TkDefaultFont", 10, "bold")).grid(row=7, column=0, sticky="w", pady=(4, 4))
         self.ai_answer = ScrolledText(panel, width=44, height=18, wrap=tk.WORD)
-        self.ai_answer.grid(row=7, column=0, sticky="nsew")
+        self.ai_answer.grid(row=8, column=0, sticky="nsew")
         self.ai_answer.insert("1.0", "PowerTool AI 已就绪。")
         self.ai_answer.configure(state="disabled")
 
-        panel.rowconfigure(7, weight=1)
+        panel.rowconfigure(8, weight=1)
 
 
     def _clear_ai_context(self) -> None:
@@ -673,6 +710,80 @@ class ApproximationToolGUI(tk.Tk):
             f"当前模式：{self.ai_config.provider.mode}\n"
             f"{api_key_status(self.ai_config)}"
         )
+
+    def _manual_doc_path(self) -> Path:
+        base = Path(__file__).resolve().parent / "manuals"
+        tab = self._current_tab_name()
+        if tab == "电压无功分析":
+            sub = self._vr_notebook.tab(self._vr_notebook.select(), "text")
+            mapping = {
+                "静态电压稳定": "电压无功分析_静态电压稳定.md",
+                "线路自然功率与无功": "电压无功分析_线路自然功率与无功.md",
+                "AVC策略模拟": "电压无功分析_AVC策略模拟.md",
+            }
+            name = mapping.get(sub, "电压无功分析.md")
+        elif tab == "参数校核与标幺值":
+            sub = self.param_notebook.tab(self.param_notebook.select(), "text")
+            mapping = {
+                "架空线路": "参数校核与标幺值_架空线路.md",
+                "两绕组变压器": "参数校核与标幺值_两绕组变压器.md",
+                "三绕组变压器": "参数校核与标幺值_三绕组变压器.md",
+            }
+            name = mapping.get(sub, "参数校核与标幺值.md")
+        else:
+            mapping = {
+                "频率动态": "频率动态.md",
+                "机电振荡": "机电振荡.md",
+                "暂稳评估": "暂稳评估.md",
+                "小扰动分析": "小扰动分析.md",
+                "配电网合环分析": "配电网合环分析.md",
+                "短路电流计算": "短路电流计算.md",
+                "录波曲线": "录波曲线.md",
+            }
+            name = mapping.get(tab, "总览.md")
+        return base / name
+
+    def _render_markdown_to_text(self, widget: ScrolledText, markdown: str) -> None:
+        widget.configure(state="normal")
+        widget.delete("1.0", tk.END)
+        widget.tag_configure("h1", font=("TkDefaultFont", 13, "bold"), spacing1=8, spacing3=6)
+        widget.tag_configure("h2", font=("TkDefaultFont", 11, "bold"), spacing1=6, spacing3=4)
+        widget.tag_configure("bullet", lmargin1=12, lmargin2=24)
+        widget.tag_configure("code", font=("TkFixedFont", 10))
+        in_code = False
+        for raw in markdown.splitlines():
+            line = raw.rstrip("\n")
+            if line.strip().startswith("```"):
+                in_code = not in_code
+                continue
+            if in_code:
+                widget.insert(tk.END, line + "\n", ("code",))
+                continue
+            if line.startswith("# "):
+                widget.insert(tk.END, line[2:].strip() + "\n", ("h1",))
+            elif line.startswith("## "):
+                widget.insert(tk.END, line[3:].strip() + "\n", ("h2",))
+            elif line.startswith("- "):
+                widget.insert(tk.END, f"• {line[2:].strip()}\n", ("bullet",))
+            else:
+                widget.insert(tk.END, line + "\n")
+        widget.configure(state="disabled")
+
+    def _open_manual_popup(self) -> None:
+        path = self._manual_doc_path()
+        if not path.exists():
+            messagebox.showwarning("使用手册", f"未找到当前页面手册：{path.name}")
+            return
+        popup = tk.Toplevel(self)
+        popup.title(f"使用手册 - {path.stem}")
+        popup.geometry("900x700")
+        popup.transient(self)
+        popup.columnconfigure(0, weight=1)
+        popup.rowconfigure(0, weight=1)
+        text = ScrolledText(popup, wrap=tk.WORD)
+        text.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        markdown = path.read_text(encoding="utf-8")
+        self._render_markdown_to_text(text, markdown)
 
     def _reload_ai_config(self) -> None:
         self.ai_config = load_ai_config()
@@ -1107,6 +1218,9 @@ class ApproximationToolGUI(tk.Tk):
         self.avc_rea_each = self._add_entry(avc_form, 12, "每组电抗器容量 / Mvar", "10")
         self.avc_p = self._add_entry(avc_form, 13, "高压侧有功潮流 P / MW", "160")
         self.avc_q = self._add_entry(avc_form, 14, "高压侧无功潮流 Q / Mvar（感性为正）", "45")
+        self.avc_sys_sc_mva = self._add_entry(avc_form, 15, "高压侧系统容量 Ssc / MVA", "6000")
+        self.avc_tx_mva = self._add_entry(avc_form, 16, "变压器容量 SN / MVA", "180")
+        self.avc_tx_uk_pct = self._add_entry(avc_form, 17, "变压器短路电压 Uk / %", "12")
         ttk.Button(avc_left, text="执行9区策略模拟", command=self.calculate_avc_strategy, style="Accent.TButton").grid(
             row=3, column=0, sticky="ew", pady=(10, 0)
         )
@@ -1832,99 +1946,46 @@ class ApproximationToolGUI(tk.Tk):
             rea_each = max(0.0, _safe_float(self.avc_rea_each.get(), "每组电抗容量"))
             p_mw = _safe_float(self.avc_p.get(), "有功潮流")
             q_mvar = _safe_float(self.avc_q.get(), "无功潮流")
-
-            if tap_min > tap_max:
-                raise InputError("最小档位不能大于最大档位。")
-            tap_now = min(max(tap_now, tap_min), tap_max)
-            _validate_positive("高压侧额定电压", hv_base)
-            _validate_positive("低压侧额定电压", lv_base)
-            _validate_positive("单档调节率", tap_step_pct)
-
-            # 当前低压估算：基于变比与当前档位（正档升压）
-            ratio = lv_base / hv_base
-            tap_gain = 1.0 + tap_now * tap_step_pct / 100.0
-            lv_est = vh * ratio * tap_gain
-            lv_mid = 0.5 * (lv_min + lv_max)
-
-            q_cap_total = cap_num * cap_each
-            q_rea_total = rea_num * rea_each
-            q_after = q_mvar
-            tap_target = tap_now
-            action_steps: list[str] = []
-
-            # 9区策略（简化）：电压3区×无功3区
-            if lv_est < lv_min:
-                v_zone = "低压区"
-            elif lv_est > lv_max:
-                v_zone = "高压区"
-            else:
-                v_zone = "正常电压区"
-
-            q_abs_ref = max(10.0, 0.2 * max(abs(p_mw), 1.0))
-            if q_mvar > q_abs_ref:
-                q_zone = "感性无功偏大"
-            elif q_mvar < -q_abs_ref:
-                q_zone = "容性无功偏大"
-            else:
-                q_zone = "无功正常区"
-
-            if v_zone == "低压区":
-                if tap_target < tap_max:
-                    tap_target += 1
-                    action_steps.append("升高变压器档位 +1")
-                if q_after > 0 and q_cap_total > 0:
-                    dq = min(q_after, q_cap_total)
-                    q_after -= dq
-                    action_steps.append(f"投入电容器（最多 {q_cap_total:.2f} Mvar，实际补偿 {dq:.2f} Mvar）")
-            elif v_zone == "高压区":
-                if tap_target > tap_min:
-                    tap_target -= 1
-                    action_steps.append("降低变压器档位 -1")
-                if q_after < 0 and q_rea_total > 0:
-                    dq = min(-q_after, q_rea_total)
-                    q_after += dq
-                    action_steps.append(f"投入电抗器（最多 {q_rea_total:.2f} Mvar，实际吸收 {dq:.2f} Mvar）")
-            else:
-                if q_zone == "感性无功偏大" and q_cap_total > 0:
-                    dq = min(q_after, q_cap_total)
-                    q_after -= dq
-                    action_steps.append(f"正常电压下优先投电容器，补偿 {dq:.2f} Mvar")
-                elif q_zone == "容性无功偏大" and q_rea_total > 0:
-                    dq = min(-q_after, q_rea_total)
-                    q_after += dq
-                    action_steps.append(f"正常电压下优先投电抗器，吸收 {dq:.2f} Mvar")
-                else:
-                    action_steps.append("保持当前档位与无功补偿状态")
-
-            # 调后电压估算（简单线性灵敏度）
-            tap_delta = tap_target - tap_now
-            lv_after = vh * ratio * (1.0 + tap_target * tap_step_pct / 100.0)
-            q_comp = q_mvar - q_after
-            lv_after += 0.015 * q_comp
-
-            zone_map = {
-                ("低压区", "感性无功偏大"): "Ⅰ区（低压+感性）",
-                ("低压区", "无功正常区"): "Ⅱ区（低压+无功正常）",
-                ("低压区", "容性无功偏大"): "Ⅲ区（低压+容性）",
-                ("正常电压区", "感性无功偏大"): "Ⅳ区（电压正常+感性）",
-                ("正常电压区", "无功正常区"): "Ⅴ区（目标区）",
-                ("正常电压区", "容性无功偏大"): "Ⅵ区（电压正常+容性）",
-                ("高压区", "感性无功偏大"): "Ⅶ区（高压+感性）",
-                ("高压区", "无功正常区"): "Ⅷ区（高压+无功正常）",
-                ("高压区", "容性无功偏大"): "Ⅸ区（高压+容性）",
-            }
-            zone_name = zone_map[(v_zone, q_zone)]
+            sys_sc_mva = _safe_float(self.avc_sys_sc_mva.get(), "高压侧系统容量")
+            tx_mva = _safe_float(self.avc_tx_mva.get(), "变压器容量")
+            tx_uk_pct = _safe_float(self.avc_tx_uk_pct.get(), "变压器短路电压")
+            result = simulate_avc_strategy(
+                hv_base=hv_base,
+                lv_base=lv_base,
+                vh=vh,
+                lv_min=lv_min,
+                lv_max=lv_max,
+                tap_min=tap_min,
+                tap_max=tap_max,
+                tap_now=tap_now,
+                tap_step_pct=tap_step_pct,
+                cap_num=cap_num,
+                cap_each=cap_each,
+                rea_num=rea_num,
+                rea_each=rea_each,
+                p_mw=p_mw,
+                q_mvar=q_mvar,
+                sys_sc_mva=sys_sc_mva,
+                tx_mva=tx_mva,
+                tx_uk_pct=tx_uk_pct,
+            )
             result_text = (
                 f"══ AVC 9区策略模拟结果 ═══════════════════════\n"
-                f"当前分区：{zone_name}\n"
-                f"电压判据：{v_zone}（估算低压侧 Vlv={lv_est:.3f} kV，限值[{lv_min:.3f}, {lv_max:.3f}]）\n"
-                f"无功判据：{q_zone}（Q={q_mvar:.3f} Mvar，阈值±{q_abs_ref:.3f} Mvar）\n\n"
-                f"建议策略：\n  - " + "\n  - ".join(action_steps) + "\n\n"
+                f"当前分区：{result.zone_name}\n"
+                f"电压判据：{result.v_zone}（估算低压侧 Vlv={result.lv_est_kv:.3f} kV，限值[{lv_min:.3f}, {lv_max:.3f}]）\n"
+                f"无功判据：{result.q_zone}（Q={result.q_now_mvar:.3f} Mvar，阈值±{result.q_abs_ref:.3f} Mvar）\n\n"
+                f"建议策略：\n  - " + "\n  - ".join(result.action_steps) + "\n\n"
                 f"调控后估算：\n"
-                f"  档位 {tap_now} → {tap_target}\n"
-                f"  无功 {q_mvar:.3f} → {q_after:.3f} Mvar\n"
-                f"  低压侧电压 {lv_est:.3f} → {lv_after:.3f} kV\n"
-                f"  无功补偿总动作量 = {q_comp:+.3f} Mvar\n"
+                f"  档位 {result.tap_now} → {result.tap_target}\n"
+                f"  无功 {result.q_now_mvar:.3f} → {result.q_after_mvar:.3f} Mvar\n"
+                f"  低压侧电压 {result.lv_est_kv:.3f} → {result.lv_after_kv:.3f} kV\n"
+                f"  无功补偿总动作量 = {result.q_comp_mvar:+.3f} Mvar\n"
+                f"\n相对准确潮流计算（当前 / 动作后）：\n"
+                f"  等值电抗 Xsys={result.x_sys_pu:.4f} pu，Xtx={result.x_tx_pu:.4f} pu，XΣ={result.x_total_pu:.4f} pu\n"
+                f"  支路电流 |I| = {result.i_now_pu:.4f} → {result.i_after_pu:.4f} pu\n"
+                f"  高压侧注入有功 P = {result.p_src_now_mw:.3f} → {result.p_src_after_mw:.3f} MW\n"
+                f"  高压侧注入无功 Q = {result.q_src_now_mvar:.3f} → {result.q_src_after_mvar:.3f} Mvar\n"
+                f"  串联电抗附加无功压降 = {result.q_drop_now_mvar:.3f} → {result.q_drop_after_mvar:.3f} Mvar\n"
             )
             self._set_text(self.avc_result, result_text)
         except Exception as exc:
