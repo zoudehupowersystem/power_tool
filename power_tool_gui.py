@@ -73,6 +73,7 @@ from power_tool_loop_closure import loop_closure_analysis
 from power_tool_avc import simulate_avc_strategy
 from power_tool_comtrade import (
     estimate_sampling_rate,
+    export_waveform_record,
     fourier_summary,
     parse_waveform_file,
     prony_like_summary,
@@ -3990,7 +3991,7 @@ class ApproximationToolGUI(tk.Tk):
         right.columnconfigure(0, weight=1)
         right.rowconfigure(3, weight=1)
 
-        ttk.Label(left, text="录波曲线（COMTRADE / Yokogawa WVF/WDF）", style="PageTitle.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 2))
+        ttk.Label(left, text="录波曲线（COMTRADE / Yokogawa / MATLAB）", style="PageTitle.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 2))
         ttk.Label(left, text="保持录波页原有的深色浏览风格，同时将左侧控制区整理为更清晰的白色操作面板。", style="Muted.TLabel", justify="left", wraplength=420).grid(row=1, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
         self.comtrade_path_var = tk.StringVar(value="")
@@ -3998,7 +3999,8 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Button(left, text="选择录波", command=self._browse_comtrade_cfg).grid(row=2, column=3, sticky="ew", pady=2)
         ttk.Button(left, text="加载录波", command=self._load_comtrade_file).grid(row=3, column=0, sticky="ew", pady=(4, 4), padx=(0, 4))
         ttk.Button(left, text="序量分析", command=self._open_sequence_analysis_window).grid(row=3, column=1, sticky="ew", pady=(4, 4), padx=(0, 4))
-        ttk.Button(left, text="多通道同图", command=self._open_comtrade_overlay_window).grid(row=3, column=2, columnspan=2, sticky="ew", pady=(4, 4))
+        ttk.Button(left, text="重新导出", command=self._open_comtrade_reexport_window).grid(row=3, column=2, sticky="ew", pady=(4, 4), padx=(0, 4))
+        ttk.Button(left, text="多通道同图", command=self._open_comtrade_overlay_window).grid(row=3, column=3, sticky="ew", pady=(4, 4))
 
         ttk.Label(left, text="通道选择（Ctrl/Shift 多选）", style="SectionTitle.TLabel").grid(row=4, column=0, columnspan=4, sticky="w", pady=(4, 2))
         self.comtrade_channel_list = tk.Listbox(left, selectmode=tk.EXTENDED, width=42, height=12, exportselection=False)
@@ -4105,6 +4107,7 @@ class ApproximationToolGUI(tk.Tk):
             filetypes=[
                 ("录波文件", "*.cfg *.wdf *.wvf *.hdr"),
                 ("COMTRADE CFG", "*.cfg"),
+                ("MATLAB MAT", "*.mat"),
                 ("Yokogawa WDF", "*.wdf"),
                 ("Yokogawa WVF", "*.wvf"),
                 ("Yokogawa HDR", "*.hdr"),
@@ -4147,6 +4150,83 @@ class ApproximationToolGUI(tk.Tk):
             return
         for idx, ch in enumerate(record.analog_channels):
             self.comtrade_channel_list.insert(tk.END, f"{idx+1:02d} | {ch.name} | {ch.phase or '-'} | {ch.unit or '-'}")
+
+    def _open_comtrade_reexport_window(self) -> None:
+        record = self._comtrade_record
+        if record is None:
+            messagebox.showwarning("提示", "请先加载录波文件。")
+            return
+
+        win = tk.Toplevel(self)
+        win.title("录波重新导出")
+        win.geometry("520x500")
+        win.transient(self)
+        win.grab_set()
+        frame = ttk.Frame(win, padding=12)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(0, weight=1)
+
+        ttk.Label(frame, text="选择一个或多个通道", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
+        channel_list = tk.Listbox(frame, selectmode=tk.EXTENDED, exportselection=False, height=14)
+        channel_list.grid(row=1, column=0, sticky="nsew", pady=(6, 8))
+        frame.rowconfigure(1, weight=1)
+        for idx, ch in enumerate(record.analog_channels):
+            channel_list.insert(tk.END, f"{idx+1:02d} | {ch.name} | {ch.unit or '-'}")
+        pre = list(self.comtrade_channel_list.curselection()) or list(range(len(record.analog_channels)))
+        for idx in pre:
+            channel_list.selection_set(idx)
+
+        form = ttk.Frame(frame)
+        form.grid(row=2, column=0, sticky="ew")
+        form.columnconfigure(1, weight=1)
+        ttk.Label(form, text="导出格式").grid(row=0, column=0, sticky="w")
+        fmt_var = tk.StringVar(value="COMTRADE")
+        fmt_combo = ttk.Combobox(form, textvariable=fmt_var, values=["COMTRADE", "CSV", "MATLAB"], state="readonly", width=14)
+        fmt_combo.grid(row=0, column=1, sticky="w")
+
+        ttk.Label(form, text="输出路径/文件名").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        path_var = tk.StringVar(value=str(Path(record.cfg_path).with_name(f"{Path(record.cfg_path).stem}_reexport")))
+        ttk.Entry(form, textvariable=path_var).grid(row=1, column=1, sticky="ew", pady=(6, 0))
+
+        def _browse_out() -> None:
+            fmt = fmt_var.get().upper()
+            if fmt == "CSV":
+                filename = filedialog.asksaveasfilename(title="保存 CSV", defaultextension=".csv", filetypes=[("CSV", "*.csv"), ("All files", "*.*")])
+            elif fmt == "MATLAB":
+                filename = filedialog.asksaveasfilename(title="保存 MATLAB", defaultextension=".mat", filetypes=[("MATLAB MAT", "*.mat"), ("All files", "*.*")])
+            else:
+                filename = filedialog.asksaveasfilename(title="保存 COMTRADE（选择基名或 cfg）", defaultextension=".cfg", filetypes=[("COMTRADE CFG", "*.cfg"), ("All files", "*.*")])
+            if filename:
+                path_var.set(filename)
+
+        ttk.Button(form, text="浏览...", command=_browse_out).grid(row=1, column=2, padx=(6, 0), pady=(6, 0))
+
+        hint = (
+            "说明：\n"
+            "1) CSV / MATLAB 直接输出物理量（无需考虑整数比例系数）；\n"
+            "2) 会同时保存通道名；\n"
+            "3) COMTRADE 导出会生成 .cfg + .dat。"
+        )
+        ttk.Label(frame, text=hint, style="Muted.TLabel", justify="left", wraplength=480).grid(row=3, column=0, sticky="w", pady=(8, 0))
+
+        def _do_export() -> None:
+            try:
+                selected = list(channel_list.curselection())
+                if not selected:
+                    raise InputError("请至少选择一个通道。")
+                target = path_var.get().strip()
+                if not target:
+                    raise InputError("请填写输出路径。")
+                paths = export_waveform_record(record, selected, target, fmt_var.get())
+                messagebox.showinfo("导出完成", "已导出文件：\n" + "\n".join(str(p) for p in paths))
+                win.destroy()
+            except Exception as exc:
+                messagebox.showerror("导出失败", str(exc))
+
+        btns = ttk.Frame(frame)
+        btns.grid(row=4, column=0, sticky="e", pady=(10, 0))
+        ttk.Button(btns, text="导出", command=_do_export).pack(side="left", padx=(0, 6))
+        ttk.Button(btns, text="取消", command=win.destroy).pack(side="left")
 
     def _select_all_comtrade_channels(self) -> None:
         if self._comtrade_record is None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import csv
 import math
 import os
 import re
@@ -233,9 +234,155 @@ def parse_waveform_file(path: str | Path) -> ComtradeRecord:
     suffix = source_path.suffix.lower()
     if suffix == '.cfg':
         return parse_comtrade(source_path)
+    if suffix == '.mat':
+        return parse_mat_waveform(source_path)
     if suffix in {'.hdr', '.wvf', '.wdf'}:
         return parse_yokogawa_waveform(source_path)
     raise ValueError(f'暂不支持的录波文件类型：{source_path.suffix or "(无扩展名)"}')
+
+
+def _decode_mat_v4_mopt(mopt: int) -> tuple[str, np.dtype]:
+    platform = mopt // 1000
+    precision = (mopt // 10) % 10
+    data_type = mopt % 10
+    if platform == 0:
+        endian = '<'
+    elif platform == 1:
+        endian = '>'
+    else:
+        raise ValueError('仅支持 little/big endian 的 MATLAB v4 文件。')
+    if precision not in (0, 1):
+        raise ValueError('仅支持 full matrix 的 MATLAB v4 文件。')
+    type_map = {
+        0: np.float64,
+        1: np.float32,
+        2: np.int32,
+        3: np.int16,
+        4: np.uint16,
+        5: np.uint8,
+    }
+    if data_type not in type_map:
+        raise ValueError(f'不支持的 MATLAB v4 数据类型标记：{data_type}')
+    return endian, np.dtype(type_map[data_type]).newbyteorder(endian)
+
+
+def _read_mat_level4(path: Path) -> dict[str, np.ndarray]:
+    out: dict[str, np.ndarray] = {}
+    data = path.read_bytes()
+    pos = 0
+    while pos + 20 <= len(data):
+        mopt, mrows, ncols, imagf, namelen = struct.unpack_from('<iiiii', data, pos)
+        if mrows <= 0 or ncols <= 0 or namelen <= 0:
+            break
+        pos += 20
+        if pos + namelen > len(data):
+            break
+        name_raw = data[pos:pos + namelen]
+        pos += namelen
+        name = name_raw.split(b'\x00', 1)[0].decode('utf-8', errors='ignore').strip() or f'var{len(out) + 1}'
+        if imagf != 0:
+            raise ValueError('暂不支持复数 MATLAB v4 变量。')
+        endian, dtype = _decode_mat_v4_mopt(mopt)
+        item_count = mrows * ncols
+        item_size = dtype.itemsize
+        total_size = item_count * item_size
+        if pos + total_size > len(data):
+            break
+        arr = np.frombuffer(data, dtype=dtype, count=item_count, offset=pos).copy()
+        pos += total_size
+        if endian != '<':
+            arr = arr.byteswap().view(arr.dtype.newbyteorder('<'))
+        out[name] = arr.reshape((mrows, ncols), order='F')
+    if not out:
+        raise ValueError('未识别到 MATLAB v4 变量，请确认 .mat 文件格式。')
+    return out
+
+
+def _encode_names_to_uint16(names: list[str]) -> np.ndarray:
+    width = max((len(name) for name in names), default=1)
+    matrix = np.zeros((len(names), width), dtype=np.uint16)
+    for i, name in enumerate(names):
+        for j, ch in enumerate(name[:width]):
+            matrix[i, j] = ord(ch)
+    return matrix
+
+
+def _decode_uint16_names(matrix: np.ndarray) -> list[str]:
+    arr = np.asarray(matrix)
+    if arr.ndim == 1:
+        arr = arr.reshape((1, -1))
+    names: list[str] = []
+    for row in arr:
+        chars = ''.join(chr(int(v)) for v in row if int(v) > 0)
+        names.append(chars.strip() or f'CH{len(names)+1}')
+    return names
+
+
+def parse_mat_waveform(path: str | Path) -> ComtradeRecord:
+    source_path = Path(path)
+    vars_map = _read_mat_level4(source_path)
+    normalized = {k.lower(): v for k, v in vars_map.items()}
+    time = None
+    for key in ('time_s', 'time', 't', 'x'):
+        if key in normalized:
+            time = np.asarray(normalized[key], dtype=float).reshape(-1)
+            break
+    if time is None:
+        raise ValueError('MATLAB 文件缺少时间变量（time_s/time/t/x）。')
+
+    analog = None
+    for key in ('analog_values', 'signals', 'data', 'y'):
+        if key in normalized:
+            analog = np.asarray(normalized[key], dtype=float)
+            break
+    if analog is None:
+        analog = np.asarray(next(iter(vars_map.values())), dtype=float)
+    if analog.ndim == 1:
+        analog = analog.reshape((-1, 1))
+    if analog.shape[0] != time.size and analog.shape[1] == time.size:
+        analog = analog.T
+    if analog.shape[0] != time.size:
+        raise ValueError('MATLAB 文件中的数据长度与时间轴不一致。')
+
+    names_var = normalized.get('channel_names')
+    units_var = normalized.get('channel_units')
+    if names_var is not None:
+        names = _decode_uint16_names(names_var)
+    else:
+        names = [f'CH{i+1}' for i in range(analog.shape[1])]
+    if units_var is not None:
+        units = _decode_uint16_names(units_var)
+    else:
+        units = ['' for _ in range(analog.shape[1])]
+    if len(names) < analog.shape[1]:
+        names.extend(f'CH{i+1}' for i in range(len(names), analog.shape[1]))
+    if len(units) < analog.shape[1]:
+        units.extend('' for _ in range(len(units), analog.shape[1]))
+
+    channels = [
+        ComtradeChannel(index=i + 1, name=names[i], phase='', unit=units[i], a=1.0, b=0.0)
+        for i in range(analog.shape[1])
+    ]
+    sample_rate = 0.0
+    if time.size > 1:
+        dt = np.median(np.diff(time))
+        if dt > 0:
+            sample_rate = float(1.0 / dt)
+    return ComtradeRecord(
+        station_name=source_path.stem,
+        device_id='MATLAB',
+        revision='MAT',
+        frequency_hz=50.0,
+        sample_rates=[(sample_rate, int(time.size))] if sample_rate > 0 else [],
+        analog_channels=channels,
+        digital_channel_names=[],
+        time_s=np.asarray(time, dtype=float),
+        analog_values=np.asarray(analog, dtype=float),
+        digital_values=np.zeros((time.size, 0), dtype=np.int16),
+        file_type='MATLAB',
+        cfg_path=source_path,
+        dat_path=source_path,
+    )
 
 
 def parse_yokogawa_waveform(path: str | Path) -> ComtradeRecord:
@@ -683,3 +830,104 @@ def prony_like_summary(signal: np.ndarray, sample_rate_hz: float) -> PronySummar
     zeta = max(0.0, min(0.999, -sigma / math.sqrt(sigma * sigma + wn * wn)))
     tau = float('inf') if abs(sigma) < 1e-12 else -1.0 / sigma
     return PronySummary(dom_freq, zeta * 100.0, tau, float(np.max(np.abs(x))))
+
+
+def _write_mat_level4(path: Path, variables: dict[str, np.ndarray]) -> None:
+    with path.open('wb') as f:
+        for name, arr in variables.items():
+            name_bytes = name.encode('utf-8') + b'\x00'
+            mat = np.asarray(arr)
+            if mat.ndim == 1:
+                mat = mat.reshape((-1, 1))
+            mat = np.asarray(mat, dtype=np.float64 if mat.dtype.kind == 'f' else mat.dtype)
+            dtype_to_t = {
+                np.dtype(np.float64): 0,
+                np.dtype(np.float32): 1,
+                np.dtype(np.int32): 2,
+                np.dtype(np.int16): 3,
+                np.dtype(np.uint16): 4,
+                np.dtype(np.uint8): 5,
+            }
+            dtype_key = np.dtype(mat.dtype).newbyteorder('=')
+            if dtype_key not in dtype_to_t:
+                mat = mat.astype(np.float64)
+                dtype_key = np.dtype(np.float64)
+            mopt = dtype_to_t[dtype_key]
+            mrows, ncols = int(mat.shape[0]), int(mat.shape[1])
+            header = struct.pack('<iiiii', mopt, mrows, ncols, 0, len(name_bytes))
+            f.write(header)
+            f.write(name_bytes)
+            f.write(np.asfortranarray(mat).tobytes(order='F'))
+
+
+def export_waveform_record(
+    record: ComtradeRecord,
+    channel_indices: list[int],
+    output_path: str | Path,
+    export_format: str,
+) -> list[Path]:
+    if not channel_indices:
+        raise ValueError('请至少选择一个通道用于导出。')
+    selected = sorted({int(i) for i in channel_indices if 0 <= int(i) < len(record.analog_channels)})
+    if not selected:
+        raise ValueError('未找到可导出的有效通道。')
+    out = Path(output_path)
+    fmt = export_format.strip().upper()
+    time = np.asarray(record.time_s, dtype=float).reshape(-1)
+    data = np.asarray(record.analog_values[:, selected], dtype=float)
+    channels = [record.analog_channels[i] for i in selected]
+
+    if fmt == 'CSV':
+        if out.suffix.lower() != '.csv':
+            out = out.with_suffix('.csv')
+        with out.open('w', encoding='utf-8-sig', newline='') as f:
+            writer = csv.writer(f)
+            header = ['time_s'] + [f"{ch.name} [{ch.unit}]" if ch.unit else ch.name for ch in channels]
+            writer.writerow(header)
+            for idx in range(time.size):
+                writer.writerow([f'{time[idx]:.12g}', *[f'{v:.12g}' for v in data[idx, :]]])
+        return [out]
+
+    if fmt == 'MATLAB':
+        if out.suffix.lower() != '.mat':
+            out = out.with_suffix('.mat')
+        vars_map: dict[str, np.ndarray] = {
+            'time_s': time.reshape((-1, 1)),
+            'analog_values': data,
+            'channel_names': _encode_names_to_uint16([ch.name for ch in channels]),
+            'channel_units': _encode_names_to_uint16([ch.unit for ch in channels]),
+        }
+        _write_mat_level4(out, vars_map)
+        return [out]
+
+    if fmt == 'COMTRADE':
+        base = out.with_suffix('') if out.suffix else out
+        cfg_path = base.with_suffix('.cfg')
+        dat_path = base.with_suffix('.dat')
+        sample_rate = estimate_sampling_rate(record)
+        if sample_rate <= 0:
+            sample_rate = 1.0
+        cfg_lines = [
+            f"{record.station_name or 'STATION'},{record.device_id or 'DEVICE'},1999",
+            f"{len(channels)},{len(channels)}A,0D",
+        ]
+        for idx, ch in enumerate(channels, start=1):
+            cfg_lines.append(f"{idx},{ch.name},{ch.phase},,{ch.unit or 'pu'},1,0,0,-999999,999999,1,1,P")
+        cfg_lines.extend([
+            f"{record.frequency_hz or 50.0:.6g}",
+            "1",
+            f"{sample_rate:.12g},{len(time)}",
+            "01/01/2026,00:00:00.000000",
+            "01/01/2026,00:00:00.000000",
+            "ASCII",
+            "1",
+        ])
+        cfg_path.write_text('\n'.join(cfg_lines) + '\n', encoding='utf-8')
+        with dat_path.open('w', encoding='utf-8') as f:
+            for i in range(time.size):
+                row = [str(i + 1), f"{time[i] * 1e6:.0f}"]
+                row.extend(f"{float(v):.12g}" for v in data[i, :])
+                f.write(','.join(row) + '\n')
+        return [cfg_path, dat_path]
+
+    raise ValueError('导出格式仅支持 COMTRADE、CSV、MATLAB。')
