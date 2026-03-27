@@ -251,6 +251,11 @@ PY2
 
 补充：若要把“合环回路阻抗提取（Ybus/多次潮流反算）→ PowerTool 合环评估”流程固化为标准作业，可参考仓库内 skill 文档：`skills/pandapower-loop-impedance/SKILL.md`；并可直接调用 `skill_pandapower_loop_impedance.py`。
 
+另外新增 3 个可直接调用的场景化 skill 代码与文档：
+- `skill_nminus1_frequency_security.py` / `skills/nminus1-frequency-security/SKILL.md`
+- `skill_smib_from_powerflow.py` / `skills/smib-from-powerflow/SKILL.md`
+- `skill_voltage_violation_governance.py` / `skills/voltage-violation-governance/SKILL.md`
+
 ## 5.7 全量测试与审计记录（2026-03-24）
 
 为支持“全软件审计”流程，当前仓库补充了本地可复现的审计记录，便于后续版本回归。
