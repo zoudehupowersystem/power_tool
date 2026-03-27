@@ -64,6 +64,21 @@ power_tool/
 └── README.md                        # 项目说明文档
 ```
 
+### 4.0 架构关系说明（重要）
+
+PowerTool 本体仍然是独立软件：  
+- 既可作为 GUI 桌面工具运行（`python power_tool.py`）；  
+- 也可作为 Python 库调用（导入 `power_tool_*.py` 内核模块）。  
+
+`skill` 与 `agent` 是包围在 PowerTool 外层的集成方式：  
+- `skill` 负责把内核能力暴露为结构化调用接口；  
+- `agent` 负责自然语言理解、工具编排和报告生成。  
+
+因此两者与 PowerTool 理论上是**松耦合的外层软件**：  
+- 不影响 GUI 主流程；  
+- 可独立演进、替换模型或替换编排框架；  
+- 在未启用 agent 时，PowerTool 仍可单独交付和运行。
+
 ### 4.1 入口文件 `power_tool.py`
 
 这是项目的直接启动入口。直接执行 `python power_tool.py` 会启动 GUI。同时它还承担兼容导出层的角色，尽量兼顾旧脚本的导入方式。
