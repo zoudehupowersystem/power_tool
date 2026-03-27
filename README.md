@@ -194,6 +194,20 @@ python local_agent.py
 
 首次启动会自动执行安装；后续启动检测到 marker 文件后会跳过，避免重复安装。
 
+如果要改用阿里源安装依赖（并且可随时切回默认源），可在同一配置文件设置：
+
+```json
+{
+  "pip": {
+    "index_mode": "aliyun",
+    "index_url": "https://mirrors.aliyun.com/pypi/simple",
+    "trusted_host": "mirrors.aliyun.com"
+  }
+}
+```
+
+切回官方默认源时，把 `index_mode` 改回 `"default"` 即可。若需企业内网源，使用 `"custom"` 并填写 `index_url`。
+
 示例：先安装 pandapower（dry-run 改为实际安装时把 `allow_install` 设为 `true`），再执行潮流：
 
 ```bash

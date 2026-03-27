@@ -38,6 +38,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "install_pandapower_on_first_run": False,
         "marker_file": ".powertool_bootstrap_done.json",
     },
+    "pip": {
+        "index_mode": "default",
+        "index_url": "https://mirrors.aliyun.com/pypi/simple",
+        "trusted_host": "mirrors.aliyun.com",
+        "extra_pip_args": [],
+    },
 }
 
 
@@ -106,6 +112,21 @@ def load_agent_config(path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
     return cfg
 
 
+def _inject_pip_source(args: dict[str, Any], pip_cfg: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(args)
+    mode = str(pip_cfg.get("index_mode", "default")).lower()
+    if mode == "aliyun":
+        merged.setdefault("index_url", str(pip_cfg.get("index_url", "https://mirrors.aliyun.com/pypi/simple")))
+        merged.setdefault("trusted_host", str(pip_cfg.get("trusted_host", "mirrors.aliyun.com")))
+    elif mode == "custom":
+        if pip_cfg.get("index_url"):
+            merged.setdefault("index_url", str(pip_cfg["index_url"]))
+        if pip_cfg.get("trusted_host"):
+            merged.setdefault("trusted_host", str(pip_cfg["trusted_host"]))
+    merged.setdefault("extra_pip_args", list(pip_cfg.get("extra_pip_args", [])))
+    return merged
+
+
 def maybe_bootstrap_dependencies(config: dict[str, Any]) -> dict[str, Any]:
     bootstrap_cfg = dict(config.get("bootstrap", {}))
     if not bool(bootstrap_cfg.get("install_pandapower_on_first_run", False)):
@@ -115,13 +136,18 @@ def maybe_bootstrap_dependencies(config: dict[str, Any]) -> dict[str, Any]:
     if marker_file.exists():
         return {"ok": True, "skipped": True, "reason": "already bootstrapped", "marker_file": str(marker_file)}
 
-    payload = {
-        "skill": "install_python_packages",
-        "args": {
+    pip_cfg = dict(config.get("pip", {}))
+    install_args = _inject_pip_source(
+        {
             "packages": ["pandapower"],
             "allow_install": True,
             "preferred_packages": ["pandapower"],
         },
+        pip_cfg,
+    )
+    payload = {
+        "skill": "install_python_packages",
+        "args": install_args,
     }
     result = execute_skill_request(payload)
     if not result.get("ok"):
@@ -233,6 +259,7 @@ def run_agent_once(user_query: str, config: dict[str, Any] | None = None) -> dic
     provider_cfg = dict(cfg.get("provider", {}))
     agent_cfg = dict(cfg.get("agent", {}))
     policy_cfg = dict(cfg.get("tool_policy", {}))
+    pip_cfg = dict(cfg.get("pip", {}))
 
     max_steps = int(agent_cfg.get("max_steps", 8))
     max_duration_s = float(agent_cfg.get("max_duration_s", 240.0))
@@ -277,6 +304,7 @@ def run_agent_once(user_query: str, config: dict[str, Any] | None = None) -> dic
         if skill == "install_python_packages":
             args.setdefault("allow_install", bool(policy_cfg.get("allow_install_packages", False)))
             args.setdefault("preferred_packages", list(policy_cfg.get("preferred_packages", ["pandapower"])))
+            args = _inject_pip_source(args, pip_cfg)
 
         tool_result = execute_skill_request({"skill": skill, "args": args})
         state.history.append({"type": "tool", "content": tool_result})

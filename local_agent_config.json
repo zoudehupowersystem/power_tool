@@ -21,5 +21,11 @@
   "bootstrap": {
     "install_pandapower_on_first_run": false,
     "marker_file": ".powertool_bootstrap_done.json"
+  },
+  "pip": {
+    "index_mode": "default",
+    "index_url": "https://mirrors.aliyun.com/pypi/simple",
+    "trusted_host": "mirrors.aliyun.com",
+    "extra_pip_args": []
   }
 }

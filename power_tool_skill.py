@@ -310,12 +310,21 @@ def skill_install_python_packages(args: JsonDict) -> JsonDict:
 
     allow_install = bool(args.get("allow_install", False))
     python_bin = str(args.get("python_bin", sys.executable))
+    index_url = args.get("index_url")
     extra_index_url = args.get("extra_index_url")
+    trusted_host = args.get("trusted_host")
+    extra_pip_args = list(args.get("extra_pip_args", []))
     timeout = float(args.get("timeout_s", 600.0))
 
     base_cmd = [python_bin, "-m", "pip", "install", *install_order]
+    if index_url:
+        base_cmd.extend(["-i", str(index_url)])
     if extra_index_url:
         base_cmd.extend(["--extra-index-url", str(extra_index_url)])
+    if trusted_host:
+        base_cmd.extend(["--trusted-host", str(trusted_host)])
+    for arg in extra_pip_args:
+        base_cmd.append(str(arg))
 
     if not allow_install:
         return {

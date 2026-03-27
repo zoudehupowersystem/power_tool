@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from local_agent import _extract_json, load_agent_config, maybe_bootstrap_dependencies
+from local_agent import _extract_json, _inject_pip_source, load_agent_config, maybe_bootstrap_dependencies
 from power_tool_skill import execute_skill_request, list_skills
 
 
@@ -104,6 +104,25 @@ def test_install_python_packages_dry_run_prefers_pandapower() -> None:
     assert result["result"]["install_order"][0] == "pandapower"
 
 
+def test_install_python_packages_supports_index_url_options() -> None:
+    payload = {
+        "skill": "install_python_packages",
+        "args": {
+            "packages": ["pandapower"],
+            "allow_install": False,
+            "index_url": "https://mirrors.aliyun.com/pypi/simple",
+            "trusted_host": "mirrors.aliyun.com",
+            "extra_pip_args": ["--prefer-binary"],
+        },
+    }
+    result = execute_skill_request(payload)
+    assert result["ok"] is True
+    cmd = result["result"]["command"]
+    assert "-i" in cmd and "https://mirrors.aliyun.com/pypi/simple" in cmd
+    assert "--trusted-host" in cmd and "mirrors.aliyun.com" in cmd
+    assert "--prefer-binary" in cmd
+
+
 def test_load_agent_config_merges_user_override(tmp_path: Path) -> None:
     cfg_path = tmp_path / "local_agent_config.json"
     cfg_path.write_text(
@@ -116,6 +135,7 @@ def test_load_agent_config_merges_user_override(tmp_path: Path) -> None:
     assert cfg["agent"]["max_steps"] == 3
     assert cfg["tool_policy"]["preferred_packages"][0] == "pandapower"
     assert cfg["bootstrap"]["marker_file"] == ".powertool_bootstrap_done.json"
+    assert cfg["pip"]["index_mode"] == "default"
 
 
 def test_pandapower_power_flow_reports_missing_dependency(monkeypatch) -> None:
@@ -159,7 +179,8 @@ def test_bootstrap_installs_once_and_creates_marker(monkeypatch, tmp_path: Path)
         "bootstrap": {
             "install_pandapower_on_first_run": True,
             "marker_file": str(marker),
-        }
+        },
+        "pip": {"index_mode": "aliyun"},
     }
     first = maybe_bootstrap_dependencies(cfg)
     second = maybe_bootstrap_dependencies(cfg)
@@ -167,3 +188,9 @@ def test_bootstrap_installs_once_and_creates_marker(monkeypatch, tmp_path: Path)
     assert second["ok"] is True and second["skipped"] is True
     assert marker.exists()
     assert len(calls) == 1
+    assert calls[0]["args"]["index_url"] == "https://mirrors.aliyun.com/pypi/simple"
+
+
+def test_inject_pip_source_can_switch_back_to_default() -> None:
+    merged = _inject_pip_source({"packages": ["pandapower"]}, {"index_mode": "default"})
+    assert "index_url" not in merged
