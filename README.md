@@ -129,11 +129,99 @@ pytest -q
 
 ---
 
-## 5.6 全量测试与审计记录（2026-03-24）
+## 5.6 Agent / Skill 无界面调用（本地 Ollama 或远程 API）
+
+项目新增 `power_tool_skill.py` 与 `local_agent.py`：
+
+- `power_tool_skill.py`：把各计算内核封装为统一技能入口 `execute_skill_request`，并提供技能目录 `list_skills`。
+- `local_agent.py`：配置驱动的多步 Agent。可在 `local_agent_config.json` 中切换本地 `ollama` 或远程 OpenAI-compatible API，并设置推理步数、总时长、推理深度等约束。
+- 技能层新增 `install_python_packages`，默认优先 `pandapower`，可用于复杂任务前的依赖准备（默认 dry-run，需显式允许才会安装）。
+- 技能层新增 `pandapower_power_flow`，可在 Agent 中把 PowerTool 的近似/稳定分析与 pandapower 潮流计算结合使用，弥补“无系统潮流计算”的能力空缺。
+- `local_agent_config.json` 支持 `bootstrap.install_pandapower_on_first_run=true`，可在首次启动 Agent 时自动安装 pandapower 并写入一次性标记文件。
+
+快速示例：
+
+```bash
+python - <<'PY2'
+from power_tool_skill import execute_skill_request
+
+payload = {
+    "skill": "frequency_dynamic",
+    "args": {
+        "delta_p_ol0": 0.08,
+        "Ts": 8.0,
+        "TG": 5.0,
+        "kD": 1.2,
+        "kG": 4.0,
+        "f0_hz": 50.0,
+    },
+}
+print(execute_skill_request(payload))
+PY2
+```
+
+启动本地 Agent（需先启动 `ollama serve`）：
+
+```bash
+python local_agent.py
+```
+
+如果要改为远程 API 模型，可在 `local_agent_config.json` 中设置：
+
+```json
+{
+  "provider": {
+    "mode": "api",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "model": "qwen3.5-plus",
+    "api_key_env": "DASHSCOPE_API_KEY"
+  }
+}
+```
+
+并在系统环境变量中设置对应 key（例如 `DASHSCOPE_API_KEY`）。
+
+如果你希望“用户第一次用 PowerTool Agent 就自动装好 pandapower”，可以设置：
+
+```json
+{
+  "bootstrap": {
+    "install_pandapower_on_first_run": true,
+    "marker_file": ".powertool_bootstrap_done.json"
+  }
+}
+```
+
+首次启动会自动执行安装；后续启动检测到 marker 文件后会跳过，避免重复安装。
+
+示例：先安装 pandapower（dry-run 改为实际安装时把 `allow_install` 设为 `true`），再执行潮流：
+
+```bash
+python - <<'PY2'
+from power_tool_skill import execute_skill_request
+
+print(execute_skill_request({"skill": "install_python_packages", "args": {"packages": ["pandapower"]}}))
+print(
+    execute_skill_request(
+        {
+            "skill": "pandapower_power_flow",
+            "args": {
+                "buses": [{"name": "BUS1", "vn_kv": 110.0}, {"name": "BUS2", "vn_kv": 110.0}],
+                "ext_grid": {"bus": "BUS1", "vm_pu": 1.0},
+                "lines": [{"from_bus": "BUS1", "to_bus": "BUS2", "r_ohm_per_km": 0.05, "x_ohm_per_km": 0.2, "length_km": 10.0}],
+                "loads": [{"bus": "BUS2", "p_mw": 40.0, "q_mvar": 10.0}]
+            }
+        }
+    )
+)
+PY2
+```
+
+## 5.7 全量测试与审计记录（2026-03-24）
 
 为支持“全软件审计”流程，当前仓库补充了本地可复现的审计记录，便于后续版本回归。
 
-### 5.6.1 审计命令
+### 5.7.1 审计命令
 
 ```bash
 python -m pytest -q
@@ -141,12 +229,12 @@ python -m pytest -q
 
 说明：当前环境中直接执行 `pytest -q` 可能出现导入路径差异，建议统一使用 `python -m pytest -q`。
 
-### 5.6.2 审计结果
+### 5.7.2 审计结果
 
 - 在本次审计环境中，测试集整体通过，个别依赖外部样例文件（WDF）的测试在样例缺失时会自动 `skip`。
 - `tests/test_ai_config.py` 已补齐与其余测试一致的仓库根目录导入路径处理，避免不同 pytest 入口下的导入不一致。
 
-### 5.6.3 与当前功能演进相关的关注点
+### 5.7.3 与当前功能演进相关的关注点
 
 结合近期功能迭代（短路图形、AGC、AVC、1型 AVR/PSS），建议在后续版本持续关注以下项：
 

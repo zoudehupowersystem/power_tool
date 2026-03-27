@@ -1,0 +1,25 @@
+{
+  "provider": {
+    "mode": "ollama",
+    "base_url": "http://127.0.0.1:11434",
+    "model": "qwen3.5:9b",
+    "api_key_env": "OPENAI_API_KEY",
+    "temperature": 0.2,
+    "timeout_s": 180
+  },
+  "agent": {
+    "max_steps": 8,
+    "max_duration_s": 240,
+    "reasoning_depth": "deep"
+  },
+  "tool_policy": {
+    "allow_install_packages": false,
+    "preferred_packages": [
+      "pandapower"
+    ]
+  },
+  "bootstrap": {
+    "install_pandapower_on_first_run": false,
+    "marker_file": ".powertool_bootstrap_done.json"
+  }
+}
