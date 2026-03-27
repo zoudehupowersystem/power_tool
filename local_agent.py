@@ -80,6 +80,7 @@ SYSTEM_TEMPLATE = """
 - 对复杂任务要组合多个技能，必要时可先安装依赖再继续。
 - 若问题涉及系统潮流/电压分布/线路负载率，优先使用 pandapower_power_flow。
 - 若用户提供 pandapower 模型文件，先用 parse_pandapower_model 提取设备与拓扑，再决定后续分析步骤。
+- 若用户问题超出当前技能覆盖，也要尽力给出 best-effort 工程建议，并明确假设与局限。
 - 如果信息不足，先调用最关键技能并在最终答案说明假设。
 - 绝对不要输出 JSON 之外的额外文本。
 """.strip()
@@ -127,6 +128,18 @@ def build_markdown_report(user_query: str, trace: list[dict[str, Any]], final_su
     lines.append("- 本报告由 Agent 自动汇总，建议工程师复核关键参数与单位。")
     lines.append("- 若涉及运行边界/保护整定，请在正式仿真平台复核。")
     return "\n".join(lines)
+
+
+def build_best_effort_summary(user_query: str, trace: list[dict[str, Any]], reason: str) -> str:
+    tool_steps = [item for item in trace if item.get("type") == "tool"]
+    success = sum(1 for t in tool_steps if bool(t.get("content", {}).get("ok")))
+    return (
+        "当前问题部分超出已注册 skill 覆盖，我已按 best-effort 给出可执行建议。"
+        f"已尝试工具步骤 {len(tool_steps)} 次，其中成功 {success} 次。"
+        f"未完全收敛原因：{reason}。"
+        "建议补充更具体边界条件/模型文件，或扩展对应 skill 后再复核关键结论。"
+        f"\n用户问题：{user_query}"
+    )
 
 
 def _merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -307,10 +320,12 @@ def run_agent_once(user_query: str, config: dict[str, Any] | None = None) -> dic
 
     for _ in range(max_steps):
         if time.monotonic() - started > max_duration_s:
+            summary = build_best_effort_summary(state.user_query, state.history, f"超过最长执行时间 {max_duration_s}s")
             return {
-                "ok": False,
+                "ok": True,
                 "steps": state.step,
-                "error": f"超过最长执行时间 {max_duration_s}s，未产生 final 响应",
+                "summary": summary,
+                "report_md": build_markdown_report(state.user_query, state.history, summary),
                 "trace": state.history,
             }
 
@@ -332,10 +347,12 @@ def run_agent_once(user_query: str, config: dict[str, Any] | None = None) -> dic
             }
 
         if action.get("action") != "call_skill":
+            summary = build_best_effort_summary(state.user_query, state.history, f"模型返回未知 action: {action.get('action')}")
             return {
-                "ok": False,
+                "ok": True,
                 "steps": state.step,
-                "error": f"未知 action: {action.get('action')}",
+                "summary": summary,
+                "report_md": build_markdown_report(state.user_query, state.history, summary),
                 "trace": state.history,
             }
 
@@ -349,10 +366,12 @@ def run_agent_once(user_query: str, config: dict[str, Any] | None = None) -> dic
         tool_result = execute_skill_request({"skill": skill, "args": args})
         state.history.append({"type": "tool", "content": tool_result})
 
+    summary = build_best_effort_summary(state.user_query, state.history, f"超过最大步数 {max_steps}")
     return {
-        "ok": False,
+        "ok": True,
         "steps": state.step,
-        "error": f"超过最大步数 {max_steps}，未产生 final 响应",
+        "summary": summary,
+        "report_md": build_markdown_report(state.user_query, state.history, summary),
         "trace": state.history,
     }
 

@@ -136,6 +136,7 @@ pytest -q
 - `power_tool_skill.py`：把各计算内核封装为统一技能入口 `execute_skill_request`，并提供技能目录 `list_skills`。
 - `local_agent.py`：配置驱动的多步 Agent。可在 `local_agent_config.json` 中切换本地 `ollama` 或远程 OpenAI-compatible API，并设置推理步数、总时长、推理深度等约束。
 - Agent 在最终响应时会自动生成一份 Markdown 汇总报告（`report_md`），包含问题、工具执行过程（逐步 JSON 结果）和结论，便于存档与复核。
+- 若用户问题超出当前技能覆盖，Agent 会返回 best-effort 工程建议并明确局限，而不是直接失败退出。
 - 技能层新增 `install_python_packages`，默认优先 `pandapower`，可用于复杂任务前的依赖准备（默认 dry-run，需显式允许才会安装）。
 - 技能层新增 `pandapower_power_flow`，可在 Agent 中把 PowerTool 的近似/稳定分析与 pandapower 潮流计算结合使用，弥补“无系统潮流计算”的能力空缺。
 - 技能层新增 `parse_pandapower_model`，可解析 pandapower JSON 模型文件，输出设备清单（bus/line/trafo/load/gen 等）和拓扑连接（edges + adjacency）。

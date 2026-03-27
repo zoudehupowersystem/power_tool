@@ -11,9 +11,11 @@ if str(ROOT) not in sys.path:
 from local_agent import (
     _extract_json,
     _inject_pip_source,
+    build_best_effort_summary,
     build_markdown_report,
     load_agent_config,
     maybe_bootstrap_dependencies,
+    run_agent_once,
 )
 from power_tool_skill import execute_skill_request, list_skills
 
@@ -246,3 +248,19 @@ def test_build_markdown_report_contains_steps_and_summary() -> None:
     assert "Step 1" in md and "frequency_dynamic" in md
     assert "Step 2" in md and "short_circuit" in md
     assert "建议先处理低频风险" in md
+
+
+def test_build_best_effort_summary_mentions_limitations() -> None:
+    summary = build_best_effort_summary("这个问题超出技能", [], "超过最大步数")
+    assert "best-effort" in summary
+    assert "超过最大步数" in summary
+
+
+def test_run_agent_once_returns_best_effort_on_unknown_action(monkeypatch) -> None:
+    import local_agent
+
+    monkeypatch.setattr(local_agent, "_chat", lambda messages, provider_cfg: '{"action":"unknown"}')
+    out = run_agent_once("一个技能外的问题", config={"provider": {"mode": "ollama"}, "agent": {"max_steps": 1, "max_duration_s": 60}, "tool_policy": {}, "pip": {}})
+    assert out["ok"] is True
+    assert "best-effort" in out["summary"]
+    assert "# PowerTool Agent 汇总报告" in out["report_md"]
