@@ -126,3 +126,23 @@ Z_{ij,eq} \approx \frac{\Delta(V_i-V_j)}{\Delta I}
 - 优先实现 C2（小扰动法）可快速落地；
 - 再补 C1（Ybus 法）做高精度与可解释性增强；
 - 最后把两者做一致性校验并给出置信等级。
+
+---
+
+## 9) 可直接调用的 Python 代码
+仓库已提供可直接调用实现：`skill_pandapower_loop_impedance.py`
+
+最小示例：
+
+```python
+from skill_pandapower_loop_impedance import run_skill
+
+out = run_skill(
+    {
+        "model_path": "example_net.json",
+        "bus_i": "BUS12",   # 可填母线名或索引
+        "bus_j": "BUS37"
+    }
+)
+print(out)
+```

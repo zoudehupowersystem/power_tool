@@ -249,7 +249,7 @@ print(
 PY2
 ```
 
-补充：若要把“合环回路阻抗提取（Ybus/多次潮流反算）→ PowerTool 合环评估”流程固化为标准作业，可参考仓库内 skill 文档：`skills/pandapower-loop-impedance/SKILL.md`。
+补充：若要把“合环回路阻抗提取（Ybus/多次潮流反算）→ PowerTool 合环评估”流程固化为标准作业，可参考仓库内 skill 文档：`skills/pandapower-loop-impedance/SKILL.md`；并可直接调用 `skill_pandapower_loop_impedance.py`。
 
 ## 5.7 全量测试与审计记录（2026-03-24）
 
