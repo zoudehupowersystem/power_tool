@@ -92,6 +92,43 @@ class AgentState:
     step: int = 0
 
 
+def build_markdown_report(user_query: str, trace: list[dict[str, Any]], final_summary: str) -> str:
+    """把 Agent 多步执行轨迹汇总为 Markdown 报告。"""
+    lines: list[str] = []
+    lines.append("# PowerTool Agent 汇总报告")
+    lines.append("")
+    lines.append("## 1. 用户问题")
+    lines.append(user_query.strip() or "(空)")
+    lines.append("")
+    lines.append("## 2. 执行过程")
+    tool_index = 0
+    for item in trace:
+        if item.get("type") != "tool":
+            continue
+        tool_index += 1
+        payload = dict(item.get("content", {}))
+        skill = str(payload.get("skill", "unknown"))
+        ok = bool(payload.get("ok", False))
+        status = "✅ 成功" if ok else "❌ 失败"
+        lines.append(f"### Step {tool_index}: `{skill}` - {status}")
+        if ok:
+            result = payload.get("result", {})
+            lines.append("```json")
+            lines.append(json.dumps(result, ensure_ascii=False, indent=2))
+            lines.append("```")
+        else:
+            lines.append(f"- 错误: {payload.get('error', 'unknown error')}")
+        lines.append("")
+
+    lines.append("## 3. 结论")
+    lines.append(final_summary.strip() or "(模型未给出结论)")
+    lines.append("")
+    lines.append("## 4. 备注")
+    lines.append("- 本报告由 Agent 自动汇总，建议工程师复核关键参数与单位。")
+    lines.append("- 若涉及运行边界/保护整定，请在正式仿真平台复核。")
+    return "\n".join(lines)
+
+
 def _merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     merged: dict[str, Any] = dict(base)
     for key, value in override.items():
@@ -285,10 +322,12 @@ def run_agent_once(user_query: str, config: dict[str, Any] | None = None) -> dic
 
         if action.get("action") == "final":
             summary = str(action.get("summary", ""))
+            report_md = build_markdown_report(state.user_query, state.history, summary)
             return {
                 "ok": True,
                 "steps": state.step,
                 "summary": summary,
+                "report_md": report_md,
                 "trace": state.history,
             }
 
@@ -343,6 +382,8 @@ def repl(config_path: str | Path = DEFAULT_CONFIG_PATH) -> None:
         if result.get("ok"):
             print("\nAgent> " + str(result.get("summary", "")))
             print(f"[steps={result['steps']}]")
+            print("\n--- Markdown 报告 ---\n")
+            print(str(result.get("report_md", "")))
         else:
             print("\nAgent 执行失败:")
             print(json.dumps(result, ensure_ascii=False, indent=2))

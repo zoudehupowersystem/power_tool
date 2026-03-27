@@ -8,7 +8,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from local_agent import _extract_json, _inject_pip_source, load_agent_config, maybe_bootstrap_dependencies
+from local_agent import (
+    _extract_json,
+    _inject_pip_source,
+    build_markdown_report,
+    load_agent_config,
+    maybe_bootstrap_dependencies,
+)
 from power_tool_skill import execute_skill_request, list_skills
 
 
@@ -228,3 +234,15 @@ def test_parse_pandapower_model_from_json_file(tmp_path: Path) -> None:
     assert parsed["inventory"]["bus"] == 2
     assert parsed["inventory"]["line"] == 1
     assert "BUS2" in parsed["adjacency"]["BUS1"]
+
+
+def test_build_markdown_report_contains_steps_and_summary() -> None:
+    trace = [
+        {"type": "tool", "content": {"ok": True, "skill": "frequency_dynamic", "result": {"f_min_hz": 49.1}}},
+        {"type": "tool", "content": {"ok": False, "skill": "short_circuit", "error": "参数缺失"}},
+    ]
+    md = build_markdown_report("请评估系统安全性", trace, "建议先处理低频风险")
+    assert "# PowerTool Agent 汇总报告" in md
+    assert "Step 1" in md and "frequency_dynamic" in md
+    assert "Step 2" in md and "short_circuit" in md
+    assert "建议先处理低频风险" in md
