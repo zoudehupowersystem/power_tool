@@ -24,6 +24,7 @@ from power_tool_common import InputError
 from power_tool_faults import short_circuit_capacity
 from power_tool_loop_closure import loop_closure_analysis
 from power_tool_params import convert_2wt_to_pu, convert_3wt_to_pu, convert_line_to_pu
+from power_tool_pandapower_parser import parse_pandapower_model_dict, parse_pandapower_model_file
 from power_tool_smib import kundur_smib_defaults, smib_small_signal_analysis
 from power_tool_stability import critical_cut_angle_approx, equal_area_criterion, impact_method
 
@@ -467,6 +468,21 @@ def skill_pandapower_power_flow(args: JsonDict) -> JsonDict:
     return {"ok": True, "data": {"summary": summary, "buses": bus_results, "lines": line_results}}
 
 
+def skill_parse_pandapower_model(args: JsonDict) -> JsonDict:
+    """解析 pandapower 模型文件或对象，返回设备清单与拓扑连接。"""
+    model_path = args.get("model_path")
+    if model_path:
+        parsed = parse_pandapower_model_file(str(model_path))
+        return {"ok": True, "data": parsed}
+
+    net_obj = args.get("model")
+    if isinstance(net_obj, dict):
+        parsed = parse_pandapower_model_dict(dict(net_obj))
+        return {"ok": True, "data": parsed}
+
+    raise SkillExecutionError("请提供 model_path（pandapower JSON 文件）或 model（字典对象）。")
+
+
 def workflow_stability_screening(args: JsonDict) -> JsonDict:
     """组合调用：频率动态 + 冲击法 + 临界切除角 + 等面积法。"""
     freq_args = dict(_require(args, "frequency"))
@@ -517,6 +533,7 @@ SKILL_REGISTRY: dict[str, SkillFunc] = {
     "three_winding_params": skill_three_winding_params,
     "avc_strategy": skill_avc,
     "install_python_packages": skill_install_python_packages,
+    "parse_pandapower_model": skill_parse_pandapower_model,
     "pandapower_power_flow": skill_pandapower_power_flow,
     "workflow_stability_screening": workflow_stability_screening,
 }
@@ -538,6 +555,7 @@ SKILL_DESCRIPTIONS: dict[str, str] = {
     "three_winding_params": "三绕组三绕组变压器参数折算到标幺。",
     "avc_strategy": "AVC 策略模拟。",
     "install_python_packages": "安装 Python 包（默认优先 pandapower，可 dry-run）。",
+    "parse_pandapower_model": "解析 pandapower 模型文件，提取设备清单与拓扑连接。",
     "pandapower_power_flow": "基于 pandapower 的电网潮流计算（PowerTool 与潮流能力融合）。",
     "workflow_stability_screening": "组合工作流：频率+暂稳联合筛查。",
 }

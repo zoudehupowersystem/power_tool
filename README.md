@@ -137,6 +137,7 @@ pytest -q
 - `local_agent.py`：配置驱动的多步 Agent。可在 `local_agent_config.json` 中切换本地 `ollama` 或远程 OpenAI-compatible API，并设置推理步数、总时长、推理深度等约束。
 - 技能层新增 `install_python_packages`，默认优先 `pandapower`，可用于复杂任务前的依赖准备（默认 dry-run，需显式允许才会安装）。
 - 技能层新增 `pandapower_power_flow`，可在 Agent 中把 PowerTool 的近似/稳定分析与 pandapower 潮流计算结合使用，弥补“无系统潮流计算”的能力空缺。
+- 技能层新增 `parse_pandapower_model`，可解析 pandapower JSON 模型文件，输出设备清单（bus/line/trafo/load/gen 等）和拓扑连接（edges + adjacency）。
 - `local_agent_config.json` 支持 `bootstrap.install_pandapower_on_first_run=true`，可在首次启动 Agent 时自动安装 pandapower 并写入一次性标记文件。
 
 快速示例：
@@ -225,6 +226,23 @@ print(
                 "lines": [{"from_bus": "BUS1", "to_bus": "BUS2", "r_ohm_per_km": 0.05, "x_ohm_per_km": 0.2, "length_km": 10.0}],
                 "loads": [{"bus": "BUS2", "p_mw": 40.0, "q_mvar": 10.0}]
             }
+        }
+    )
+)
+PY2
+```
+
+如果用户提供 pandapower 模型文件（JSON），可先解析模型设备与拓扑：
+
+```bash
+python - <<'PY2'
+from power_tool_skill import execute_skill_request
+
+print(
+    execute_skill_request(
+        {
+            "skill": "parse_pandapower_model",
+            "args": {"model_path": "example_net.json"}
         }
     )
 )

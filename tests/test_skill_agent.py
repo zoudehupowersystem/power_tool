@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -17,6 +18,7 @@ def test_skill_catalog_contains_composite_workflow() -> None:
     assert "frequency_dynamic" in names
     assert "short_circuit" in names
     assert "pandapower_power_flow" in names
+    assert "parse_pandapower_model" in names
 
 
 def test_execute_skill_request_frequency_dynamic_success() -> None:
@@ -194,3 +196,35 @@ def test_bootstrap_installs_once_and_creates_marker(monkeypatch, tmp_path: Path)
 def test_inject_pip_source_can_switch_back_to_default() -> None:
     merged = _inject_pip_source({"packages": ["pandapower"]}, {"index_mode": "default"})
     assert "index_url" not in merged
+
+
+def test_parse_pandapower_model_from_json_file(tmp_path: Path) -> None:
+    model = {
+        "bus": {
+            "_object": "DataFrame",
+            "columns": ["name", "vn_kv", "in_service"],
+            "index": [0, 1],
+            "data": [["BUS1", 110.0, True], ["BUS2", 110.0, True]],
+        },
+        "line": {
+            "_object": "DataFrame",
+            "columns": ["from_bus", "to_bus", "in_service"],
+            "index": [0],
+            "data": [[0, 1, True]],
+        },
+        "load": {
+            "_object": "DataFrame",
+            "columns": ["bus", "p_mw", "q_mvar"],
+            "index": [0],
+            "data": [[1, 40.0, 10.0]],
+        },
+    }
+    f = tmp_path / "net.json"
+    f.write_text(json.dumps(model, ensure_ascii=False), encoding="utf-8")
+    payload = {"skill": "parse_pandapower_model", "args": {"model_path": str(f)}}
+    result = execute_skill_request(payload)
+    assert result["ok"] is True
+    parsed = result["result"]
+    assert parsed["inventory"]["bus"] == 2
+    assert parsed["inventory"]["line"] == 1
+    assert "BUS2" in parsed["adjacency"]["BUS1"]
