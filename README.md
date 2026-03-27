@@ -64,6 +64,24 @@ power_tool/
 └── README.md                        # 项目说明文档
 ```
 
+### 4.0 架构关系说明（重要）
+
+PowerTool 本体仍然是独立软件：  
+- 既可作为 GUI 桌面工具运行（`python power_tool.py`）；  
+- 也可作为 Python 库调用（导入 `power_tool_*.py` 内核模块）。  
+
+`skill` 与 `agent` 是包围在 PowerTool 外层的集成方式：  
+- `skill` 负责把内核能力暴露为结构化调用接口；  
+- `agent` 负责自然语言理解、工具编排和报告生成。  
+
+因此两者与 PowerTool 理论上是**松耦合的外层软件**：  
+- 不影响 GUI 主流程；  
+- 可独立演进、替换模型或替换编排框架；  
+- 在未启用 agent 时，PowerTool 仍可单独交付和运行。
+
+为便于架构梳理，仓库新增 `PowerTool/` 目录作为“内层软件边界”标识，提供统一入口与核心清单；agent/skill 继续保留在外层。详见 `PowerTool/README.md`。
+完整架构与测试说明见：`ARCHITECTURE.md`。
+
 ### 4.1 入口文件 `power_tool.py`
 
 这是项目的直接启动入口。直接执行 `python power_tool.py` 会启动 GUI。同时它还承担兼容导出层的角色，尽量兼顾旧脚本的导入方式。
@@ -129,11 +147,140 @@ pytest -q
 
 ---
 
-## 5.6 全量测试与审计记录（2026-03-24）
+## 5.6 Agent / Skill 无界面调用（本地 Ollama 或远程 API）
+
+项目新增 `power_tool_skill.py` 与 `local_agent.py`：
+
+- `power_tool_skill.py`：把各计算内核封装为统一技能入口 `execute_skill_request`，并提供技能目录 `list_skills`。
+- `local_agent.py`：配置驱动的多步 Agent。可在 `local_agent_config.json` 中切换本地 `ollama` 或远程 OpenAI-compatible API，并设置推理步数、总时长、推理深度等约束。
+- Agent 在最终响应时会自动生成一份 Markdown 汇总报告（`report_md`），包含问题、工具执行过程（逐步 JSON 结果）和结论，便于存档与复核。
+- 若用户问题超出当前技能覆盖，Agent 会返回 best-effort 工程建议并明确局限，而不是直接失败退出。
+- 技能层新增 `install_python_packages`，默认优先 `pandapower`，可用于复杂任务前的依赖准备（默认 dry-run，需显式允许才会安装）。
+- 技能层新增 `pandapower_power_flow`，可在 Agent 中把 PowerTool 的近似/稳定分析与 pandapower 潮流计算结合使用，弥补“无系统潮流计算”的能力空缺。
+- 技能层新增 `parse_pandapower_model`，可解析 pandapower JSON 模型文件，输出设备清单（bus/line/trafo/load/gen 等）和拓扑连接（edges + adjacency）。
+- `local_agent_config.json` 支持 `bootstrap.install_pandapower_on_first_run=true`，可在首次启动 Agent 时自动安装 pandapower 并写入一次性标记文件。
+
+快速示例：
+
+```bash
+python - <<'PY2'
+from power_tool_skill import execute_skill_request
+
+payload = {
+    "skill": "frequency_dynamic",
+    "args": {
+        "delta_p_ol0": 0.08,
+        "Ts": 8.0,
+        "TG": 5.0,
+        "kD": 1.2,
+        "kG": 4.0,
+        "f0_hz": 50.0,
+    },
+}
+print(execute_skill_request(payload))
+PY2
+```
+
+启动本地 Agent（需先启动 `ollama serve`）：
+
+```bash
+python local_agent.py
+```
+
+如果要改为远程 API 模型，可在 `local_agent_config.json` 中设置：
+
+```json
+{
+  "provider": {
+    "mode": "api",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "model": "qwen3.5-plus",
+    "api_key_env": "DASHSCOPE_API_KEY"
+  }
+}
+```
+
+并在系统环境变量中设置对应 key（例如 `DASHSCOPE_API_KEY`）。
+
+如果你希望“用户第一次用 PowerTool Agent 就自动装好 pandapower”，可以设置：
+
+```json
+{
+  "bootstrap": {
+    "install_pandapower_on_first_run": true,
+    "marker_file": ".powertool_bootstrap_done.json"
+  }
+}
+```
+
+首次启动会自动执行安装；后续启动检测到 marker 文件后会跳过，避免重复安装。
+
+如果要改用阿里源安装依赖（并且可随时切回默认源），可在同一配置文件设置：
+
+```json
+{
+  "pip": {
+    "index_mode": "aliyun",
+    "index_url": "https://mirrors.aliyun.com/pypi/simple",
+    "trusted_host": "mirrors.aliyun.com"
+  }
+}
+```
+
+切回官方默认源时，把 `index_mode` 改回 `"default"` 即可。若需企业内网源，使用 `"custom"` 并填写 `index_url`。
+
+示例：先安装 pandapower（dry-run 改为实际安装时把 `allow_install` 设为 `true`），再执行潮流：
+
+```bash
+python - <<'PY2'
+from power_tool_skill import execute_skill_request
+
+print(execute_skill_request({"skill": "install_python_packages", "args": {"packages": ["pandapower"]}}))
+print(
+    execute_skill_request(
+        {
+            "skill": "pandapower_power_flow",
+            "args": {
+                "buses": [{"name": "BUS1", "vn_kv": 110.0}, {"name": "BUS2", "vn_kv": 110.0}],
+                "ext_grid": {"bus": "BUS1", "vm_pu": 1.0},
+                "lines": [{"from_bus": "BUS1", "to_bus": "BUS2", "r_ohm_per_km": 0.05, "x_ohm_per_km": 0.2, "length_km": 10.0}],
+                "loads": [{"bus": "BUS2", "p_mw": 40.0, "q_mvar": 10.0}]
+            }
+        }
+    )
+)
+PY2
+```
+
+如果用户提供 pandapower 模型文件（JSON），可先解析模型设备与拓扑：
+
+```bash
+python - <<'PY2'
+from power_tool_skill import execute_skill_request
+
+print(
+    execute_skill_request(
+        {
+            "skill": "parse_pandapower_model",
+            "args": {"model_path": "example_net.json"}
+        }
+    )
+)
+PY2
+```
+
+补充：若要把“合环回路阻抗提取（Ybus/多次潮流反算）→ PowerTool 合环评估”流程固化为标准作业，可参考仓库内 skill 文档：`skills/pandapower-loop-impedance/SKILL.md`；并可直接调用 `skill_pandapower_loop_impedance.py`。
+
+另外新增 3 个可直接调用的场景化 skill 代码与文档：
+- `skill_nminus1_frequency_security.py` / `skills/nminus1-frequency-security/SKILL.md`
+- `skill_smib_from_powerflow.py` / `skills/smib-from-powerflow/SKILL.md`
+- `skill_voltage_violation_governance.py` / `skills/voltage-violation-governance/SKILL.md`
+
+## 5.7 全量测试与审计记录（2026-03-24）
 
 为支持“全软件审计”流程，当前仓库补充了本地可复现的审计记录，便于后续版本回归。
 
-### 5.6.1 审计命令
+### 5.7.1 审计命令
 
 ```bash
 python -m pytest -q
@@ -141,12 +288,12 @@ python -m pytest -q
 
 说明：当前环境中直接执行 `pytest -q` 可能出现导入路径差异，建议统一使用 `python -m pytest -q`。
 
-### 5.6.2 审计结果
+### 5.7.2 审计结果
 
 - 在本次审计环境中，测试集整体通过，个别依赖外部样例文件（WDF）的测试在样例缺失时会自动 `skip`。
 - `tests/test_ai_config.py` 已补齐与其余测试一致的仓库根目录导入路径处理，避免不同 pytest 入口下的导入不一致。
 
-### 5.6.3 与当前功能演进相关的关注点
+### 5.7.3 与当前功能演进相关的关注点
 
 结合近期功能迭代（短路图形、AGC、AVC、1型 AVR/PSS），建议在后续版本持续关注以下项：
 

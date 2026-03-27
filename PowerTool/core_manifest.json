@@ -1,0 +1,17 @@
+{
+  "core_entry": "power_tool.py",
+  "gui": "power_tool_gui.py",
+  "core_modules": [
+    "power_tool_common.py",
+    "power_tool_approximations.py",
+    "power_tool_stability.py",
+    "power_tool_smib.py",
+    "power_tool_loop_closure.py",
+    "power_tool_faults.py",
+    "power_tool_params.py",
+    "power_tool_line_geometry.py",
+    "power_tool_avc.py",
+    "power_tool_comtrade.py"
+  ],
+  "note": "Agent/skill files are considered outer-layer wrappers."
+}

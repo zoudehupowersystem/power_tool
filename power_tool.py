@@ -18,6 +18,7 @@ from power_tool_line_geometry import *  # noqa: F401,F403
 from power_tool_loop_closure import *  # noqa: F401,F403
 from power_tool_avc import *  # noqa: F401,F403
 from power_tool_ai import *  # noqa: F401,F403
+from power_tool_skill import *  # noqa: F401,F403
 
 
 def main() -> None:
