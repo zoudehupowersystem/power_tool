@@ -1,4 +1,4 @@
-"""PowerTool AI 配置、提示词与请求适配。"""
+"""PowerTool AI configuration, prompt composition, and request adapters. / PowerTool AI 配置、提示词与请求适配。"""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+from power_tool_i18n import normalize_language
 from urllib import error, request
 
 
@@ -19,6 +21,16 @@ DEFAULT_OVERVIEW_PROMPT = (
     "短路电流、COMTRADE 录波等模块。回答时请优先结合当前界面截图、当前算例数值、"
     "软件定位与工程近似边界，给出结构化、可执行、面向电力工程人员的中文说明；"
     "如果发现输入不完整、量纲可疑、结果超出近似模型适用范围，要明确提示。"
+)
+
+DEFAULT_OVERVIEW_PROMPT_EN = (
+    "You are PowerTool AI, the embedded assistant of PowerTool, a power-system engineering approximation tool. "
+    "The software is used for power-system analysis, parameter conversion, teaching demonstrations, and preliminary engineering checks. "
+    "Its modules cover frequency dynamics, electromechanical oscillation, static voltage stability, natural power of transmission lines, "
+    "transient stability assessment, SMIB small-signal analysis, distribution loop closure, parameter validation and per-unit conversion, "
+    "short-circuit current calculation, and COMTRADE waveform analysis. When answering, prioritize the current screenshot, the numerical case summary, "
+    "and the engineering applicability limits of the approximation model. Provide structured, actionable explanations for power engineers. "
+    "If the input is incomplete, the dimensions look suspicious, or the result falls outside the valid approximation range, state that explicitly."
 )
 
 
@@ -55,7 +67,7 @@ class PowerToolAIConfig:
 
 
 class PowerToolAIError(RuntimeError):
-    """AI 交互异常。"""
+    """AI interaction error. / AI 交互异常。"""
 
 
 def _config_path() -> Path:
@@ -130,8 +142,17 @@ def config_path() -> Path:
 
 
 def api_key_status(config: PowerToolAIConfig) -> str:
+    """Return API-key environment-variable status. / 返回 API Key 环境变量状态。"""
     name = config.api.env_key_name.strip() or "DASHSCOPE_API_KEY"
     return f"环境变量 {name}: {'已设置' if os.getenv(name) else '未设置'}"
+
+
+def _request_system_prompt(config: PowerToolAIConfig, language: str = "zh") -> str:
+    """Select the request-time system prompt. / 选择请求时使用的 system prompt。"""
+    lang = normalize_language(language)
+    if lang == "en" and config.system_prompt == DEFAULT_OVERVIEW_PROMPT:
+        return DEFAULT_OVERVIEW_PROMPT_EN
+    return config.system_prompt
 
 
 def encode_image_base64(image_path: str | Path) -> str:
@@ -144,29 +165,55 @@ def _image_data_url(image_path: str | Path) -> str:
     return f"data:{mime or 'image/png'};base64,{encode_image_base64(image_path)}"
 
 
-def compose_prompt(question: str, tab_name: str, case_text: str, screenshot_note: str) -> str:
-    case_block = case_text.strip() if case_text.strip() else "当前页暂未提取到数值算例。"
-    return (
-        f"用户问题：\n{question.strip()}\n\n"
-        f"当前模块：{tab_name}\n\n"
-        f"界面截图说明：{screenshot_note.strip() or '未提供额外说明。'}\n\n"
-        f"当前算例数值：\n{case_block}\n\n"
-        "请基于上述信息回答，并在必要时：\n"
-        "1. 先概括当前模块在 PowerTool 中的用途；\n"
-        "2. 结合当前输入判断关键量纲、边界条件与结果趋势；\n"
-        "3. 给出下一步操作建议或复核建议；\n"
-        "4. 如果截图缺失或数值不足，明确说明你的假设。"
-    )
+def compose_prompt(question: str, tab_name: str, case_text: str, screenshot_note: str, language: str = "zh") -> str:
+    """Compose a localized user prompt. / 生成带本地化语言的用户提示词。"""
+    lang = normalize_language(language)
+    if lang == "en":
+        case_block = case_text.strip() if case_text.strip() else "No numerical case was extracted from the current page."
+        screenshot_block = screenshot_note.strip() or "No extra note was provided."
+        return f"""User question:
+{question.strip()}
 
+Current module: {tab_name}
+
+Screenshot note: {screenshot_block}
+
+Current numerical case:
+{case_block}
+
+Please answer based on the information above and, when necessary:
+1. Briefly summarize the purpose of this module in PowerTool;
+2. Assess the key dimensions, boundary conditions, and result trends from the current inputs;
+3. Suggest the next operation or validation step;
+4. If the screenshot is missing or the numbers are insufficient, state your assumptions explicitly."""
+    case_block = case_text.strip() if case_text.strip() else "当前页暂未提取到数值算例。"
+    screenshot_block = screenshot_note.strip() or "未提供额外说明。"
+    return f"""用户问题：
+{question.strip()}
+
+当前模块：{tab_name}
+
+界面截图说明：{screenshot_block}
+
+当前算例数值：
+{case_block}
+
+请基于上述信息回答，并在必要时：
+1. 先概括当前模块在 PowerTool 中的用途；
+2. 结合当前输入判断关键量纲、边界条件与结果趋势；
+3. 给出下一步操作建议或复核建议；
+4. 如果截图缺失或数值不足，明确说明你的假设。"""
 
 def ask_ai(config: PowerToolAIConfig, question: str, tab_name: str, case_text: str,
-           screenshot_note: str, screenshot_path: str | Path | None = None, think: bool = False) -> str:
-    prompt = compose_prompt(question, tab_name, case_text, screenshot_note)
+           screenshot_note: str, screenshot_path: str | Path | None = None, think: bool = False, language: str = "zh") -> str:
+    """Send a localized AI request. / 发送带本地化语言的 AI 请求。"""
+    prompt = compose_prompt(question, tab_name, case_text, screenshot_note, language=language)
+    system_prompt = _request_system_prompt(config, language)
     if config.provider.mode == "ollama":
-        return _ask_ollama(config, prompt, screenshot_path, think=think)
+        return _ask_ollama(config, prompt, screenshot_path, think=think, system_prompt=system_prompt, language=language)
     if config.provider.mode == "api":
-        return _ask_openai_compatible(config, prompt, screenshot_path)
-    raise PowerToolAIError(f"不支持的 AI 提供方式：{config.provider.mode}")
+        return _ask_openai_compatible(config, prompt, screenshot_path, system_prompt=system_prompt, language=language)
+    raise PowerToolAIError(f"Unsupported AI provider mode. / 不支持的 AI 提供方式：{config.provider.mode}")
 
 
 def _http_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeout_s: float) -> dict[str, Any]:
@@ -270,7 +317,7 @@ def _extract_openai_text(data: dict[str, Any]) -> str:
             return text
     return ""
 
-def _ollama_chat_once(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None, think: bool = False) -> tuple[str, dict[str, Any]]:
+def _ollama_chat_once(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None, think: bool = False, system_prompt: str | None = None) -> tuple[str, dict[str, Any]]:
     user_message: dict[str, Any] = {"role": "user", "content": prompt}
     if screenshot_path:
         user_message["images"] = [encode_image_base64(screenshot_path)]
@@ -279,7 +326,7 @@ def _ollama_chat_once(config: PowerToolAIConfig, prompt: str, screenshot_path: s
         "stream": True,
         "think": think,
         "messages": [
-            {"role": "system", "content": config.system_prompt},
+            {"role": "system", "content": system_prompt or config.system_prompt},
             user_message,
         ],
         "options": {
@@ -304,23 +351,35 @@ def _ollama_chat_once(config: PowerToolAIConfig, prompt: str, screenshot_path: s
     return "", {}
 
 
-def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None, think: bool = False) -> str:
-    content, data = _ollama_chat_once(config, prompt, screenshot_path, think=think)
+def _ask_ollama(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None, think: bool = False, system_prompt: str | None = None, language: str = "zh") -> str:
+    """Request Ollama and fall back to text-only mode when image parsing fails. / 请求 Ollama，并在图像解析失败时回退到纯文本模式。"""
+    content, data = _ollama_chat_once(config, prompt, screenshot_path, think=think, system_prompt=system_prompt)
     if content:
         return content
+    lang = normalize_language(language)
     if screenshot_path:
-        fallback_prompt = (
-            f"{prompt}\n\n补充说明：已尝试附带当前软件界面截图，但当前本地模型未返回可用的图像理解文本。"
-            "请至少基于上述数值摘要和软件上下文继续回答，并明确说明你当前无法可靠解读截图细节。"
+        if lang == "en":
+            fallback_prompt = f"""{prompt}
+
+Additional note: the current software screenshot was attached, but the local model did not return any usable vision-text output. Please continue the answer using at least the numerical summary and the software context above, and state clearly that screenshot details cannot be interpreted reliably at the moment."""
+        else:
+            fallback_prompt = f"""{prompt}
+
+补充说明：已尝试附带当前软件界面截图，但当前本地模型未返回可用的图像理解文本。请至少基于上述数值摘要和软件上下文继续回答，并明确说明你当前无法可靠解读截图细节。"""
+        fallback_content, fallback_data = _ollama_chat_once(
+            config,
+            fallback_prompt,
+            None,
+            think=think,
+            system_prompt=system_prompt,
         )
-        fallback_content, fallback_data = _ollama_chat_once(config, fallback_prompt, None, think=think)
         if fallback_content:
             return fallback_content
         data = fallback_data
     raise PowerToolAIError(f"Ollama 未返回有效文本内容。原始响应字段：{sorted(data.keys())}")
 
 
-def _openai_payload(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> dict[str, Any]:
+def _openai_payload(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None, system_prompt: str | None = None) -> dict[str, Any]:
     if screenshot_path:
         user_content: str | list[dict[str, Any]] = [
             {"type": "text", "text": prompt},
@@ -333,18 +392,18 @@ def _openai_payload(config: PowerToolAIConfig, prompt: str, screenshot_path: str
         "temperature": config.api.temperature,
         "max_tokens": config.max_tokens,
         "messages": [
-            {"role": "system", "content": config.system_prompt},
+            {"role": "system", "content": system_prompt or config.system_prompt},
             {"role": "user", "content": user_content},
         ],
     }
 
 
-def _ask_openai_once(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> str:
+def _ask_openai_once(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None, system_prompt: str | None = None) -> str:
     env_name = config.api.env_key_name.strip() or "DASHSCOPE_API_KEY"
     api_key = os.getenv(env_name, "").strip()
     if not api_key:
         raise PowerToolAIError(f"当前为 API 模式，但环境变量 {env_name} 未设置。")
-    payload = _openai_payload(config, prompt, screenshot_path)
+    payload = _openai_payload(config, prompt, screenshot_path, system_prompt=system_prompt)
     headers = {"Authorization": f"Bearer {api_key}"}
     data = _http_json(_chat_completions_url(config.api.base_url), payload, headers, config.api.timeout)
     content = _extract_openai_text(data)
@@ -353,21 +412,22 @@ def _ask_openai_once(config: PowerToolAIConfig, prompt: str, screenshot_path: st
     raise PowerToolAIError("API 未返回有效文本内容。")
 
 
-def _ask_openai_compatible(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None) -> str:
+def _ask_openai_compatible(config: PowerToolAIConfig, prompt: str, screenshot_path: str | Path | None, system_prompt: str | None = None, language: str = "zh") -> str:
     if screenshot_path:
         try:
-            return _ask_openai_once(config, prompt, screenshot_path)
+            return _ask_openai_once(config, prompt, screenshot_path, system_prompt=system_prompt)
         except PowerToolAIError as exc:
             try:
-                return _ask_openai_once(config, prompt, None)
+                return _ask_openai_once(config, prompt, None, system_prompt=system_prompt)
             except PowerToolAIError:
                 raise exc
-    return _ask_openai_once(config, prompt, None)
+    return _ask_openai_once(config, prompt, None, system_prompt=system_prompt)
 
 
 __all__ = [
     "APISettings",
     "DEFAULT_OVERVIEW_PROMPT",
+    "DEFAULT_OVERVIEW_PROMPT_EN",
     "OllamaSettings",
     "PowerToolAIConfig",
     "PowerToolAIError",

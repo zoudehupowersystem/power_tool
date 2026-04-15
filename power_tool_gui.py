@@ -1,4 +1,4 @@
-"""Tkinter GUI：负责界面、绘图与计算内核调用。"""
+"""Tkinter GUI for widgets, plots, and calls into the computational kernels. / Tkinter GUI：负责界面、绘图与计算内核调用。"""
 
 
 from __future__ import annotations
@@ -68,6 +68,7 @@ from power_tool_smib import (
 )
 
 from power_tool_line_geometry import calculate_overhead_line_sequence
+from power_tool_sag import analyze_conductor_sag
 from power_tool_ai import PowerToolAIError, api_key_status, ask_ai, config_path, load_ai_config
 from power_tool_loop_closure import loop_closure_analysis
 from power_tool_avc import simulate_avc_strategy
@@ -82,8 +83,19 @@ from power_tool_comtrade import (
     single_frequency_phasor,
 )
 
+from power_tool_i18n import (
+    KEY_CONCLUSION_PREFIXES_EN,
+    display_text,
+    install_runtime_hooks,
+    logic_text,
+    normalize_language,
+    set_active_language,
+    translate_text,
+    translate_widget_tree,
+)
 
-# ── 中文字体配置 ──────────────────────────────────────────────────────────────
+
+# Chinese-font configuration / 中文字体配置 ──────────────────────────────────────────────────────────────
 _CN_FONT_CANDIDATES = [
     "WenQuanYi Zen Hei",
     "WenQuanYi Micro Hei",
@@ -122,7 +134,7 @@ matplotlib.rcParams.update({
     "legend.framealpha": 0.95,
     "figure.autolayout": False,
 })
-# ─────────────────────────────────────────────────────────────────────────────
+# End of font configuration / 中文字体配置结束 ─────────────────────────────────────────────────────────
 
 _KEY_CONCLUSION_PREFIXES = (
     "运行区间判断：",
@@ -131,11 +143,32 @@ _KEY_CONCLUSION_PREFIXES = (
     "稳定性：",
     "匹配：",
     "不匹配：",
+    *KEY_CONCLUSION_PREFIXES_EN,
 )
 
 
+def _lang_of(obj: object | None) -> str:
+    """Return the active UI language. / 返回当前界面语言。"""
+    return normalize_language(getattr(obj, "language", "zh"))
+
+
+def _tr_obj(obj: object | None, text: str) -> str:
+    """Translate text for a GUI object. / 按 GUI 对象语言翻译文本。"""
+    return translate_text(text, _lang_of(obj))
+
+
+def _logic_obj(obj: object | None, text: str) -> str:
+    """Map a display label back to the logic label. / 将显示标签映射回逻辑标签。"""
+    return logic_text(text, _lang_of(obj))
+
+
+def _display_obj(obj: object | None, text: str) -> str:
+    """Map a logic label to the display label. / 将逻辑标签映射为显示标签。"""
+    return display_text(text, _lang_of(obj))
+
+
 def _detect_key_conclusion_lines(text: str) -> list[int]:
-    """识别结果文本中的关键性结论行，用于红色高亮。"""
+    """Detect key conclusion lines in result text for red highlighting. / 识别结果文本中的关键性结论行，用于红色高亮。"""
     rows: list[int] = []
     for idx, line in enumerate(text.splitlines(), start=1):
         stripped = line.strip()
@@ -145,7 +178,7 @@ def _detect_key_conclusion_lines(text: str) -> list[int]:
 
 
 def _notebook_style_spec() -> dict[str, dict[str, object]]:
-    """Notebook 样式规格：选中标签不缩小，并以深蓝色区分。"""
+    """Return notebook-style settings so the selected tab keeps its size and uses dark-blue emphasis. / Notebook 样式规格：选中标签不缩小，并以深蓝色区分。"""
     return {
         "configure": {
             "TNotebook": {"background": "#f3f5f7", "borderwidth": 0},
@@ -158,6 +191,31 @@ def _notebook_style_spec() -> dict[str, dict[str, object]]:
             "foreground": [("selected", "#ffffff"), ("!selected", "#1e2b37")],
         },
     }
+
+
+_MANUAL_LIBRARY: tuple[dict[str, str], ...] = (
+    {"title_zh": "PowerTool 手册总览", "title_en": "PowerTool Manual Overview", "basename": "PowerTool_Overview"},
+    {"title_zh": "频率动态", "title_en": "Frequency Dynamics", "basename": "PowerTool_Frequency_Dynamics"},
+    {"title_zh": "机电振荡", "title_en": "Electromechanical Oscillation", "basename": "PowerTool_Electromechanical_Oscillation"},
+    {"title_zh": "电压无功分析：静态电压稳定", "title_en": "Voltage / Reactive Power Analysis: Static Voltage Stability", "basename": "PowerTool_Voltage_Reactive_Static_Voltage_Stability"},
+    {"title_zh": "电压无功分析：线路自然功率与无功", "title_en": "Voltage / Reactive Power Analysis: Line Natural Power and Reactive Power", "basename": "PowerTool_Voltage_Reactive_Line_Natural_Power_and_Reactive_Power"},
+    {"title_zh": "电压无功分析：AVC策略模拟", "title_en": "Voltage / Reactive Power Analysis: AVC Strategy Simulation", "basename": "PowerTool_Voltage_Reactive_AVC_Strategy_Simulation"},
+    {"title_zh": "暂稳评估", "title_en": "Transient Stability Assessment", "basename": "PowerTool_Transient_Stability_Assessment"},
+    {"title_zh": "小扰动分析", "title_en": "Small-Signal Analysis", "basename": "PowerTool_Small_Signal_Analysis"},
+    {"title_zh": "配电网合环分析", "title_en": "Distribution Loop-Closure Analysis", "basename": "PowerTool_Distribution_Loop_Closure_Analysis"},
+    {"title_zh": "参数校核与标幺值：架空线路", "title_en": "Parameter Validation & Per-Unit: Overhead Line", "basename": "PowerTool_Parameter_Validation_Overhead_Line"},
+    {"title_zh": "参数校核与标幺值：导线弧垂", "title_en": "Parameter Validation & Per-Unit: Conductor Sag", "basename": "PowerTool_Parameter_Validation_Conductor_Sag"},
+    {"title_zh": "参数校核与标幺值：两绕组变压器", "title_en": "Parameter Validation & Per-Unit: Two-Winding Transformer", "basename": "PowerTool_Parameter_Validation_Two_Winding_Transformer"},
+    {"title_zh": "参数校核与标幺值：三绕组变压器", "title_en": "Parameter Validation & Per-Unit: Three-Winding Transformer", "basename": "PowerTool_Parameter_Validation_Three_Winding_Transformer"},
+    {"title_zh": "短路电流计算", "title_en": "Short-Circuit Current Calculation", "basename": "PowerTool_Short_Circuit_Current_Calculation"},
+    {"title_zh": "录波曲线", "title_en": "Waveform Viewer", "basename": "PowerTool_Waveform_Viewer"},
+)
+
+
+def _manual_filename(basename: str, language: str | None = None) -> str:
+    """Return the localized manual filename. / 返回按语言选择后的手册文件名。"""
+    suffix = "" if normalize_language(language) == "en" else "_zh"
+    return f"{basename}{suffix}.md"
 
 
 def _format_polar_complex(z: complex, unit: str = "") -> str:
@@ -306,8 +364,12 @@ def _draw_type1_avr_diagram(ax) -> None:
     ax.text(11.05, 2.35, "E_fdmin", fontsize=9)
 
 class ApproximationToolGUI(tk.Tk):
-    def __init__(self) -> None:
+    def __init__(self, language: str = "zh") -> None:
         super().__init__()
+        self.language = normalize_language(language)
+        set_active_language(self.language)
+        if self.language == "en":
+            install_runtime_hooks()
         self.title("电力系统近似公式工程工具")
         self.geometry("1660x930")
         self.minsize(1400, 820)
@@ -367,6 +429,7 @@ class ApproximationToolGUI(tk.Tk):
         self._build_ai_sidebar()
         self._hide_tab_muted_explanations()
         self._apply_global_aesthetics()
+        self._apply_language()
         self.main_notebook.bind("<<NotebookTabChanged>>", self._on_ai_context_changed)
 
     def _hide_tab_muted_explanations(self) -> None:
@@ -398,6 +461,27 @@ class ApproximationToolGUI(tk.Tk):
 
         for root in tab_roots:
             walk(root)
+
+    def _apply_language(self) -> None:
+        """Apply UI translation after widgets are created. / 在控件创建后应用界面翻译。"""
+        if self.language != "en":
+            return
+        translate_widget_tree(self, self.language)
+        for value in self.__dict__.values():
+            try:
+                if isinstance(value, tk.Toplevel) and value.winfo_exists():
+                    translate_widget_tree(value, self.language)
+            except Exception:
+                pass
+        self.ai_question_placeholder = _tr_obj(self, self.ai_question_placeholder)
+        self.ai_status_var.set(self._ai_status_summary())
+        if hasattr(self, "smib_mode_hint_var"):
+            self.smib_mode_hint_var.set(_tr_obj(self, self.smib_mode_hint_var.get()))
+        if hasattr(self, "sc_summary_fault_var") and self.sc_summary_fault_var.get().strip() not in {"", "—"}:
+            self.sc_summary_fault_var.set(_tr_obj(self, self.sc_summary_fault_var.get()))
+        if hasattr(self, "_sequence_channel_vars"):
+            for key, var in self._sequence_channel_vars.items():
+                var.set(_display_obj(self, _logic_obj(self, var.get())))
 
     @staticmethod
     def _add_entry(parent: ttk.Frame,
@@ -604,13 +688,13 @@ class ApproximationToolGUI(tk.Tk):
     def _apply_global_aesthetics(self) -> None:
         for page in (self.freq_tab, self.osc_tab, self.volt_tab, self.impact_tab, self.smib_tab, self.loop_tab, self.param_tab, self.sc_tab, self.comtrade_tab):
             self._apply_surface_theme(page, card=False)
-        for panel in (getattr(self, name, None) for name in ("_vr_static_tab", "_vr_line_tab", "_vr_avc_tab", "_ptab_line", "_ptab_2wt", "_ptab_3wt")):
+        for panel in (getattr(self, name, None) for name in ("_vr_static_tab", "_vr_line_tab", "_vr_avc_tab", "_ptab_line", "_ptab_sag", "_ptab_2wt", "_ptab_3wt")):
             if panel is not None:
                 self._apply_surface_theme(panel, card=True)
         for widget_name in (
             "freq_result", "osc_result", "volt_result", "line_result", "avc_result",
             "imp_result", "eac_result", "smib_result", "smib_type1_result",
-            "lp_result", "tx2_result", "tx3_result", "loop_result", "sc_result",
+            "lp_result", "sag_result", "tx2_result", "tx3_result", "loop_result", "sc_result",
             "comtrade_info", "ai_question", "ai_answer", "comtrade_cursor_label",
         ):
             widget = getattr(self, widget_name, None)
@@ -706,43 +790,65 @@ class ApproximationToolGUI(tk.Tk):
         self.ai_status_var.set(self._ai_status_summary())
 
     def _ai_status_summary(self) -> str:
-        return (
-            f"配置文件：{config_path().name}\n"
-            f"当前模式：{self.ai_config.provider.mode}\n"
-            f"{api_key_status(self.ai_config)}"
+        return _tr_obj(
+            self,
+            (
+                f"配置文件：{config_path().name}\n"
+                f"当前模式：{self.ai_config.provider.mode}\n"
+                f"{api_key_status(self.ai_config)}"
+            ),
         )
 
-    def _manual_doc_path(self) -> Path:
-        base = Path(__file__).resolve().parent / "manuals"
-        tab = self._current_tab_name()
+    def _manual_doc_dir(self) -> Path:
+        """Return the manual directory. / 返回手册目录。"""
+        return Path(__file__).resolve().parent / "manuals"
+
+    def _current_manual_basename(self) -> str:
+        """Return the basename of the manual for the current page. / 返回当前页面对应手册的基础文件名。"""
+        tab = _logic_obj(self, self._current_tab_name())
         if tab == "电压无功分析":
-            sub = self._vr_notebook.tab(self._vr_notebook.select(), "text")
+            sub = _logic_obj(self, self._vr_notebook.tab(self._vr_notebook.select(), "text"))
             mapping = {
-                "静态电压稳定": "电压无功分析_静态电压稳定.md",
-                "线路自然功率与无功": "电压无功分析_线路自然功率与无功.md",
-                "AVC策略模拟": "电压无功分析_AVC策略模拟.md",
+                "静态电压稳定": "PowerTool_Voltage_Reactive_Static_Voltage_Stability",
+                "线路自然功率与无功": "PowerTool_Voltage_Reactive_Line_Natural_Power_and_Reactive_Power",
+                "AVC策略模拟": "PowerTool_Voltage_Reactive_AVC_Strategy_Simulation",
             }
-            name = mapping.get(sub, "电压无功分析.md")
-        elif tab == "参数校核与标幺值":
-            sub = self.param_notebook.tab(self.param_notebook.select(), "text")
+            return mapping.get(sub, "PowerTool_Overview")
+        if tab == "参数校核与标幺值":
+            sub = _logic_obj(self, self.param_notebook.tab(self.param_notebook.select(), "text"))
             mapping = {
-                "架空线路": "参数校核与标幺值_架空线路.md",
-                "两绕组变压器": "参数校核与标幺值_两绕组变压器.md",
-                "三绕组变压器": "参数校核与标幺值_三绕组变压器.md",
+                "架空线路": "PowerTool_Parameter_Validation_Overhead_Line",
+                "导线弧垂": "PowerTool_Parameter_Validation_Conductor_Sag",
+                "两绕组变压器": "PowerTool_Parameter_Validation_Two_Winding_Transformer",
+                "三绕组变压器": "PowerTool_Parameter_Validation_Three_Winding_Transformer",
             }
-            name = mapping.get(sub, "参数校核与标幺值.md")
-        else:
-            mapping = {
-                "频率动态": "频率动态.md",
-                "机电振荡": "机电振荡.md",
-                "暂稳评估": "暂稳评估.md",
-                "小扰动分析": "小扰动分析.md",
-                "配电网合环分析": "配电网合环分析.md",
-                "短路电流计算": "短路电流计算.md",
-                "录波曲线": "录波曲线.md",
-            }
-            name = mapping.get(tab, "总览.md")
-        return base / name
+            return mapping.get(sub, "PowerTool_Overview")
+        mapping = {
+            "频率动态": "PowerTool_Frequency_Dynamics",
+            "机电振荡": "PowerTool_Electromechanical_Oscillation",
+            "暂稳评估": "PowerTool_Transient_Stability_Assessment",
+            "小扰动分析": "PowerTool_Small_Signal_Analysis",
+            "小扰动分析（SMIB）": "PowerTool_Small_Signal_Analysis",
+            "配电网合环分析": "PowerTool_Distribution_Loop_Closure_Analysis",
+            "短路电流计算": "PowerTool_Short_Circuit_Current_Calculation",
+            "录波曲线": "PowerTool_Waveform_Viewer",
+        }
+        return mapping.get(tab, "PowerTool_Overview")
+
+    def _manual_doc_path(self) -> Path:
+        """Return the manual path for the current page. / 返回当前页面对应手册路径。"""
+        return self._manual_doc_dir() / _manual_filename(self._current_manual_basename(), _lang_of(self))
+
+    def _manual_catalog(self) -> list[tuple[str, Path]]:
+        """Build the manual catalog shown from the AI sidebar. / 构造 AI 侧栏打开的手册目录。"""
+        lang = _lang_of(self)
+        base = self._manual_doc_dir()
+        entries: list[tuple[str, Path]] = []
+        for item in _MANUAL_LIBRARY:
+            title = item["title_en"] if lang == "en" else item["title_zh"]
+            path = base / _manual_filename(item["basename"], lang)
+            entries.append((title, path))
+        return entries
 
     def _render_markdown_to_text(self, widget: ScrolledText, markdown: str) -> None:
         widget.configure(state="normal")
@@ -771,20 +877,70 @@ class ApproximationToolGUI(tk.Tk):
         widget.configure(state="disabled")
 
     def _open_manual_popup(self) -> None:
-        path = self._manual_doc_path()
-        if not path.exists():
-            messagebox.showwarning("使用手册", f"未找到当前页面手册：{path.name}")
+        """Open the manual browser from the AI sidebar. / 从 AI 侧栏打开手册浏览器。"""
+        catalog = [(title, path) for title, path in self._manual_catalog() if path.exists()]
+        if not catalog:
+            messagebox.showwarning("使用手册", f"未找到手册目录：{self._manual_doc_dir().name}")
             return
+
+        lang = _lang_of(self)
+        current_path = self._manual_doc_path()
         popup = tk.Toplevel(self)
-        popup.title(f"使用手册 - {path.stem}")
-        popup.geometry("900x700")
+        popup.title("PowerTool Manual" if lang == "en" else "PowerTool 使用手册")
+        popup.geometry("1180x760")
         popup.transient(self)
-        popup.columnconfigure(0, weight=1)
-        popup.rowconfigure(0, weight=1)
-        text = ScrolledText(popup, wrap=tk.WORD)
-        text.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
-        markdown = path.read_text(encoding="utf-8")
-        self._render_markdown_to_text(text, markdown)
+        popup.columnconfigure(1, weight=1)
+        popup.rowconfigure(1, weight=1)
+
+        left_title = "Manuals" if lang == "en" else "手册目录"
+        right_title = "Document" if lang == "en" else "文档内容"
+        status_prefix = "File" if lang == "en" else "文件"
+
+        ttk.Label(popup, text=left_title, style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 6), pady=(10, 6))
+        ttk.Label(popup, text=right_title, style="SectionTitle.TLabel").grid(row=0, column=1, sticky="w", padx=(6, 10), pady=(10, 6))
+
+        list_frame = ttk.Frame(popup, style="Card.TFrame", padding=8)
+        list_frame.grid(row=1, column=0, sticky="nsew", padx=(10, 6), pady=(0, 10))
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+
+        listbox = tk.Listbox(list_frame, exportselection=False, width=38)
+        listbox.grid(row=0, column=0, sticky="nsew")
+        self._style_listbox_widget(listbox)
+        scroll = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        listbox.configure(yscrollcommand=scroll.set)
+
+        right_frame = ttk.Frame(popup, style="Card.TFrame", padding=8)
+        right_frame.grid(row=1, column=1, sticky="nsew", padx=(6, 10), pady=(0, 10))
+        right_frame.columnconfigure(0, weight=1)
+        right_frame.rowconfigure(0, weight=1)
+        text = ScrolledText(right_frame, wrap=tk.WORD)
+        text.grid(row=0, column=0, sticky="nsew")
+        self._style_text_widget(text, font=("TkDefaultFont", 10))
+
+        status_var = tk.StringVar(value="")
+        ttk.Label(popup, textvariable=status_var, style="Muted.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 10))
+
+        for title, _path in catalog:
+            listbox.insert(tk.END, title)
+
+        def _show_selected(_event: object | None = None) -> None:
+            if not listbox.curselection():
+                return
+            index = int(listbox.curselection()[0])
+            title, path = catalog[index]
+            markdown = path.read_text(encoding="utf-8")
+            self._render_markdown_to_text(text, markdown)
+            popup.title(f"{left_title} - {title}")
+            status_var.set(f"{status_prefix}: {path.name}")
+
+        listbox.bind("<<ListboxSelect>>", _show_selected)
+
+        selected_index = next((idx for idx, (_title, path) in enumerate(catalog) if path.name == current_path.name), 0)
+        listbox.selection_set(selected_index)
+        listbox.activate(selected_index)
+        _show_selected()
 
     def _reload_ai_config(self) -> None:
         self.ai_config = load_ai_config()
@@ -800,7 +956,7 @@ class ApproximationToolGUI(tk.Tk):
         return self.main_notebook.tab(self.main_notebook.select(), "text")
 
     def _tab_numeric_summary(self) -> str:
-        tab = self._current_tab_name()
+        tab = _logic_obj(self, self._current_tab_name())
         if tab == "频率动态":
             pairs = [("额定频率 f0 / Hz", self.freq_f0), ("功率缺额 ΔP_OL0 / pu", self.freq_dp), ("系统惯性时间常数 T_s / s", self.freq_ts),
                      ("一次调频时间常数 T_G / s", self.freq_tg), ("负荷频率系数 k_D / pu/pu", self.freq_kd), ("一次调频系数 k_G / pu/pu", self.freq_kg),
@@ -809,7 +965,7 @@ class ApproximationToolGUI(tk.Tk):
             pairs = [("内电势 E'_q / pu", self.osc_eq), ("端电压 U / pu", self.osc_u), ("等值电抗 X_Σ / pu", self.osc_x), ("初始有功 P0 / pu", self.osc_p0),
                      ("惯性时间常数 T_j / s", self.osc_tj), ("同步频率 f0 / Hz", self.osc_f0)]
         elif tab == "电压无功分析":
-            current = self._vr_notebook.tab(self._vr_notebook.select(), "text")
+            current = _logic_obj(self, self._vr_notebook.tab(self._vr_notebook.select(), "text"))
             if current == "静态电压稳定":
                 pairs = [("送端电压 U_g / pu", self.volt_ug), ("总电抗 X_Σ / pu", self.volt_x), ("功率因数 cosφ", self.volt_pf), ("容量基准 S_base / MVA", self.volt_sbase)]
             elif current == "线路自然功率与无功":
@@ -823,7 +979,7 @@ class ApproximationToolGUI(tk.Tk):
             pairs = [("冲击法 ΔPa / pu", self.imp_dp), ("冲击法 Δt / s", self.imp_dt), ("冲击法 f_d / Hz", self.imp_fd),
                      ("等面积法 Pm / pu", self.eac_pm), ("等面积法 Pmax_pre / pu", self.eac_ppre),
                      ("等面积法 Pmax_fault / pu", self.eac_pf), ("等面积法 Pmax_post / pu", self.eac_ppost), ("等面积法 Δt / s", self.eac_dt)]
-        elif tab == "小扰动分析":
+        elif tab in {"小扰动分析", "小扰动分析（SMIB）"}:
             lines = [f"模型配置: {self.smib_config.get().strip()}"]
             for key, entry in self.smib_entries.items():
                 lines.append(f"{key}: {entry.get().strip()}")
@@ -831,10 +987,28 @@ class ApproximationToolGUI(tk.Tk):
         elif tab == "配电网合环分析":
             pairs = [("连接点数量 N", self.loop_n), ("U1 / kV", self.loop_u1), ("U2 / kV", self.loop_u2), ("相角 φ / °", self.loop_angle), ("系统频率 / Hz", self.loop_freq)]
         elif tab == "参数校核与标幺值":
-            current = self.param_notebook.tab(self.param_notebook.select(), "text")
+            current = _logic_obj(self, self.param_notebook.tab(self.param_notebook.select(), "text"))
             if current == "架空线路":
                 pairs = [("线路额定电压 U_base / kV", self.lp_ubase), ("容量基准 S_base / MVA", self.lp_sbase), ("线路长度 l / km", self.lp_len),
                          ("R1 / Ω/km", self.lp_r1), ("X1 / Ω/km", self.lp_x1), ("C1 / μF/km", self.lp_c1)]
+                header = f"参数页子标签: {current}"
+                return header + "\n" + "\n".join(f"{name}: {entry.get().strip()}" for name, entry in pairs)
+            elif current == "导线弧垂":
+                mode_var = getattr(self, "sag_driver_var", None)
+                mode_text = mode_var.get().strip() if mode_var is not None else "temperature"
+                summary_lines = [
+                    f"参数页子标签: {current}",
+                    f"档距 l / m: {self.sag_span.get().strip()}",
+                    f"左挂点高度 h_A / m: {self.sag_h_left.get().strip()}",
+                    f"右挂点高度 h_B / m: {self.sag_h_right.get().strip()}",
+                    f"单位质量 m / (kg/m): {self.sag_mass.get().strip()}",
+                    f"参考水平张力 H_ref / kN: {self.sag_href.get().strip()}",
+                    f"驱动方式: {mode_text}",
+                    f"温度滑块 T_c / °C: {float(self.sag_temp_scale_var.get()):.1f}",
+                    f"电流滑块 I / A: {float(self.sag_current_scale_var.get()):.0f}",
+                    f"环境温度 T_a / °C: {self.sag_ambient.get().strip()}",
+                ]
+                return "\n".join(summary_lines)
             elif current == "两绕组变压器":
                 pairs = [("S_base / MVA", self.tx2_sbase), ("额定容量 SN / MVA", self.tx2_sn), ("额定电压 UN / kV", self.tx2_un),
                          ("Uk / %", self.tx2_uk), ("Pk / kW", self.tx2_pk), ("I0 / %", self.tx2_i0), ("P0 / kW", self.tx2_p0), ("Ubase / kV", self.tx2_ubase)]
@@ -888,15 +1062,15 @@ class ApproximationToolGUI(tk.Tk):
             return
         self._reload_ai_config()
         tab_name = self._current_tab_name()
-        case_text = self._tab_numeric_summary()
+        case_text = _tr_obj(self, self._tab_numeric_summary())
         screenshot_path, screenshot_note = self._capture_current_ui()
         self._ai_busy = True
-        self.ai_status_var.set(f"PowerTool AI 正在分析：{tab_name}")
+        self.ai_status_var.set(_tr_obj(self, f"PowerTool AI 正在分析：{tab_name}"))
         self._set_ai_answer("PowerTool AI 正在处理中，请稍候…")
 
         def worker() -> None:
             try:
-                answer = ask_ai(self.ai_config, question, tab_name, case_text, screenshot_note, screenshot_path, think=self.ai_think_var.get())
+                answer = ask_ai(self.ai_config, question, tab_name, case_text, screenshot_note, screenshot_path, think=self.ai_think_var.get(), language=self.language)
                 status = f"分析完成：{tab_name}"
             except PowerToolAIError as exc:
                 answer = f"PowerTool AI 调用失败：\n{exc}"
@@ -907,7 +1081,7 @@ class ApproximationToolGUI(tk.Tk):
 
             def finish() -> None:
                 self._ai_busy = False
-                self.ai_status_var.set(f"{status}\n当前截图：{screenshot_note}\n{self._ai_status_summary()}")
+                self.ai_status_var.set(_tr_obj(self, f"{status}\n当前截图：{screenshot_note}\n{self._ai_status_summary()}"))
                 self._set_ai_answer(answer)
 
             self.after(0, finish)
@@ -1078,7 +1252,7 @@ class ApproximationToolGUI(tk.Tk):
         nb.add(self._vr_line_tab, text="线路自然功率与无功")
         nb.add(self._vr_avc_tab, text="AVC策略模拟")
 
-        # 子页1：静态电压稳定
+        # Subpage 1: static voltage stability / 子页1：静态电压稳定
         self._vr_static_tab.columnconfigure(0, weight=1)
         self._vr_static_tab.rowconfigure(0, weight=1)
         static_shell = ttk.Frame(self._vr_static_tab, padding=8, style="Surface.TFrame")
@@ -1125,7 +1299,7 @@ class ApproximationToolGUI(tk.Tk):
         self.volt_result.grid(row=2, column=0, sticky="nsew")
         self.volt_result.configure(state="disabled")
 
-        # 子页2：线路自然功率与无功
+        # Subpage 2: natural power and reactive power / 子页2：线路自然功率与无功
         self._vr_line_tab.columnconfigure(0, weight=1)
         self._vr_line_tab.rowconfigure(0, weight=1)
         line_shell = ttk.Frame(self._vr_line_tab, padding=8, style="Surface.TFrame")
@@ -1175,7 +1349,7 @@ class ApproximationToolGUI(tk.Tk):
         self.line_result.grid(row=2, column=0, sticky="nsew")
         self.line_result.configure(state="disabled")
 
-        # 子页3：AVC策略模拟
+        # Subpage 3: AVC strategy simulation / 子页3：AVC策略模拟
         self._vr_avc_tab.columnconfigure(0, weight=1)
         self._vr_avc_tab.rowconfigure(0, weight=1)
         avc_shell = ttk.Frame(self._vr_avc_tab, padding=8, style="Surface.TFrame")
@@ -1584,7 +1758,7 @@ class ApproximationToolGUI(tk.Tk):
 
     def _apply_smib_defaults(self) -> None:
         defaults = kundur_smib_defaults()
-        self.smib_config.set(str(defaults["config"]))
+        self.smib_config.set(_display_obj(self, str(defaults["config"])))
         for key, value in defaults.items():
             if key == "config":
                 continue
@@ -1596,23 +1770,24 @@ class ApproximationToolGUI(tk.Tk):
         self.calculate_smib()
 
     def _on_smib_config_change(self, _event: object | None = None) -> None:
-        config_key = _SMIB_CONFIG_KEY.get(self.smib_config.get().strip(), "avr_pss")
+        config_label = _logic_obj(self, self.smib_config.get().strip())
+        config_key = _SMIB_CONFIG_KEY.get(config_label, "avr_pss")
         self._set_enabled(self.smib_avr_widgets, config_key in {"avr", "avr_pss"})
         self._set_enabled(self.smib_pss_widgets, config_key == "avr_pss")
-        label = self.smib_config.get().strip() or "未选择"
+        label = self.smib_config.get().strip() or _display_obj(self, "未选择")
         if hasattr(self, "smib_mode_hint_var"):
             self.smib_mode_hint_var.set(
-                f"提示：当前主分析模型为「{label}」（Kundur 六阶线化）；如需 1型 AVR/PSS 请点击上方按钮切换到参数校核页。"
+                _tr_obj(self, f"提示：当前主分析模型为「{label}」（Kundur 六阶线化）；如需 1型 AVR/PSS 请点击上方按钮切换到参数校核页。")
             )
 
     def _goto_type1_avr_pss_page(self) -> None:
         if hasattr(self, "smib_sub_notebook") and hasattr(self, "smib_page_type1"):
             self.smib_sub_notebook.select(self.smib_page_type1)
         if hasattr(self, "smib_mode_hint_var"):
-            self.smib_mode_hint_var.set("提示：已切换到 1型 AVR/PSS 参数页，可直接输入参数并点击“计算1型 AVR/PSS 指标”。")
+            self.smib_mode_hint_var.set(_tr_obj(self, "提示：已切换到 1型 AVR/PSS 参数页，可直接输入参数并点击“计算1型 AVR/PSS 指标”。"))
 
     def _read_smib_inputs(self) -> tuple[str, dict[str, float]]:
-        label = self.smib_config.get().strip() or "六阶机组 + AVR + PSS"
+        label = _logic_obj(self, self.smib_config.get().strip()) or "六阶机组 + AVR + PSS"
         config_key = _SMIB_CONFIG_KEY.get(label)
         if config_key is None:
             raise InputError("请选择有效的小扰动模型配置。")
@@ -1930,7 +2105,7 @@ class ApproximationToolGUI(tk.Tk):
             messagebox.showerror("计算错误", str(exc))
 
     def calculate_avc_strategy(self) -> None:
-        """按简化9区策略给出档位+无功补偿调控建议与调后结果。"""
+        """Apply the simplified nine-zone AVC policy and report tap/reactive-compensation recommendations together with the adjusted result. / 按简化 9 区策略给出档位与无功补偿调控建议及调后结果。"""
         try:
             hv_base = _safe_float(self.avc_hv_kv.get(), "高压额定电压")
             lv_base = _safe_float(self.avc_lv_kv.get(), "低压额定电压")
@@ -2024,7 +2199,7 @@ class ApproximationToolGUI(tk.Tk):
 
             r = equal_area_criterion(Pm, Pmax_pre, Pmax_f, Pmax_post, dt, Tj, f0)
 
-            # ── 结果文字 ────────────────────────────────────────────────
+            # Result text / 结果文字 ────────────────────────────────────────────────
             stab_str = "[稳定]" if r.stable else "[失稳]（加速面积 > 可用减速面积）"
             text = (
                 f"稳定性判断：{stab_str}\n"
@@ -2053,7 +2228,7 @@ class ApproximationToolGUI(tk.Tk):
             )
             self._set_text(self.eac_result, text)
 
-            # ── P-δ 图 ──────────────────────────────────────────────────
+            # P-δ plot / P-δ 图 ──────────────────────────────────────────────────
             ax = self.eac_ax
             ax.clear()
 
@@ -2074,10 +2249,10 @@ class ApproximationToolGUI(tk.Tk):
             ax.axhline(Pm, color="k", linewidth=1.4, linestyle=":",
                        label=f"Pm = {Pm:.3f} pu")
 
-            # 加速面积（红色填充）δ0 → δc，曲线为故障中正弦
+            # Acceleration area (red fill) from δ0 to δc, using the faulted sine curve. / 加速面积（红色填充）δ0 → δc，曲线为故障中正弦
             d_acc = np.linspace(r.delta0_rad, r.deltac_rad, 500)
             Pe_f_acc = Pmax_f * np.sin(d_acc)
-            # 正加速（Pm > Pe_fault）→ 红色；负加速（Pe_fault > Pm）→ 蓝紫色
+            # Positive acceleration (Pm > Pe_fault) is red; negative acceleration (Pe_fault > Pm) is blue-violet. / 正加速（Pm > Pe_fault）→ 红色；负加速（Pe_fault > Pm）→ 蓝紫色
             ax.fill_between(np.degrees(d_acc), Pm, Pe_f_acc,
                             where=(Pm >= Pe_f_acc),
                             color="tomato", alpha=0.45,
@@ -2090,7 +2265,7 @@ class ApproximationToolGUI(tk.Tk):
                                 color="mediumpurple", alpha=0.40,
                                 label=f"减速（故障中）{neg_area:.4f} pu·rad")
 
-            # 减速面积（绿色填充）δc → δmax（或 δu）
+            # Deceleration area (green fill) from δc to δmax (or δu). / 减速面积（绿色填充）δc → δmax（或 δu）
             d_end = r.deltamax_rad if r.deltamax_rad is not None else r.deltau_rad
             d_dec = np.linspace(r.deltac_rad, d_end, 500)
             Pe_post_dec = Pmax_post * np.sin(d_dec)
@@ -2100,7 +2275,7 @@ class ApproximationToolGUI(tk.Tk):
                             color="limegreen", alpha=0.45,
                             label=f"减速面积 {r.A_dec_avail:.4f} pu·rad")
 
-            # 关键角度标注
+            # Key-angle annotations. / 关键角度标注
             def _vline(deg: float, color: str, ls: str, label: str) -> None:
                 ax.axvline(deg, color=color, linestyle=ls, linewidth=1.2, label=label)
 
@@ -2174,7 +2349,7 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Label(basic, text="网络模式", style="Form.TLabel").grid(row=0, column=0, sticky="w", padx=4, pady=4)
         self.sc_mode = ttk.Combobox(basic, state="readonly", width=22, style="Input.TCombobox", values=["单电源", "双电源"])
         self.sc_mode.grid(row=0, column=1, sticky="ew", padx=4, pady=4)
-        self.sc_mode.set("单电源")
+        self.sc_mode.set(_display_obj(self, "单电源"))
 
         ttk.Label(basic, text="故障类型", style="Form.TLabel").grid(row=0, column=2, sticky="w", padx=4, pady=4)
         self.sc_fault_type = ttk.Combobox(
@@ -2185,7 +2360,7 @@ class ApproximationToolGUI(tk.Tk):
             values=["A相接地", "B相接地", "C相接地", "AB两相接地", "BC两相接地", "CA两相接地", "AB两相短路", "BC两相短路", "CA两相短路", "三相接地"],
         )
         self.sc_fault_type.grid(row=0, column=3, sticky="ew", padx=4, pady=4)
-        self.sc_fault_type.set("A相接地")
+        self.sc_fault_type.set(_display_obj(self, "A相接地"))
 
         self.sc_u = self._add_entry(basic, 1, "系统电压 U / kV（线电压）", "110", column=0)
         self.sc_fault_pos = self._add_entry(basic, 1, "故障点距左侧百分比 / %", "50", column=2)
@@ -2222,12 +2397,12 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_neutral_mode = ttk.Combobox(neutral, state="readonly", width=22, style="Input.TCombobox",
                                             values=["直接接地", "中性点不接地", "经消弧线圈接地", "经电阻接地"])
         self.sc_neutral_mode.grid(row=0, column=1, sticky="ew", padx=4, pady=4)
-        self.sc_neutral_mode.set("直接接地")
+        self.sc_neutral_mode.set(_display_obj(self, "直接接地"))
         ttk.Label(neutral, text="右侧中性点方式", style="Form.TLabel").grid(row=0, column=2, sticky="w", padx=4, pady=4)
         self.sc_neutral_mode_r = ttk.Combobox(neutral, state="readonly", width=22, style="Input.TCombobox",
                                               values=["直接接地", "中性点不接地", "经消弧线圈接地", "经电阻接地"])
         self.sc_neutral_mode_r.grid(row=0, column=3, sticky="ew", padx=4, pady=4)
-        self.sc_neutral_mode_r.set("直接接地")
+        self.sc_neutral_mode_r.set(_display_obj(self, "直接接地"))
 
         self.sc_rn = self._add_entry(neutral, 1, "左侧中性点电阻 Rn,L / Ω", "1.5", column=0)
         self.sc_xn = self._add_entry(neutral, 1, "左侧中性点电抗 Xn,L / Ω", "12.0", column=2)
@@ -2402,7 +2577,7 @@ class ApproximationToolGUI(tk.Tk):
                 rn_entry.configure(state="disabled")
                 xn_entry.configure(state="disabled")
                 return
-            mode = mode_box.get().strip()
+            mode = _logic_obj(self, mode_box.get().strip())
             if mode in {"直接接地", "中性点不接地"}:
                 rn_entry.configure(state="disabled")
                 xn_entry.configure(state="disabled")
@@ -2416,11 +2591,11 @@ class ApproximationToolGUI(tk.Tk):
                 rn_entry.configure(state="normal")
                 xn_entry.configure(state="normal")
 
-        dual_on = self.sc_mode.get().strip() == "双电源"
+        dual_on = _logic_obj(self, self.sc_mode.get().strip()) == "双电源"
         _apply(self.sc_neutral_mode, self.sc_rn, self.sc_xn, enabled=True)
         _apply(self.sc_neutral_mode_r, self.sc_rn_r, self.sc_xn_r, enabled=dual_on)
     def _on_sc_neutral_mode_change(self, _event: object | None = None) -> None:
-        """根据线路零序参数给出与量级匹配的中性点参数默认值。"""
+        """Populate neutral-point defaults whose magnitude matches the line zero-sequence parameters. / 根据线路零序参数给出与量级匹配的中性点参数默认值。"""
         try:
             length = _safe_float(self.sc_len.get(), "线路长度")
             r0 = _safe_float(self.sc_r0.get(), "R0")
@@ -2431,6 +2606,7 @@ class ApproximationToolGUI(tk.Tk):
             r0_total, x0_total = 4.5, 36.0
 
         def _defaults(mode: str) -> tuple[float, float]:
+            mode = _logic_obj(self, mode)
             if mode == "直接接地":
                 return 0.0, 0.0
             if mode == "中性点不接地":
@@ -2462,12 +2638,12 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_fault_pos.configure(state="normal")
         self.sc_fault_pos.delete(0, tk.END)
         self.sc_fault_pos.insert(0, f"{v:.2f}")
-        if self.sc_mode.get().strip() != "双电源":
+        if _logic_obj(self, self.sc_mode.get().strip()) != "双电源":
             self.sc_fault_pos.configure(state="disabled")
         self.calculate_short_circuit()
 
     def _on_sc_mode_change(self, _event: object | None = None) -> None:
-        is_dual = self.sc_mode.get().strip() == "双电源"
+        is_dual = _logic_obj(self, self.sc_mode.get().strip()) == "双电源"
         state = "normal" if is_dual else "disabled"
         dual_entries = (
             self.sc_ssc_r, self.sc_xr_r, self.sc_fault_pos,
@@ -2598,9 +2774,9 @@ class ApproximationToolGUI(tk.Tk):
 
     def calculate_short_circuit(self) -> None:
         try:
-            mode = self.sc_mode.get().strip()
-            fault_type = self.sc_fault_type.get().strip()
-            neutral_mode = self.sc_neutral_mode.get().strip()
+            mode = _logic_obj(self, self.sc_mode.get().strip())
+            fault_type = _logic_obj(self, self.sc_fault_type.get().strip())
+            neutral_mode = _logic_obj(self, self.sc_neutral_mode.get().strip())
             U = _safe_float(self.sc_u.get(), "U")
             Ssc = _safe_float(self.sc_ssc.get(), "S_sc")
             xr = _safe_float(self.sc_xr.get(), "X/R")
@@ -2619,7 +2795,7 @@ class ApproximationToolGUI(tk.Tk):
             Rf = _safe_float(self.sc_rf.get(), "Rf")
             Rn = _safe_float(self.sc_rn.get(), "Rn")
             Xn = _safe_float(self.sc_xn.get(), "Xn")
-            neutral_mode_right = self.sc_neutral_mode_r.get().strip()
+            neutral_mode_right = _logic_obj(self, self.sc_neutral_mode_r.get().strip())
             Rn_r = _safe_float(self.sc_rn_r.get(), "Rn,R")
             Xn_r = _safe_float(self.sc_xn_r.get(), "Xn,R")
             cycles = max(1.0, _safe_float(self.sc_cycles.get(), "仿真周波数"))
@@ -2644,7 +2820,7 @@ class ApproximationToolGUI(tk.Tk):
                 check = "匹配：额定开断电流 ≥ 计算开断电流。" if r.breaker_ok else "不匹配：额定开断电流 < 计算开断电流。"
 
             peak_phase_ka = max(abs(r.Ia_A), abs(r.Ib_A), abs(r.Ic_A)) / 1000.0
-            self.sc_summary_fault_var.set(f"{r.network_mode} · {r.fault_type}")
+            self.sc_summary_fault_var.set(_tr_obj(self, f"{r.network_mode} · {r.fault_type}"))
             self.sc_summary_peak_var.set(f"{peak_phase_ka:.3f} kA")
             self.sc_summary_break_var.set(f"{r.I_break_kA:.3f} kA")
             self.sc_summary_tau_var.set(f"{r.tau_dc_s:.4f} s")
@@ -2771,12 +2947,12 @@ class ApproximationToolGUI(tk.Tk):
         except Exception as exc:
             messagebox.showerror("计算错误", str(exc))
 
-    # ════════════════════════════════════════════════════════════════════
-    # 参数校核与标幺值转换标签页
-    # ════════════════════════════════════════════════════════════════════
+    # Parameter-validation section separator / 参数校核分隔线 ═══════════════════════════════════════════════
+    # Parameter validation and per-unit conversion tab / 参数校核与标幺值转换标签页
+    # Parameter-validation section separator / 参数校核分隔线 ═══════════════════════════════════════════════
 
     def _build_param_tab(self) -> None:
-        """构建"参数校核与标幺值转换"标签页（含线路、双绕组变压器、三绕组变压器子页）。"""
+        """Build the "Parameter Validation and Per-Unit Conversion" tab, including the line, two-winding-transformer, and three-winding-transformer subpages. / 构建“参数校核与标幺值转换”标签页（含线路、双绕组变压器、三绕组变压器子页）。"""
         self.param_tab.columnconfigure(0, weight=1)
         self.param_tab.rowconfigure(0, weight=1)
 
@@ -2786,17 +2962,21 @@ class ApproximationToolGUI(tk.Tk):
         self.param_notebook.bind("<<NotebookTabChanged>>", self._on_ai_context_changed)
 
         self._ptab_line = ttk.Frame(nb)
+        self._ptab_sag  = ttk.Frame(nb)
         self._ptab_2wt  = ttk.Frame(nb)
         self._ptab_3wt  = ttk.Frame(nb)
+        sag_tab_text = "Conductor Sag" if _lang_of(self) == "en" else "导线弧垂"
         nb.add(self._ptab_line, text="架空线路")
+        nb.add(self._ptab_sag,  text=sag_tab_text)
         nb.add(self._ptab_2wt,  text="两绕组变压器")
         nb.add(self._ptab_3wt,  text="三绕组变压器")
 
         self._build_line_param_sub()
+        self._build_sag_sub()
         self._build_2wt_sub()
         self._build_3wt_sub()
 
-    # ── 架空线路子页 ─────────────────────────────────────────────────────────
+    # Overhead-line subpage / 架空线路子页 ─────────────────────────────────────────────────────────
 
     def _build_line_param_sub(self) -> None:
         f = self._ptab_line
@@ -2992,8 +3172,424 @@ class ApproximationToolGUI(tk.Tk):
         self.tx3_result.configure(state="disabled")
         self.calculate_3wt()
 
+
+    # Conductor-sag subpage / 导线弧垂子页 ─────────────────────────────────────────────────────
+
+    def _build_sag_sub(self) -> None:
+        """Build the conductor-sag page with interactive temperature/current sliders. / 构建导线弧垂页面，提供温度/载流量交互滑块。"""
+        lang = _lang_of(self)
+        txt = lambda zh, en: en if lang == "en" else zh
+
+        f = self._ptab_sag
+        f.columnconfigure(0, weight=1)
+        f.rowconfigure(0, weight=1)
+
+        shell = ttk.Frame(f, padding=8, style="Surface.TFrame")
+        shell.grid(row=0, column=0, sticky="nsew")
+        shell.columnconfigure(0, weight=0, minsize=620)
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(0, weight=1)
+
+        left_outer, left, _left_canvas = self._create_scrollable_card(shell, padding=16)
+        left_outer.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        right = ttk.Frame(shell, padding=16, style="Card.TFrame")
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        left.columnconfigure(0, weight=1)
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(2, weight=3)
+        right.rowconfigure(4, weight=2)
+
+        title = txt("输电线路导线弧垂计算（单档悬链线）", "Transmission-line conductor sag (single-span catenary)")
+        intro = txt(
+            "本页按不等高挂点的悬链线模型计算导线弧垂，并以参考温度/参考水平张力为基准回算当前张力。"
+            "在“载流量估温”模式下，程序先用简化稳态热平衡把电流换算成导线温度，再求解弧垂。"
+            "拖动温度或载流量滑块，可直观看到导线简图和关键指标的变化。",
+            "This page evaluates conductor sag using a catenary model with unequal support heights and back-solves the current tension from a reference temperature/reference horizontal tension state. "
+            "In current mode the tool first converts line current into conductor temperature through a simplified steady-state thermal balance and then solves the sag-tension state. "
+            "Drag either the temperature slider or the current slider to update the conductor sketch and key indicators in real time.",
+        )
+        ttk.Label(left, text=title, style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(left, text=intro, style="Card.TLabel", justify="left", wraplength=560).grid(
+            row=1, column=0, sticky="ew", pady=(4, 10)
+        )
+
+        mech = ttk.LabelFrame(left, text=txt("几何与机械参数", "Geometry and mechanical parameters"), style="Card.TLabelframe", padding=10)
+        mech.grid(row=2, column=0, sticky="ew")
+        mech.columnconfigure(1, weight=1, minsize=120)
+        mech.columnconfigure(3, weight=1, minsize=120)
+        self.sag_span = self._add_entry(mech, 0, txt("档距 l / m", "Span length l / m"), "400", column=0)
+        self.sag_h_left = self._add_entry(mech, 0, txt("左挂点高度 h_A / m", "Left support height h_A / m"), "25", column=2)
+        self.sag_h_right = self._add_entry(mech, 1, txt("右挂点高度 h_B / m", "Right support height h_B / m"), "35", column=0)
+        self.sag_mass = self._add_entry(mech, 1, txt("单位质量 m / (kg/m)", "Line mass m / (kg/m)"), "1.35", column=2)
+        self.sag_area = self._add_entry(mech, 2, txt("截面积 A / mm²", "Cross-section area A / mm²"), "425", column=0)
+        self.sag_E = self._add_entry(mech, 2, txt("等效弹性模量 E / GPa", "Equivalent elastic modulus E / GPa"), "70", column=2)
+        self.sag_alpha = self._add_entry(mech, 3, txt("线膨胀系数 α_L / (1/°C)", "Thermal expansion α_L / (1/°C)"), "1.90e-5", column=0)
+        self.sag_tref = self._add_entry(mech, 3, txt("参考温度 T_ref / °C", "Reference temperature T_ref / °C"), "20", column=2)
+        self.sag_href = self._add_entry(mech, 4, txt("参考水平张力 H_ref / kN", "Reference horizontal tension H_ref / kN"), "20", column=0)
+        ttk.Label(mech, text=txt("说明：单位质量自动按 m·g 换算为自重荷载；当前版本未计风偏、覆冰与长期蠕变。", "Note: the line mass is automatically converted into self-weight through m·g; the present model does not include wind swing, ice loading, or long-term creep."), style="Card.TLabel", justify="left", wraplength=520).grid(
+            row=5, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
+        )
+
+        thermal = ttk.LabelFrame(left, text=txt("载流量—温度近似模型", "Current-to-temperature approximation"), style="Card.TLabelframe", padding=10)
+        thermal.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        thermal.columnconfigure(1, weight=1, minsize=120)
+        thermal.columnconfigure(3, weight=1, minsize=120)
+        self.sag_ambient = self._add_entry(thermal, 0, txt("环境温度 T_a / °C", "Ambient temperature T_a / °C"), "25", column=0)
+        self.sag_r20 = self._add_entry(thermal, 0, txt("20°C 电阻 R20 / (Ω/km)", "20°C resistance R20 / (Ω/km)"), "0.068", column=2)
+        self.sag_alpha_r = self._add_entry(thermal, 1, txt("电阻温度系数 α_R / (1/°C)", "Resistance temperature coefficient α_R / (1/°C)"), "0.00403", column=0)
+        self.sag_cooling = self._add_entry(thermal, 1, txt("等效冷却系数 k_c / (W/(m·K))", "Effective cooling coefficient k_c / (W/(m·K))"), "1.20", column=2)
+        self.sag_solar = self._add_entry(thermal, 2, txt("太阳热增益 q_s / (W/m)", "Solar heat gain q_s / (W/m)"), "4.0", column=0)
+        ttk.Label(thermal, text=txt("说明：此处采用 I²R(T)+q_s = k_c(T_c-T_a) 的集总稳态近似，适合滑块交互与快速工程估算。", "Note: the page uses a lumped steady-state approximation I²R(T)+q_s = k_c(T_c-T_a), which is intended for interactive sliders and fast engineering estimates."), style="Card.TLabel", justify="left", wraplength=520).grid(
+            row=3, column=0, columnspan=4, sticky="ew", padx=4, pady=(6, 0)
+        )
+
+        sliders = ttk.LabelFrame(left, text=txt("交互驱动变量", "Interactive driving variables"), style="Card.TLabelframe", padding=10)
+        sliders.grid(row=4, column=0, sticky="ew", pady=(10, 0))
+        sliders.columnconfigure(1, weight=1)
+        sliders.columnconfigure(2, weight=0)
+
+        self.sag_driver_var = tk.StringVar(value="temperature")
+        mode_bar = ttk.Frame(sliders, style="Card.TFrame")
+        mode_bar.grid(row=0, column=0, columnspan=3, sticky="ew")
+        ttk.Radiobutton(mode_bar, text=txt("按导线温度直接驱动", "Drive by conductor temperature"), value="temperature", variable=self.sag_driver_var, command=self._on_sag_mode_change).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        ttk.Radiobutton(mode_bar, text=txt("按载流量估温驱动", "Drive by current-derived temperature"), value="current", variable=self.sag_driver_var, command=self._on_sag_mode_change).grid(row=0, column=1, sticky="w")
+
+        self.sag_temp_scale_var = tk.DoubleVar(value=40.0)
+        self.sag_current_scale_var = tk.DoubleVar(value=600.0)
+        self.sag_temp_value_var = tk.StringVar(value="40.0 °C")
+        self.sag_current_value_var = tk.StringVar(value="600 A")
+        ttk.Label(sliders, text=txt("导线运行温度 T_c / °C", "Conductor temperature T_c / °C"), style="Form.TLabel").grid(row=1, column=0, sticky="w", padx=4, pady=(8, 2))
+        ttk.Label(sliders, textvariable=self.sag_temp_value_var, style="Card.TLabel").grid(row=1, column=2, sticky="e", padx=4, pady=(8, 2))
+        self.sag_temp_slider = ttk.Scale(sliders, from_=-20.0, to=120.0, orient=tk.HORIZONTAL, variable=self.sag_temp_scale_var, command=lambda _v: self._on_sag_slider_change("temperature"), style="Accent.Horizontal.TScale")
+        self.sag_temp_slider.grid(row=2, column=0, columnspan=3, sticky="ew", padx=4)
+
+        ttk.Label(sliders, text=txt("载流量 I / A", "Line current I / A"), style="Form.TLabel").grid(row=3, column=0, sticky="w", padx=4, pady=(8, 2))
+        ttk.Label(sliders, textvariable=self.sag_current_value_var, style="Card.TLabel").grid(row=3, column=2, sticky="e", padx=4, pady=(8, 2))
+        self.sag_current_slider = ttk.Scale(sliders, from_=0.0, to=1200.0, orient=tk.HORIZONTAL, variable=self.sag_current_scale_var, command=lambda _v: self._on_sag_slider_change("current"), style="Accent.Horizontal.TScale")
+        self.sag_current_slider.grid(row=4, column=0, columnspan=3, sticky="ew", padx=4)
+
+        ttk.Label(sliders, text=txt("拖动任一滑块时，页面会自动切换到对应驱动方式并刷新弧垂。", "Dragging either slider automatically switches the page to the corresponding driving mode and refreshes the sag state."), style="Card.TLabel", justify="left", wraplength=520).grid(
+            row=5, column=0, columnspan=3, sticky="ew", padx=4, pady=(8, 6)
+        )
+        ttk.Button(sliders, text=txt("计算并绘图", "Calculate & Plot"), command=self.calculate_sag_analysis, style="Accent.TButton").grid(row=6, column=0, columnspan=3, sticky="ew", padx=4, pady=(2, 0))
+
+        ttk.Label(right, text=txt("关键指标", "Key indicators"), style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        metrics = ttk.Frame(right, style="Card.TFrame")
+        metrics.grid(row=1, column=0, sticky="ew", pady=(6, 10))
+        self.sag_metric_vars = {
+            "driver": tk.StringVar(value="--"),
+            "temp": tk.StringVar(value="--"),
+            "current": tk.StringVar(value="--"),
+            "sag": tk.StringVar(value="--"),
+            "clearance": tk.StringVar(value="--"),
+            "tension": tk.StringVar(value="--"),
+        }
+        metric_defs = [
+            (txt("驱动方式", "Driver"), "driver"),
+            (txt("导线温度", "Conductor temp."), "temp"),
+            (txt("载流量", "Current"), "current"),
+            (txt("最大弦垂", "Maximum sag"), "sag"),
+            (txt("最小净空", "Minimum clearance"), "clearance"),
+            (txt("水平张力", "Horizontal tension"), "tension"),
+        ]
+        for idx, (metric_title, key) in enumerate(metric_defs):
+            row, col = divmod(idx, 3)
+            card = ttk.Frame(metrics, padding=(10, 8), style="Metric.TFrame")
+            card.grid(row=row, column=col, sticky="nsew", padx=4, pady=4)
+            metrics.columnconfigure(col, weight=1)
+            ttk.Label(card, text=metric_title, style="MetricTitle.TLabel").grid(row=0, column=0, sticky="w")
+            ttk.Label(card, textvariable=self.sag_metric_vars[key], style="MetricValue.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 0))
+
+        plot_frame = ttk.LabelFrame(right, text=txt("输电导线简图与悬链线", "Conductor sketch and catenary"), style="Card.TLabelframe", padding=4)
+        plot_frame.grid(row=2, column=0, sticky="nsew")
+        plot_frame.columnconfigure(0, weight=1)
+        plot_frame.rowconfigure(0, weight=1)
+        self.sag_fig = Figure(figsize=(8.1, 5.1), dpi=100)
+        self.sag_ax = self.sag_fig.add_subplot(111)
+        self.sag_canvas = FigureCanvasTkAgg(self.sag_fig, master=plot_frame)
+        self.sag_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+
+        toolbar_frame = ttk.Frame(right, style="Card.TFrame")
+        toolbar_frame.grid(row=3, column=0, sticky="ew", pady=(4, 8))
+        self.sag_toolbar = NavigationToolbar2Tk(self.sag_canvas, toolbar_frame, pack_toolbar=False)
+        self.sag_toolbar.update()
+        self.sag_toolbar.pack(fill="x")
+
+        ttk.Label(right, text=txt("结果说明", "Result notes"), style="SectionTitle.TLabel").grid(row=4, column=0, sticky="w", pady=(2, 4))
+        self.sag_result = ScrolledText(right, width=90, height=13, wrap=tk.WORD)
+        self.sag_result.grid(row=5, column=0, sticky="nsew")
+        self.sag_result.configure(state="disabled")
+
+        self._sag_last_result = None
+        self._update_sag_slider_labels()
+        for widget in (
+            self.sag_span, self.sag_h_left, self.sag_h_right, self.sag_mass,
+            self.sag_area, self.sag_E, self.sag_alpha, self.sag_tref,
+            self.sag_href, self.sag_ambient, self.sag_r20, self.sag_alpha_r,
+            self.sag_cooling, self.sag_solar,
+        ):
+            widget.bind("<FocusOut>", lambda _e: self._refresh_sag_analysis(show_error=False))
+            widget.bind("<Return>", lambda _e: self._refresh_sag_analysis(show_error=False))
+        self._refresh_sag_analysis(show_error=False)
+
+    def _update_sag_slider_labels(self) -> None:
+        """Refresh the slider-value labels. / 刷新滑块数值标签。"""
+        if not hasattr(self, "sag_temp_value_var"):
+            return
+        self.sag_temp_value_var.set(f"{float(self.sag_temp_scale_var.get()):.1f} °C")
+        self.sag_current_value_var.set(f"{float(self.sag_current_scale_var.get()):.0f} A")
+
+    def _on_sag_mode_change(self) -> None:
+        """Refresh the page after the driving mode is changed. / 切换驱动方式后刷新页面。"""
+        self._update_sag_slider_labels()
+        self._refresh_sag_analysis(show_error=False)
+
+    def _on_sag_slider_change(self, driver: str) -> None:
+        """Switch to the corresponding driving mode and refresh interactively. / 拖动滑块时自动切换到相应驱动方式并交互刷新。"""
+        if hasattr(self, "sag_driver_var"):
+            self.sag_driver_var.set(driver)
+        self._update_sag_slider_labels()
+        self._refresh_sag_analysis(show_error=False)
+
+    def _collect_sag_inputs(self) -> dict[str, float | str]:
+        """Collect conductor-sag inputs from the GUI. / 从界面读取导线弧垂参数。"""
+        lang = _lang_of(self)
+        txt = lambda zh, en: en if lang == "en" else zh
+        return {
+            "span_m": _safe_float(self.sag_span.get(), txt("档距", "Span length")),
+            "left_support_height_m": _safe_float(self.sag_h_left.get(), txt("左挂点高度", "Left support height")),
+            "right_support_height_m": _safe_float(self.sag_h_right.get(), txt("右挂点高度", "Right support height")),
+            "line_mass_kg_per_m": _safe_float(self.sag_mass.get(), txt("单位质量", "Line mass")),
+            "cross_section_mm2": _safe_float(self.sag_area.get(), txt("截面积", "Cross-section area")),
+            "elastic_modulus_gpa": _safe_float(self.sag_E.get(), txt("等效弹性模量", "Equivalent elastic modulus")),
+            "thermal_expansion_per_c": _safe_float(self.sag_alpha.get(), txt("线膨胀系数", "Thermal expansion coefficient")),
+            "reference_temperature_c": _safe_float(self.sag_tref.get(), txt("参考温度", "Reference temperature")),
+            "reference_horizontal_tension_kN": _safe_float(self.sag_href.get(), txt("参考水平张力", "Reference horizontal tension")),
+            "driver_mode": self.sag_driver_var.get().strip() or "temperature",
+            "conductor_temperature_c": float(self.sag_temp_scale_var.get()),
+            "current_a": float(self.sag_current_scale_var.get()),
+            "ambient_temp_c": _safe_float(self.sag_ambient.get(), txt("环境温度", "Ambient temperature")),
+            "resistance_20c_ohm_per_km": _safe_float(self.sag_r20.get(), txt("20°C 电阻", "20°C resistance")),
+            "resistance_temp_coeff_per_c": _safe_float(self.sag_alpha_r.get(), txt("电阻温度系数", "Resistance temperature coefficient")),
+            "cooling_coeff_w_per_mk": _safe_float(self.sag_cooling.get(), txt("等效冷却系数", "Effective cooling coefficient")),
+            "solar_gain_w_per_m": _safe_float(self.sag_solar.get(), txt("太阳热增益", "Solar heat gain")),
+        }
+
+    def _set_sag_metric_defaults(self) -> None:
+        """Reset metric cards to placeholders. / 将指标卡片重置为占位值。"""
+        for var in getattr(self, "sag_metric_vars", {}).values():
+            var.set("--")
+
+    def _render_sag_metrics(self, result) -> None:
+        """Render the summary metric cards. / 渲染顶部指标卡片。"""
+        if result is None:
+            self._set_sag_metric_defaults()
+            return
+        lang = _lang_of(self)
+        driver_text = (
+            "Current-derived temperature" if result.driver_mode == "current" else "Direct conductor temperature"
+        ) if lang == "en" else (
+            "按载流量估温" if result.driver_mode == "current" else "按导线温度直接驱动"
+        )
+        self.sag_metric_vars["driver"].set(driver_text)
+        self.sag_metric_vars["temp"].set(f"{result.conductor_temperature_c:.1f} °C")
+        self.sag_metric_vars["current"].set(f"{result.current_a:.0f} A")
+        self.sag_metric_vars["sag"].set(f"{result.operating_state.maximum_sag_m:.3f} m")
+        self.sag_metric_vars["clearance"].set(f"{result.operating_state.minimum_clearance_m:.3f} m")
+        self.sag_metric_vars["tension"].set(f"{result.operating_state.horizontal_tension_n / 1000.0:.3f} kN")
+
+    def _render_sag_plot(self, result) -> None:
+        """Draw the conductor sketch and the reference/current catenaries. / 绘制导线简图与参考/当前悬链线。"""
+        if getattr(self, "sag_ax", None) is None:
+            return
+        lang = _lang_of(self)
+        txt = lambda zh, en: en if lang == "en" else zh
+        ax = self.sag_ax
+        ax.clear()
+
+        ref = result.reference_state
+        op = result.operating_state
+        span = result.span_m
+        left_h = result.left_support_height_m
+        right_h = result.right_support_height_m
+
+        ground_line = np.zeros_like(op.x_profile_m)
+        ax.plot(op.x_profile_m, ground_line, color="#4a5568", linewidth=1.6, label=txt("地面", "Ground"))
+        tower_arm = max(4.0, 0.035 * span)
+        for x_tower, height, label in ((0.0, left_h, "A"), (span, right_h, "B")):
+            ax.plot([x_tower, x_tower], [0.0, height], color="#4a5568", linewidth=2.2)
+            if x_tower == 0.0:
+                ax.plot([x_tower, x_tower + tower_arm], [height, height], color="#4a5568", linewidth=2.0)
+            else:
+                ax.plot([x_tower - tower_arm, x_tower], [height, height], color="#4a5568", linewidth=2.0)
+            ax.text(x_tower, height + 0.7, label, ha="center", va="bottom", fontsize=10, fontweight="bold")
+
+        ax.plot(ref.x_profile_m, ref.y_profile_m, linestyle="--", linewidth=1.4, label=txt("参考状态导线", "Reference conductor"))
+        ax.plot(op.x_profile_m, op.y_profile_m, linewidth=2.4, label=txt("当前状态导线", "Current conductor"))
+        ax.plot(op.x_profile_m, op.y_chord_m, linestyle=":", linewidth=1.2, label=txt("挂点连线", "Support chord"))
+
+        x_sag = op.maximum_sag_x_m
+        y_conductor = float(np.interp(x_sag, op.x_profile_m, op.y_profile_m))
+        y_chord = float(np.interp(x_sag, op.x_profile_m, op.y_chord_m))
+        ax.annotate("", xy=(x_sag, y_chord), xytext=(x_sag, y_conductor), arrowprops=dict(arrowstyle="<->", linewidth=1.2, color="#8b5a00"))
+        ax.text(
+            x_sag + 0.02 * span,
+            0.5 * (y_conductor + y_chord),
+            txt(f"最大弦垂 {op.maximum_sag_m:.2f} m", f"Max sag {op.maximum_sag_m:.2f} m"),
+            fontsize=9,
+            va="center",
+        )
+
+        x_clear = op.minimum_clearance_x_m
+        y_clear = op.minimum_clearance_m
+        ax.scatter([x_clear], [y_clear], s=30, zorder=5)
+        ax.annotate(
+            txt(f"最小净空 {y_clear:.2f} m", f"Min clearance {y_clear:.2f} m"),
+            xy=(x_clear, y_clear),
+            xytext=(x_clear + 0.06 * span, y_clear + max(1.2, 0.08 * max(left_h, right_h))),
+            arrowprops=dict(arrowstyle="->", linewidth=1.0),
+            fontsize=9,
+        )
+
+        title = txt("输电导线悬链线示意（当前状态 vs 参考状态）", "Transmission-line catenary sketch (current vs reference)")
+        subtitle = txt(
+            f"驱动方式：{'载流量估温' if result.driver_mode == 'current' else '导线温度'}，当前导线温度 T_c = {result.conductor_temperature_c:.1f} °C",
+            f"Driver: {'current-derived temperature' if result.driver_mode == 'current' else 'direct conductor temperature'}, conductor temperature T_c = {result.conductor_temperature_c:.1f} °C",
+        )
+        ax.set_title(f"{title}\n{subtitle}")
+        ax.set_xlabel(txt("跨距坐标 x / m", "Span coordinate x / m"))
+        ax.set_ylabel(txt("高度 / m", "Height / m"))
+        ax.grid(True)
+        ax.legend(loc="upper right")
+        ymax = max(float(np.max(ref.y_profile_m)), float(np.max(op.y_profile_m)), left_h, right_h) + max(2.0, 0.12 * max(left_h, right_h))
+        ax.set_xlim(-0.04 * span, 1.04 * span)
+        ax.set_ylim(-0.5, ymax)
+        self.sag_canvas.draw_idle()
+
+    def _render_sag_result_text(self, result) -> str:
+        """Build the bilingual result text for the sag page. / 生成弧垂页面的双语结果文本。"""
+        lang = _lang_of(self)
+        ref = result.reference_state
+        op = result.operating_state
+        delta_sag = op.maximum_sag_m - ref.maximum_sag_m
+        delta_mid = op.midspan_sag_m - ref.midspan_sag_m
+
+        if lang == "en":
+            lines = [
+                f"Driver mode: {'current-derived temperature' if result.driver_mode == 'current' else 'direct conductor temperature'}",
+                f"Current slider value I = {result.current_a:.0f} A",
+                f"Active conductor temperature T_c = {result.conductor_temperature_c:.2f} °C",
+                f"Reference state: T_ref = {result.reference_temperature_c:.2f} °C, H_ref = {result.reference_horizontal_tension_n / 1000.0:.3f} kN",
+                "",
+                "══ Operating catenary state ═══════════════════════════════════════",
+                f"Horizontal tension H = {op.horizontal_tension_n / 1000.0:.6f} kN",
+                f"Average conductor tension T_avg = {op.average_tension_n / 1000.0:.6f} kN",
+                f"Left / right support tension = {op.left_support_tension_n / 1000.0:.6f} / {op.right_support_tension_n / 1000.0:.6f} kN",
+                f"Left / right support tangent angle = {op.support_angle_left_deg:+.3f}° / {op.support_angle_right_deg:+.3f}°",
+                f"Conductor length in span S = {op.arc_length_m:.6f} m (reference {ref.arc_length_m:.6f} m)",
+                f"Maximum sag from the support chord f_max = {op.maximum_sag_m:.6f} m at x = {op.maximum_sag_x_m:.3f} m",
+                f"Midspan sag f_mid = {op.midspan_sag_m:.6f} m (Δf_mid = {delta_mid:+.6f} m vs reference)",
+                f"Minimum ground clearance within the span = {op.minimum_clearance_m:.6f} m at x = {op.minimum_clearance_x_m:.3f} m",
+                f"Change in maximum sag relative to the reference state Δf_max = {delta_sag:+.6f} m",
+            ]
+            if result.thermal_balance is not None:
+                th = result.thermal_balance
+                lines += [
+                    "",
+                    "══ Simplified thermal balance ════════════════════════════════════",
+                    f"Ambient temperature T_a = {th.ambient_temp_c:.2f} °C",
+                    f"Resistance at T_c: R(T_c) = {th.resistance_ohm_per_m * 1000.0:.6f} Ω/km",
+                    f"Joule heating I²R = {th.joule_heating_w_per_m:.6f} W/m",
+                    f"Solar heat gain q_s = {th.solar_gain_w_per_m:.6f} W/m",
+                    f"Equivalent cooling k_c(T_c - T_a) = {th.cooling_w_per_m:.6f} W/m",
+                    f"Estimated temperature rise ΔT = {th.temperature_rise_c:.6f} °C",
+                ]
+            lines += [
+                "",
+                "Notes:",
+                "This page uses a single-span catenary with unequal support heights. Wind swing, ice loading, creep, and nonlinear elastoplastic effects are neglected.",
+                "The tension-temperature compatibility is solved from the reference state through thermal expansion plus an average-tension elastic extension approximation.",
+                "The current mode uses the lumped steady-state thermal relation I²R(T) + q_s = k_c (T_c - T_a); it is intended for fast engineering interaction and is not equivalent to IEEE 738 or a detailed thermo-fluid model.",
+            ]
+            if not op.lowest_point_inside_span:
+                lines.append("The theoretical catenary low point lies outside the span; therefore the minimum clearance within the span occurs at the lower support side.")
+            return "\n".join(lines)
+
+        lines = [
+            f"驱动方式：{'按载流量估温' if result.driver_mode == 'current' else '按导线温度直接驱动'}",
+            f"当前滑块载流量 I = {result.current_a:.0f} A",
+            f"当前导线温度 T_c = {result.conductor_temperature_c:.2f} °C",
+            f"参考状态：T_ref = {result.reference_temperature_c:.2f} °C，H_ref = {result.reference_horizontal_tension_n / 1000.0:.3f} kN",
+            "",
+            "══ 当前悬链线状态 ═══════════════════════════════════════",
+            f"水平张力 H = {op.horizontal_tension_n / 1000.0:.6f} kN",
+            f"平均导线张力 T_avg = {op.average_tension_n / 1000.0:.6f} kN",
+            f"左/右挂点张力 = {op.left_support_tension_n / 1000.0:.6f} / {op.right_support_tension_n / 1000.0:.6f} kN",
+            f"左/右挂点切线角 = {op.support_angle_left_deg:+.3f}° / {op.support_angle_right_deg:+.3f}°",
+            f"跨内导线长度 S = {op.arc_length_m:.6f} m（参考状态 {ref.arc_length_m:.6f} m）",
+            f"最大弦垂 f_max = {op.maximum_sag_m:.6f} m，位置 x = {op.maximum_sag_x_m:.3f} m",
+            f"跨中弦垂 f_mid = {op.midspan_sag_m:.6f} m（相对参考状态 Δf_mid = {delta_mid:+.6f} m）",
+            f"跨内最小净空 = {op.minimum_clearance_m:.6f} m，位置 x = {op.minimum_clearance_x_m:.3f} m",
+            f"相对参考状态的最大弦垂变化 Δf_max = {delta_sag:+.6f} m",
+        ]
+        if result.thermal_balance is not None:
+            th = result.thermal_balance
+            lines += [
+                "",
+                "══ 简化热平衡 ═══════════════════════════════════════════",
+                f"环境温度 T_a = {th.ambient_temp_c:.2f} °C",
+                f"导线电阻 R(T_c) = {th.resistance_ohm_per_m * 1000.0:.6f} Ω/km",
+                f"焦耳热 I²R = {th.joule_heating_w_per_m:.6f} W/m",
+                f"太阳热增益 q_s = {th.solar_gain_w_per_m:.6f} W/m",
+                f"等效散热 k_c(T_c - T_a) = {th.cooling_w_per_m:.6f} W/m",
+                f"估算温升 ΔT = {th.temperature_rise_c:.6f} °C",
+            ]
+        lines += [
+            "",
+            "说明：",
+            "本页采用单档、不等高挂点的悬链线模型；未计风偏、覆冰、长期蠕变与非线性弹塑性，仅适合快速工程估算。",
+            "张力—温度关系由参考状态经热膨胀与平均张力弹性伸长近似回算得到。",
+            "载流量模式采用 I²R(T)+q_s = k_c(T_c-T_a) 的集总稳态热平衡，不等价于 IEEE 738 或更详细的热-流体模型。",
+        ]
+        if not op.lowest_point_inside_span:
+            lines.append("当前参数下，理论最低点位于跨外，跨内最小净空出现在较低挂点侧。")
+        return "\n".join(lines)
+
+    def _render_sag_error(self, message: str) -> None:
+        """Render a non-blocking sag-page error state. / 在弧垂页面中渲染非阻塞错误状态。"""
+        self._set_sag_metric_defaults()
+        if getattr(self, "sag_ax", None) is not None:
+            self.sag_ax.clear()
+            self.sag_ax.text(0.5, 0.5, message, ha="center", va="center", transform=self.sag_ax.transAxes, wrap=True)
+            self.sag_ax.set_axis_off()
+            self.sag_canvas.draw_idle()
+        if getattr(self, "sag_result", None) is not None:
+            self._set_text(self.sag_result, message)
+
+    def _refresh_sag_analysis(self, show_error: bool = False) -> None:
+        """Refresh the sag analysis, optionally raising a popup on errors. / 刷新弧垂分析，并可选地在异常时弹窗。"""
+        try:
+            inputs = self._collect_sag_inputs()
+            result = analyze_conductor_sag(**inputs)
+            self._sag_last_result = result
+            self._render_sag_metrics(result)
+            self._render_sag_plot(result)
+            self._set_text(self.sag_result, self._render_sag_result_text(result))
+        except Exception as exc:
+            self._sag_last_result = None
+            self._render_sag_error(str(exc))
+            if show_error:
+                if _lang_of(self) == "en":
+                    messagebox.showerror("Calculation Error", str(exc))
+                else:
+                    messagebox.showerror("计算错误", str(exc))
+
+    def calculate_sag_analysis(self) -> None:
+        """Run the conductor-sag analysis from the button. / 按按钮执行导线弧垂分析。"""
+        self._refresh_sag_analysis(show_error=True)
+
     def show_line_param_reference(self) -> None:
-        """弹出架空线路典型参数窗口（按电压等级展示）。"""
+        """Open the typical-parameter window for overhead lines, grouped by voltage level. / 弹出架空线路典型参数窗口（按电压等级展示）。"""
         try:
             data = load_line_params_reference()
         except Exception as exc:
@@ -3010,7 +3606,7 @@ class ApproximationToolGUI(tk.Tk):
 
         title = data.get("description") or "架空线路典型参数"
         ttk.Label(container, text=title, font=("TkDefaultFont", 11, "bold")).pack(anchor="w")
-        #ttk.Label(container, text=f"数据来源：{data.get('source_file', '-')}", foreground="#666666").pack(anchor="w", pady=(2, 6))
+        # Optional source label is kept disabled to reduce visual noise. / 数据来源标签预留但默认关闭，以减少视觉干扰。
 
         text = ScrolledText(container, wrap=tk.NONE, font="TkFixedFont")
         text.pack(fill="both", expand=True)
@@ -3588,7 +4184,7 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Label(basic, text="功率因数类型", style="Form.TLabel").grid(row=5, column=0, sticky="w", padx=4, pady=4)
         self.loop_pf_mode = ttk.Combobox(basic, state="readonly", values=["滞后", "超前"], width=10, style="Input.TCombobox")
         self.loop_pf_mode.grid(row=5, column=1, sticky="ew", padx=4, pady=4)
-        self.loop_pf_mode.set("滞后")
+        self.loop_pf_mode.set(_display_obj(self, "滞后"))
         self.loop_ampacity = self._add_entry(basic, 5, "额定载流量 / A", "442", column=2)
         self.loop_overload = self._add_entry(basic, 6, "短时过载系数 K", "1.5", column=0)
         self.loop_tclose = self._add_entry(basic, 6, "合环时刻 / s", "0.10", column=2)
@@ -3677,7 +4273,7 @@ class ApproximationToolGUI(tk.Tk):
             return
         for idx, label in enumerate(self.loop_node_indicator_labels, start=1):
             if idx == closure:
-                label.configure(text="◉ 合环点")
+                label.configure(text="◉ Closure point" if self.language == "en" else "◉ 合环点")
             else:
                 label.configure(text="")
 
@@ -3717,7 +4313,8 @@ class ApproximationToolGUI(tk.Tk):
             ttk.Label(self.loop_table_frame, text=str(i + 1)).grid(row=i + 1, column=0, sticky="w", padx=3, pady=2)
             label_entry = ttk.Entry(self.loop_table_frame, width=10, style="Input.TEntry")
             label_entry.grid(row=i + 1, column=1, sticky="ew", padx=3, pady=2)
-            label_entry.insert(0, old_labels[i] if i < len(old_labels) else f"点{i + 1}")
+            default_label = old_labels[i] if i < len(old_labels) else _display_obj(self, f"点{i + 1}")
+            label_entry.insert(0, default_label)
 
             current_entry = ttk.Entry(self.loop_table_frame, width=12, style="Input.TEntry")
             current_entry.grid(row=i + 1, column=2, sticky="ew", padx=3, pady=2)
@@ -3767,12 +4364,12 @@ class ApproximationToolGUI(tk.Tk):
             widget.delete(0, tk.END)
             widget.insert(0, value)
 
-        self.loop_pf_mode.set("滞后")
+        self.loop_pf_mode.set(_display_obj(self, "滞后"))
         self._rebuild_loop_closure_rows()
         self.loop_closure.set("4")
         self._refresh_loop_closure_indicator()
 
-        labels = ["A", "B", "C", "联络点", "D", "E", "F"]
+        labels = ["A", "B", "C", _display_obj(self, "联络点"), "D", "E", "F"]
         injections = [79.35, 117.40, 116.60, 0.0, 136.69, 58.81, 158.66]
         for entry, label in zip(self.loop_node_label_entries, labels):
             entry.delete(0, tk.END)
@@ -3812,7 +4409,7 @@ class ApproximationToolGUI(tk.Tk):
             node_injections_A=node_currents,
             node_labels=node_labels,
             power_factor=_safe_float(self.loop_pf.get(), "统一功率因数 cosφ"),
-            pf_mode=self.loop_pf_mode.get().strip() or "滞后",
+            pf_mode=_logic_obj(self, self.loop_pf_mode.get().strip()) or "滞后",
             total_length_km=_safe_float(self.loop_total_len.get(), "总线路长度"),
             segment_ratios=ratios,
             ampacity_A=ampacity,
@@ -4690,7 +5287,7 @@ class ApproximationToolGUI(tk.Tk):
         top.grid(row=0, column=0, sticky="ew")
         top.columnconfigure(0, weight=1)
         top.columnconfigure(1, weight=1)
-        self._sequence_channel_vars = {key: tk.StringVar(value="未设置") for key in ["Ua", "Ub", "Uc", "Ia", "Ib", "Ic"]}
+        self._sequence_channel_vars = {key: tk.StringVar(value=_display_obj(self, "未设置")) for key in ["Ua", "Ub", "Uc", "Ia", "Ib", "Ic"]}
         self._sequence_comboboxes: list[ttk.Combobox] = []
 
         for box_idx, (title, prefix) in enumerate((("三相电压通道", "U"), ("三相电流通道", "I"))):
@@ -4699,7 +5296,7 @@ class ApproximationToolGUI(tk.Tk):
             for ridx, phase in enumerate(("a", "b", "c")):
                 show_key = f"{prefix}{phase}"
                 ttk.Label(lf, text=show_key).grid(row=ridx, column=0, sticky="w", padx=2, pady=2)
-                cmb = ttk.Combobox(lf, textvariable=self._sequence_channel_vars[show_key], values=["未设置"], state="readonly", width=24)
+                cmb = ttk.Combobox(lf, textvariable=self._sequence_channel_vars[show_key], values=[_display_obj(self, "未设置")], state="readonly", width=24)
                 cmb.grid(row=ridx, column=1, sticky="ew", padx=2, pady=2)
                 cmb.bind("<<ComboboxSelected>>", lambda _e: self._refresh_sequence_analysis_window())
                 self._sequence_comboboxes.append(cmb)
@@ -4772,7 +5369,7 @@ class ApproximationToolGUI(tk.Tk):
 
     def _sequence_channel_options(self) -> list[str]:
         record = self._comtrade_record
-        options = ["未设置"]
+        options = [_display_obj(self, "未设置")]
         if record is None:
             return options
         for idx, ch in enumerate(record.analog_channels):
@@ -4781,7 +5378,7 @@ class ApproximationToolGUI(tk.Tk):
 
     def _parse_sequence_channel_selection(self, value: str) -> int | None:
         value = value.strip()
-        if not value or value == "未设置":
+        if not value or _logic_obj(self, value) == "未设置":
             return None
         return int(value.split(":", 1)[0])
 
@@ -5067,8 +5664,44 @@ class ApproximationToolGUI(tk.Tk):
         self._comtrade_popup_canvas.draw()
 
 
-def main() -> None:
-    app = ApproximationToolGUI()
+def _wrap_english_refresh(method_name: str) -> None:
+    """Wrap selected GUI update methods so English text variables are re-translated after dynamic updates. / 包装部分 GUI 更新方法，确保英文界面在动态更新后再次翻译文本变量。"""
+    original = getattr(ApproximationToolGUI, method_name)
+
+    def wrapped(self, *args, **kwargs):
+        result = original(self, *args, **kwargs)
+        if getattr(self, "language", "zh") == "en":
+            try:
+                self._apply_language()
+            except Exception:
+                pass
+        return result
+
+    setattr(ApproximationToolGUI, method_name, wrapped)
+
+
+for _method_name in (
+    "calculate_frequency",
+    "calculate_oscillation",
+    "calculate_voltage",
+    "calculate_line",
+    "calculate_avc_strategy",
+    "calculate_impact",
+    "calculate_eac",
+    "calculate_smib",
+    "calculate_type1_avr_pss",
+    "calculate_loop_closure",
+    "calculate_short_circuit",
+    "open_line_geometry_calculator",
+    "calculate_line_geometry_popup",
+    "_refresh_comtrade_plot",
+    "_refresh_sequence_analysis_window",
+):
+    _wrap_english_refresh(_method_name)
+
+
+def main(language: str = "zh") -> None:
+    app = ApproximationToolGUI(language=language)
     app.mainloop()
 
 

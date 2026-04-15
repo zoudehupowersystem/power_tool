@@ -1,4 +1,4 @@
-"""共享类型、输入校验与数据加载。"""
+"""Shared data types, input validation, and data loading. / 共享类型、输入校验与数据加载。"""
 
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ import numpy as np
 EPS = 1e-10
 
 def load_line_params_reference() -> dict:
-    """读取架空线路典型参数 JSON 数据。"""
+    """Load the JSON reference data for typical overhead-line parameters. / 读取架空线路典型参数 JSON 数据。"""
     data_path = Path(__file__).resolve().with_name("line_params_reference.json")
     if not data_path.exists():
         raise FileNotFoundError(f"未找到典型参数文件：{data_path.name}")
@@ -37,7 +37,7 @@ def load_line_params_reference() -> dict:
     return data
 
 class InputError(ValueError):
-    """用户输入错误。"""
+    """User-input error. / 用户输入错误。"""
 
 def _validate_positive(name: str, value: float) -> None:
     if value <= 0:
@@ -106,36 +106,36 @@ class ImpactMethodSummary:
 
 @dataclass
 class CriticalCutSummary:
-    """临界切除角 / 临界切除时间快速估算结果（§7.6 近似公式）。"""
-    delta0_deg: float       # 初始平衡角（°）
+    """Quick-estimate result for critical clearing angle and time (§7.6 approximation). / 临界切除角 / 临界切除时间快速估算结果（§7.6 近似公式）。"""
+    delta0_deg: float       # Initial equilibrium angle (deg). / 初始平衡角（°）
     delta0_rad: float
-    delta_cr_deg: float     # 临界切除角（°）
+    delta_cr_deg: float     # Critical clearing angle (deg). / 临界切除角（°）
     delta_cr_rad: float
-    t_cr_s: float           # 临界切除时间（s）
-    margin_pct: Optional[float]   # 相对给定切除时间的时间裕度 (t_cr - Δt)/t_cr × 100 %
+    t_cr_s: float           # Critical clearing time (s). / 临界切除时间（s）
+    margin_pct: Optional[float]   # Time margin relative to the specified clearing time, (t_cr - Δt)/t_cr × 100 %. / 相对给定切除时间的时间裕度 (t_cr - Δt)/t_cr × 100 %
     status: str
     notes: str
 
 @dataclass
 class EACResult:
-    """等面积法（单机无穷大）计算结果。"""
-    # 关键角度（均以弧度和度数双重存储）
-    delta0_rad: float;  delta0_deg: float    # 故障前稳定平衡角
-    deltac_rad: float;  deltac_deg: float    # 故障切除角
-    deltau_rad: float;  deltau_deg: float    # 故障后不稳定平衡角
-    # 等面积
-    A_acc: float                              # 加速面积
-    A_dec_avail: float                        # 可用减速面积（δc → δu）
-    A_dec_actual: Optional[float]             # 实际用掉的减速面积（δc → δmax）
-    # 极限切除角 / 极限切除时间
+    """Equal-area-criterion result for a single-machine infinite-bus system. / 等面积法（单机无穷大）计算结果。"""
+    # Key angles stored in both radians and degrees. / 关键角度（均以弧度和度数双重存储）
+    delta0_rad: float;  delta0_deg: float    # Pre-fault stable equilibrium angle. / 故障前稳定平衡角
+    deltac_rad: float;  deltac_deg: float    # Fault-clearing angle. / 故障切除角
+    deltau_rad: float;  deltau_deg: float    # Post-fault unstable equilibrium angle. / 故障后不稳定平衡角
+    # Equal-area terms. / 等面积
+    A_acc: float                              # Acceleration area. / 加速面积
+    A_dec_avail: float                        # Available deceleration area (δc → δu). / 可用减速面积（δc → δu）
+    A_dec_actual: Optional[float]             # Actual deceleration area used (δc → δmax). / 实际用掉的减速面积（δc → δmax）
+    # Limiting clearing angle and limiting clearing time. / 极限切除角 / 极限切除时间
     delta_cr_rad: float; delta_cr_deg: float
-    t_cr_s: float                             # 极限切除时间（数值积分）
-    # 实际最大摆角（仅稳定时有意义）
+    t_cr_s: float                             # Limiting clearing time from numerical integration. / 极限切除时间（数值积分）
+    # Actual maximum swing angle, meaningful only for stable cases. / 实际最大摆角（仅稳定时有意义）
     deltamax_rad: Optional[float]
     deltamax_deg: Optional[float]
-    # 稳定性判断
+    # Stability judgement. / 稳定性判断
     stable: bool
-    margin_pct: float                         # (A_dec_avail - A_acc)/A_acc × 100 %
+    margin_pct: float                         # Margin = (A_dec_avail - A_acc)/A_acc × 100 %. / 裕度 = (A_dec_avail - A_acc)/A_acc × 100 %
     notes: str
 
 @dataclass
@@ -183,13 +183,13 @@ class ParamWarning:
     low: float
     high: float
     hint: str
-    severity: str  # "WARNING" / "ERROR"
+    severity: str  # Severity label, "WARNING" / "ERROR". / 严重级别，"WARNING" / "ERROR"。
 
 @dataclass
 class LineParamResult:
     R_total_ohm: float
     X_total_ohm: float
-    B_half_S: float         # B/2 (S)
+    B_half_S: float         # Half shunt susceptance B/2 (S). / 半线路对地电纳 B/2（S）
     Zc_ohm: float
     R_pu: float
     X_pu: float
@@ -208,18 +208,18 @@ class TwoWindingResult:
     Xk_pu: float
     G0_pu: float
     B0_pu: float
-    Uk_pct_check: float     # recomputed from Rk/Xk for cross-check
+    Uk_pct_check: float     # Recomputed from Rk/Xk for cross-check. / 由 Rk/Xk 反算用于交叉校验
     Zbase_ohm: float
     warnings: list[ParamWarning]
 
 @dataclass
 class ThreeWindingResult:
-    # per-unit values on Sbase/Ubase
+    # Per-unit values on the Sbase/Ubase base. / Sbase/Ubase 基准下的标幺值
     RH_pu: float; XH_pu: float
     RM_pu: float; XM_pu: float
     RL_pu: float; XL_pu: float
     G0_pu: float; B0_pu: float
-    # ohm values on HV side
+    # Ohmic values referred to the HV side. / 折算到高压侧的有名值
     RH_ohm: float; XH_ohm: float
     RM_ohm: float; XM_ohm: float
     RL_ohm: float; XL_ohm: float

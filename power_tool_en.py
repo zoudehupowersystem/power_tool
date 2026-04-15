@@ -1,9 +1,9 @@
-
 # -*- coding: utf-8 -*-
-"""Project entry point and compatibility export layer. / 项目入口与兼容导出层。
+"""English GUI entry point and compatibility export layer. / 英文版 GUI 入口与兼容导出层。
 
-- Direct execution / 直接运行：`python power_tool.py`
-- Library usage / 作为库使用：prefer importing from the dedicated `power_tool_*.py` modules / 建议从各 `power_tool_*.py` 模块导入"""
+- Direct execution / 直接运行：`python power_tool_en.py`
+- Library usage / 作为库使用：prefer importing from the dedicated `power_tool_*.py` modules / 建议从各 `power_tool_*.py` 模块导入
+"""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from power_tool_ai import *  # noqa: F401,F403
 def main() -> None:
     from power_tool_gui import main as gui_main
 
-    gui_main()
+    gui_main(language="en")
 
 
 if __name__ == "__main__":

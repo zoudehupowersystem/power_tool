@@ -1,4 +1,4 @@
-"""短路电流计算内核。"""
+"""Short-circuit current calculation kernel. / 短路电流计算内核。"""
 
 
 from __future__ import annotations

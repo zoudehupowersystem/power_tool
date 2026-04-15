@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-from power_tool_gui import ApproximationToolGUI, _detect_key_conclusion_lines, _notebook_style_spec
+from power_tool_gui import ApproximationToolGUI, _detect_key_conclusion_lines, _manual_filename, _notebook_style_spec
 
 
 def test_key_conclusion_line_detection() -> None:
@@ -79,11 +79,14 @@ class _FakeText:
 
 
 class _FakeVar:
-    def __init__(self) -> None:
-        self.value = ""
+    def __init__(self, value: str = "") -> None:
+        self.value = value
 
     def set(self, value: str) -> None:
         self.value = value
+
+    def get(self) -> str:
+        return self.value
 
 
 class _SummaryDummy:
@@ -108,11 +111,15 @@ class _SummaryDummy:
             "lp_ubase": "110", "lp_sbase": "100", "lp_len": "30", "lp_r1": "0.05", "lp_x1": "0.40", "lp_c1": "0.012",
             "tx2_sbase": "100", "tx2_sn": "63", "tx2_un": "110", "tx2_uk": "10.5", "tx2_pk": "180", "tx2_i0": "0.8", "tx2_p0": "45", "tx2_ubase": "110",
             "tx3_sbase": "100", "tx3_ubase": "220", "tx3_sn_h": "180", "tx3_un_h": "220", "tx3_sn_m": "180", "tx3_sn_l": "90", "tx3_uk_hm": "12", "tx3_uk_hl": "18", "tx3_uk_ml": "7",
+            "sag_span": "400", "sag_h_left": "35", "sag_h_right": "38", "sag_mass": "1.35", "sag_href": "25", "sag_ambient": "25",
             "sc_u": "110", "sc_len": "30", "sc_r1": "0.05", "sc_x1": "0.40", "sc_r0": "0.15", "sc_x0": "1.20", "sc_rn": "0", "sc_rf": "0.0",
             "sc_delta_right": "0.0", "sc_fault_pos": "50",
         }
         for name, value in entries.items():
             setattr(self, name, _FakeEntry(value))
+        self.sag_driver_var = _FakeVar("temperature")
+        self.sag_temp_scale_var = _FakeVar("60")
+        self.sag_current_scale_var = _FakeVar("500")
 
     def _current_tab_name(self) -> str:
         return self.current_tab
@@ -144,6 +151,7 @@ def test_tab_numeric_summary_covers_every_main_tab_and_param_subtab() -> None:
     dummy.current_tab = "参数校核与标幺值"
     for subtab, expected in {
         "架空线路": "参数页子标签: 架空线路",
+        "导线弧垂": "档距 l / m: 400",
         "两绕组变压器": "额定容量 SN / MVA: 63",
         "三绕组变压器": "Uk_HL / %: 18",
     }.items():
@@ -170,11 +178,61 @@ def test_on_ai_context_changed_clears_question_and_answer_immediately() -> None:
 
 def test_manual_doc_path_matches_current_tab_and_subtab() -> None:
     dummy = type("Dummy", (), {})()
+    dummy.language = "zh"
     dummy._current_tab_name = lambda: "电压无功分析"
     dummy._vr_notebook = _FakeNotebook("AVC策略模拟")
     dummy.param_notebook = _FakeNotebook("架空线路")
+    dummy._manual_doc_dir = lambda: ApproximationToolGUI._manual_doc_dir(dummy)
+    dummy._current_manual_basename = lambda: ApproximationToolGUI._current_manual_basename(dummy)
     path = ApproximationToolGUI._manual_doc_path(dummy)
-    assert path.name == "电压无功分析_AVC策略模拟.md"
+    assert path.name == "PowerTool_Voltage_Reactive_AVC_Strategy_Simulation_zh.md"
+
+    dummy.language = "en"
+    path_en = ApproximationToolGUI._manual_doc_path(dummy)
+    assert path_en.name == "PowerTool_Voltage_Reactive_AVC_Strategy_Simulation.md"
+
+
+def test_manual_doc_path_matches_new_conductor_sag_subtab() -> None:
+    dummy = type("Dummy", (), {})()
+    dummy.language = "en"
+    dummy._current_tab_name = lambda: "Parameter Validation & Per-Unit"
+    dummy.param_notebook = _FakeNotebook("Conductor Sag")
+    dummy._vr_notebook = _FakeNotebook("Static Voltage Stability")
+    dummy._manual_doc_dir = lambda: ApproximationToolGUI._manual_doc_dir(dummy)
+    dummy._current_manual_basename = lambda: ApproximationToolGUI._current_manual_basename(dummy)
+    path = ApproximationToolGUI._manual_doc_path(dummy)
+    assert path.name == "PowerTool_Parameter_Validation_Conductor_Sag.md"
+
+
+def test_manual_catalog_contains_conductor_sag_manual_in_both_languages() -> None:
+    dummy = type("Dummy", (), {})()
+    dummy._manual_doc_dir = lambda: ApproximationToolGUI._manual_doc_dir(dummy)
+
+    dummy.language = "en"
+    catalog_en = ApproximationToolGUI._manual_catalog(dummy)
+    names_en = {path.name for _title, path in catalog_en}
+    assert "PowerTool_Parameter_Validation_Conductor_Sag.md" in names_en
+
+    dummy.language = "zh"
+    catalog_zh = ApproximationToolGUI._manual_catalog(dummy)
+    names_zh = {path.name for _title, path in catalog_zh}
+    assert "PowerTool_Parameter_Validation_Conductor_Sag_zh.md" in names_zh
+
+
+def test_manual_catalog_uses_app_named_bilingual_files() -> None:
+    dummy = type("Dummy", (), {})()
+    dummy.language = "en"
+    dummy._manual_doc_dir = lambda: ApproximationToolGUI._manual_doc_dir(dummy)
+    catalog = ApproximationToolGUI._manual_catalog(dummy)
+    assert any(title == "PowerTool Manual Overview" for title, _ in catalog)
+    assert all(path.name.startswith("PowerTool_") for _title, path in catalog)
+    assert all(path.exists() for _title, path in catalog)
+
+    dummy.language = "zh"
+    catalog_zh = ApproximationToolGUI._manual_catalog(dummy)
+    assert all(path.name.endswith("_zh.md") for _title, path in catalog_zh)
+    assert _manual_filename("PowerTool_Overview", "en") == "PowerTool_Overview.md"
+    assert _manual_filename("PowerTool_Overview", "zh") == "PowerTool_Overview_zh.md"
 
 
 def test_estimate_nonperiodic_components_returns_decay_parameters() -> None:

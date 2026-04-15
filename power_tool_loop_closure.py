@@ -1,4 +1,4 @@
-"""配电网合环近似分析：多连接点稳态环流与简化冲击暂态。"""
+"""Approximate loop-closure analysis for distribution networks: steady loop current plus simplified impulsive transient. / 配电网合环近似分析：多连接点稳态环流与简化冲击暂态。"""
 
 from __future__ import annotations
 
@@ -128,18 +128,16 @@ def loop_closure_analysis(
     t_end_s: float = 0.30,
     n_samples: int = 2400,
 ) -> LoopClosureResult:
-    """
-    配电网合环近似分析。
-
-    参数说明
-    --------
+    """Approximate loop-closure analysis for a distribution network. / 配电网合环近似分析。
+    
+    Parameter notes / 参数说明
+    ----------------------------
     node_injections_A:
-        连接点净电流，单位 A。
-        正值表示负荷电流，负值表示分布式电源向线路回送电流。
-        closure_node_index 对应行必须为空点，即净电流为 0。
+        Net current at each connection node, in amperes. / 连接点净电流，单位 A。
+        Positive values denote load current, and negative values denote DG backfeed current. / 正值表示负荷电流，负值表示分布式电源向线路回送电流。
+        The row indexed by `closure_node_index` must be an empty point, i.e. zero net current. / `closure_node_index` 对应行必须为空点，即净电流为 0。
     pf_mode:
-        "lagging" / "leading"。
-    """
+        "lagging" or "leading". / “滞后”或“超前”。"""
     _validate_positive("U1", u1_kv_ll)
     _validate_positive("U2", u2_kv_ll)
     _validate_positive("合环回路电阻 RΣ", r_loop_ohm)

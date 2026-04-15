@@ -1,4 +1,4 @@
-"""近似解析模型：频率、机电振荡、静稳、自然功率。"""
+"""Approximate analytical models for frequency, electromechanical oscillation, static voltage stability, and natural power. / 近似解析模型：频率、机电振荡、静稳、自然功率。"""
 
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from power_tool_common import (
 
 
 def classify_damping(Ts: float, TG: float, kD: float, kG: float) -> tuple[str, float]:
-    """返回阻尼类型和判别式 Δ = a1^2 - 4a0。"""
+    """Return the damping regime and discriminant Δ = a1^2 - 4a0. / 返回阻尼类型和判别式 Δ = a1^2 - 4a0。"""
     ks = kD + kG
     _validate_positive("T_s", Ts)
     _validate_positive("T_G", TG)
@@ -50,10 +50,8 @@ def frequency_response_value(t: np.ndarray | float,
                              TG: float,
                              kD: float,
                              kG: float) -> np.ndarray | float:
-    """
-    含一次调频二阶模型的解析解。
-    输入/输出均为标幺频差 Δf。
-    """
+    """Analytical solution of the second-order frequency-response model with primary frequency control. / 含一次调频二阶模型的解析解。
+    Input and output are per-unit frequency deviations Δf. / 输入/输出均为标幺频差 Δf。"""
     _validate_positive("T_s", Ts)
     _validate_positive("T_G", TG)
     _validate_nonnegative("k_D", kD)
@@ -83,8 +81,8 @@ def frequency_response_value(t: np.ndarray | float,
         root = math.sqrt(disc)
         r1 = (-a1 + root) / 2.0
         r2 = (-a1 - root) / 2.0
-        # c1 + c2 = -y_ss
-        # c1*r1 + c2*r2 = dy0
+        # c1 + c2 = -y_ss / 两个指数项系数之和等于 -y_ss
+        # c1*r1 + c2*r2 = dy0 / 导数初值约束为 dy0
         c1 = (dy0 + y_ss * r2) / (r1 - r2)
         c2 = -y_ss - c1
         y = y_ss + c1 * np.exp(r1 * t_arr) + c2 * np.exp(r2 * t_arr)
@@ -102,11 +100,8 @@ def first_order_frequency_response_value(t: np.ndarray | float,
                                          delta_p_ol0: float,
                                          Ts: float,
                                          kD: float) -> np.ndarray | float:
-    """
-    无一次调频的一阶模型：
-        T_s dΔf/dt + k_D Δf = -ΔP_OL0
-    若 k_D = 0，则退化为匀速下滑：Δf = -(ΔP_OL0/T_s) t。
-    """
+    """First-order model without primary frequency control. / 无一次调频的一阶模型。
+    T_s dΔf/dt + k_D Δf = -ΔP_OL0. If k_D = 0, the response degenerates to a linear frequency ramp. / T_s dΔf/dt + k_D Δf = -ΔP_OL0。若 k_D = 0，则退化为匀速下滑。"""
     _validate_positive("T_s", Ts)
     _validate_nonnegative("k_D", kD)
     _validate_positive("ΔP_OL0", delta_p_ol0)
@@ -127,7 +122,7 @@ def frequency_response_summary(delta_p_ol0: float,
                                kD: float,
                                kG: float,
                                f0_hz: float) -> FrequencyResponseSummary:
-    """返回事故频率动态的关键工程量。"""
+    """Return key engineering quantities of disturbance frequency dynamics. / 返回事故频率动态的关键工程量。"""
     _validate_positive("f0", f0_hz)
     regime, disc = classify_damping(Ts, TG, kD, kG)
 
@@ -140,7 +135,7 @@ def frequency_response_summary(delta_p_ol0: float,
 
     if regime == "欠阻尼":
         omega_d = math.sqrt(-disc) / 2.0
-        # 采用 atan2 以避免象限误判
+        # Use atan2 to avoid quadrant ambiguity. / 采用 atan2 以避免象限误判
         nadir_time = math.atan2(2.0 * Ts * TG * omega_d, kD * TG - Ts) / omega_d
         nadir_pu = float(frequency_response_value(nadir_time, delta_p_ol0, Ts, TG, kD, kG))
         notes = (
@@ -183,7 +178,7 @@ def electromechanical_frequency(Eq_prime: float,
                                 P0: float,
                                 Tj: float,
                                 f0_hz: float) -> ElectromechSummary:
-    """机电振荡频率快估。"""
+    """Quick estimate of electromechanical oscillation frequency. / 机电振荡频率快估。"""
     _validate_positive("E'_q", Eq_prime)
     _validate_positive("U", U)
     _validate_positive("X_Σ", X_sigma)
@@ -219,7 +214,7 @@ def static_voltage_stability(Ug: float,
                              X_sigma: float,
                              cos_phi: float,
                              s_base_mva: Optional[float]) -> VoltageStabilitySummary:
-    """二节点、忽略电阻、滞后负荷功率因数下的静态电压稳定极限。"""
+    """Static-voltage-stability limit for a two-bus system with neglected resistance and lagging load power factor. / 二节点、忽略电阻、滞后负荷功率因数下的静态电压稳定极限。"""
     _validate_positive("U_g", Ug)
     _validate_positive("X_Σ", X_sigma)
     if not (0.0 < cos_phi <= 1.0):
@@ -255,13 +250,11 @@ def natural_power_and_reactive(U_kV_ll: float,
                                P_MW: float,
                                QN_Mvar_per_km: float,
                                length_km: float) -> NaturalPowerSummary:
-    """
-    长线路自然功率与无功行为快估。
-    约定：
-    - U_kV_ll 采用三相线电压 kV（RMS）
-    - Zc 单位为 Ω
-    - 若直接给 Zc，则优先使用；否则由 sqrt(L/C) 计算
-    """
+    """Quick estimate of natural power and reactive-power behavior for long lines. / 长线路自然功率与无功行为快估。
+    Assumptions / 约定：
+    - U_kV_ll uses three-phase line-to-line RMS voltage in kV. / U_kV_ll 采用三相线电压 kV（RMS）。
+    - Zc is in ohms. / Zc 单位为 Ω。
+    - If Zc is supplied directly, it takes precedence; otherwise it is computed from sqrt(L/C). / 若直接给 Zc，则优先使用；否则由 sqrt(L/C) 计算。"""
     _validate_positive("U", U_kV_ll)
     _validate_nonnegative("P", P_MW)
     _validate_nonnegative("Q_N", QN_Mvar_per_km)

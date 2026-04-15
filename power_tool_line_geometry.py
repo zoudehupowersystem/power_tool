@@ -1,4 +1,4 @@
-"""由几何数据计算架空线路正序/零序参数。"""
+"""Compute positive- and zero-sequence overhead-line parameters from geometric data. / 由几何数据计算架空线路正序/零序参数。"""
 
 from __future__ import annotations
 
@@ -66,18 +66,17 @@ def bundle_equivalent_parameters(
     bundle_count: int = 1,
     bundle_spacing_m: float = 0.0,
 ) -> tuple[float, float, float]:
-    """由单分裂导线参数得到等效相导线参数。
-
-    返回值依次为：
-    - 等效相导线电阻（Ω/km）
-    - 等效相导线 GMR（m）
-    - 等效相导线电容半径（m）
-
-    约定：
-    - `bundle_count=1` 表示单导线；
-    - `bundle_count=2/3/4` 分别按双分裂、等边三分裂、正方形四分裂近似；
-    - `resistance_sub_ohm_per_km`、`gmr_sub_m`、`radius_sub_m` 均为单根子导线数据。
-    """
+    """Derive equivalent phase-conductor parameters from sub-conductor data. / 由单分裂导线参数得到等效相导线参数。
+    
+    Return values / 返回值依次为：
+    - Equivalent phase-conductor resistance (Ω/km). / 等效相导线电阻（Ω/km）
+    - Equivalent phase-conductor GMR (m). / 等效相导线 GMR（m）
+    - Equivalent phase-conductor electrostatic radius (m). / 等效相导线电容半径（m）
+    
+    Conventions / 约定：
+    - `bundle_count=1` means a single conductor. / `bundle_count=1` 表示单导线。
+    - `bundle_count=2/3/4` are approximated as duplex, equilateral-triplex, and square-quad bundles. / `bundle_count=2/3/4` 分别按双分裂、等边三分裂、正方形四分裂近似。
+    - `resistance_sub_ohm_per_km`, `gmr_sub_m`, and `radius_sub_m` are all single sub-conductor data. / `resistance_sub_ohm_per_km`、`gmr_sub_m`、`radius_sub_m` 均为单根子导线数据。"""
     _validate_positive("单分裂导线电阻", resistance_sub_ohm_per_km)
     _validate_positive("单分裂导线 GMR", gmr_sub_m)
     _validate_positive("单分裂导线半径", radius_sub_m)
@@ -97,7 +96,7 @@ def bundle_equivalent_parameters(
     elif bundle_count == 3:
         gmr_eq = (gmr_sub_m * bundle_spacing_m * bundle_spacing_m) ** (1.0 / 3.0)
         radius_eq = (radius_sub_m * bundle_spacing_m * bundle_spacing_m) ** (1.0 / 3.0)
-    else:  # bundle_count == 4，按正方形排列近似
+    else:  # bundle_count == 4, approximated as a square arrangement. / bundle_count == 4，按正方形排列近似
         factor = 2.0 ** 0.125
         gmr_eq = factor * (gmr_sub_m * bundle_spacing_m ** 3) ** 0.25
         radius_eq = factor * (radius_sub_m * bundle_spacing_m ** 3) ** 0.25
@@ -134,7 +133,7 @@ def _primitive_series_matrix(
 ) -> np.ndarray:
     omega = 2.0 * math.pi * frequency_hz
     p = _complex_depth(soil_resistivity_ohm_m, omega)
-    coef = 1j * omega * _MU0 * 1000.0 / (2.0 * math.pi)  # Ω/km
+    coef = 1j * omega * _MU0 * 1000.0 / (2.0 * math.pi)  # Ω/km / 单位为 Ω/km
     n = len(conductors)
     mat = np.zeros((n, n), dtype=complex)
 
@@ -211,18 +210,17 @@ def calculate_overhead_line_sequence(
     ground_wire_gmr_m: float = 0.0,
     ground_wire_radius_m: float = 0.0,
 ) -> LineGeometryResult:
-    """按导线几何数据计算架空线路序参数。
-
-    参数说明
-    --------
-    `phase_positions` 为三相导线的 `(x, h)` 坐标（m），其中 `h` 为离地高度。
-
-    计算模型：
-    - 串联参数采用复深度（complex-depth）近似计及大地回路与土壤电阻率；
-    - 对地电容/电纳采用镜像法电位系数矩阵；
-    - 若启用地线，则按连续接地导体处理，并通过 Kron 消去得到三相等值矩阵；
-    - 最终按三段完全换位平均，输出正序和零序参数。
-    """
+    """Calculate overhead-line sequence parameters from conductor geometry. / 按导线几何数据计算架空线路序参数。
+    
+    Parameter notes / 参数说明
+    ----------------------------
+    `phase_positions` contains the `(x, h)` coordinates of the three phase conductors in metres, where `h` is the height above ground. / `phase_positions` 为三相导线的 `(x, h)` 坐标（m），其中 `h` 为离地高度。
+    
+    Model / 计算模型：
+    - Series parameters use the complex-depth approximation to include earth-return effect and soil resistivity. / 串联参数采用复深度近似计及大地回路与土壤电阻率。
+    - Shunt capacitance/admittance uses the method-of-images potential-coefficient matrix. / 对地电容/电纳采用镜像法电位系数矩阵。
+    - If a ground wire is enabled, it is treated as a continuously grounded conductor and eliminated through Kron reduction. / 若启用地线，则按连续接地导体处理，并通过 Kron 消去得到三相等值矩阵。
+    - Final positive- and zero-sequence values are averaged over a fully transposed three-section line. / 最终按三段完全换位平均，输出正序和零序参数。"""
     _validate_positive("频率", frequency_hz)
     _validate_positive("土壤电阻率", soil_resistivity_ohm_m)
     _validate_phase_positions(phase_positions)

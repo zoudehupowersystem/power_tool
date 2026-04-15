@@ -336,7 +336,7 @@ def _read_mat_level5(path: Path) -> dict[str, np.ndarray]:
             continue
 
         cur = 0
-        # array flags
+        # Array flags. / 数组标志。
         sdt, sn = struct.unpack_from(f'{endian}II', payload, cur)
         cur += 8
         flags = payload[cur:cur + sn]
@@ -345,7 +345,7 @@ def _read_mat_level5(path: Path) -> dict[str, np.ndarray]:
             continue
         mx_class = struct.unpack_from(f'{endian}I', flags, 0)[0] & 0xFF
 
-        # dimensions
+        # Dimensions. / 维度信息。
         sdt, sn = struct.unpack_from(f'{endian}II', payload, cur)
         cur += 8
         dims_raw = payload[cur:cur + sn]
@@ -358,7 +358,7 @@ def _read_mat_level5(path: Path) -> dict[str, np.ndarray]:
         if mrows <= 0 or ncols <= 0:
             continue
 
-        # name
+        # Channel name. / 通道名称。
         sdt, sn = struct.unpack_from(f'{endian}II', payload, cur)
         cur += 8
         name_raw = payload[cur:cur + sn]
@@ -367,7 +367,7 @@ def _read_mat_level5(path: Path) -> dict[str, np.ndarray]:
             continue
         name = name_raw.decode('utf-8', errors='ignore').strip('\x00').strip() or f'var{len(out)+1}'
 
-        # real data
+        # Real data samples. / 实际数据样本。
         sdt, sn = struct.unpack_from(f'{endian}II', payload, cur)
         cur += 8
         real_raw = payload[cur:cur + sn]

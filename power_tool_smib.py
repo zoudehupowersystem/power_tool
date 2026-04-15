@@ -1,4 +1,4 @@
-"""单机无穷大系统（SMIB）小扰动分析内核。"""
+"""Small-signal analysis kernel for the single-machine infinite-bus (SMIB) system. / 单机无穷大系统（SMIB）小扰动分析内核。"""
 
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ _SMIB_STATE_LABELS = {
 }
 
 def kundur_smib_defaults() -> dict[str, float | str]:
-    """Kundur《Power System Stability and Control》Example 13.2 / OpenIPSL KundurSMIB 默认值。"""
+    """Default data set from Kundur, Power System Stability and Control, Example 13.2, and the OpenIPSL KundurSMIB case. / Kundur《Power System Stability and Control》Example 13.2 / OpenIPSL KundurSMIB 默认值。"""
     return {
         "config": "六阶机组 + AVR + PSS",
         "P0": 0.90,
@@ -114,13 +114,11 @@ def _smib_clip(value: float, low: float, high: float) -> float:
     return min(max(value, low), high)
 
 def _smib_build_operating_point(params: dict[str, float]) -> dict[str, float]:
-    """
-    根据端口功率/端电压/网络电抗构造与无穷大母线参考角一致的平衡点。
-
-    约定：
-    - 所有量均在同一标幺基准下（Kundur 示例中机器基准 = 系统基准）。
-    - 将无穷大母线相角平移为 0°，从而得到自洽的 SMIB 平衡点。
-    """
+    """Construct a steady operating point that is consistent with the infinite-bus reference angle from terminal power, terminal voltage, and network reactance. / 根据端口功率、端电压与网络电抗构造与无穷大母线参考角一致的平衡点。
+    
+    Conventions / 约定：
+    - All quantities share the same per-unit base; in the Kundur example, the machine base equals the system base. / 所有量均在同一标幺基准下（Kundur 示例中机器基准 = 系统基准）。
+    - The infinite-bus angle is shifted to 0° so that the resulting SMIB equilibrium point is self-consistent. / 将无穷大母线相角平移为 0°，从而得到自洽的 SMIB 平衡点。"""
     P0 = params["P0"]
     Q0 = params["Q0"]
     Vt_mag = params["Vt"]
@@ -214,9 +212,7 @@ def _smib_build_operating_point(params: dict[str, float]) -> dict[str, float]:
 def _smib_network_algebraic(delta: float, e2q: float, e2d: float,
                             params: dict[str, float],
                             op: dict[str, float]) -> tuple[float, float, float, float, float, float, float, float]:
-    """
-    消去网络代数方程，返回 id、iq、vd、vq、v、pe、P、Q。
-    """
+    """Eliminate the network algebraic equations and return id, iq, vd, vq, v, pe, P, and Q. / 消去网络代数方程，返回 id、iq、vd、vq、v、pe、P、Q。"""
     ra = params["ra"]
     x2d = params["x2d"]
     x2q = params["x2q"]
