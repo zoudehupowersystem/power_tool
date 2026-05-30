@@ -4574,6 +4574,8 @@ class ApproximationToolGUI(tk.Tk):
         self._comtrade_visible_count = 6
         self._comtrade_channel_scroll = 0
         self._comtrade_cursor_positions: dict[str, float | None] = {"T1": None}
+        self._comtrade_cursor_dragging = False
+        self._comtrade_cursor_refresh_after_id = None
         self._comtrade_is_syncing_view = False
         self._comtrade_xlimit_callback_registered = False
 
@@ -4654,7 +4656,7 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_time_label = ttk.Label(right, text="未加载文件")
         self.comtrade_time_label.grid(row=1, column=0, sticky="w", pady=(0, 2))
         self.comtrade_cursor_label = tk.Text(right, height=1, wrap=tk.WORD)
-        self.comtrade_cursor_label.insert("1.0", "光标：左键点击曲线区放置游标。")
+        self.comtrade_cursor_label.insert("1.0", "光标：左键点击曲线区放置游标，按住左键可连续拖拽。")
         self.comtrade_cursor_label.configure(state="disabled")
 
         self.comtrade_fig = Figure(figsize=(9.0, 6.2), dpi=100, facecolor="#101010")
@@ -4688,6 +4690,8 @@ class ApproximationToolGUI(tk.Tk):
         self._set_text(self.comtrade_info, "未加载录波文件。")
         self.comtrade_ax.callbacks.connect("xlim_changed", self._on_comtrade_axis_xlim_changed)
         self.comtrade_canvas.mpl_connect("button_press_event", self._on_comtrade_mouse_click)
+        self.comtrade_canvas.mpl_connect("motion_notify_event", self._on_comtrade_mouse_drag)
+        self.comtrade_canvas.mpl_connect("button_release_event", self._on_comtrade_mouse_release)
         self._comtrade_xlimit_callback_registered = True
         self.comtrade_canvas.draw()
 
@@ -4846,6 +4850,7 @@ class ApproximationToolGUI(tk.Tk):
         self._comtrade_vertical_zoom = 1.0
         self._comtrade_channel_scroll = 0
         self._comtrade_cursor_positions = {"T1": None}
+        self._comtrade_cursor_dragging = False
         default_window = self._default_comtrade_window(record.duration_s)
         self._set_comtrade_time_entries(float(record.time_s[0]), float(record.time_s[0]) + default_window)
         self._comtrade_is_syncing_view = True
@@ -4918,30 +4923,33 @@ class ApproximationToolGUI(tk.Tk):
             idx -= 1
         return idx
 
+    def _clip_comtrade_cursor_x(self, x_value: float) -> float:
+        record = self._comtrade_record
+        if record is None or record.time_s.size == 0:
+            return float(x_value)
+        return float(np.clip(float(x_value), float(record.time_s[0]), float(record.time_s[-1])))
+
     def _current_comtrade_cursor_index(self, key: str) -> int | None:
         record = self._comtrade_record
-        frac = self._comtrade_cursor_positions.get(key)
-        if record is None or frac is None:
+        cursor_x = self._comtrade_cursor_positions.get(key)
+        if record is None or cursor_x is None:
             return None
-        start_s, end_s = self._current_comtrade_window()
-        x = start_s + frac * max(end_s - start_s, 0.0)
-        return self._nearest_comtrade_index(x)
+        return self._nearest_comtrade_index(cursor_x)
 
     def _current_comtrade_cursor_x(self, key: str) -> float | None:
-        frac = self._comtrade_cursor_positions.get(key)
-        if frac is None:
+        cursor_x = self._comtrade_cursor_positions.get(key)
+        if cursor_x is None:
             return None
-        start_s, end_s = self._current_comtrade_window()
-        return start_s + frac * max(end_s - start_s, 0.0)
+        return self._clip_comtrade_cursor_x(cursor_x)
 
     def _update_comtrade_cursor_label(self) -> None:
         record = self._comtrade_record
         if record is None:
-            text = "光标：左键点击曲线区放置游标。"
+            text = "光标：左键点击曲线区放置游标，按住左键可连续拖拽。"
         else:
             idx = self._current_comtrade_cursor_index("T1")
             if idx is None:
-                text = "光标：左键点击曲线区放置游标。"
+                text = "光标：左键点击曲线区放置游标，按住左键可连续拖拽。"
             else:
                 text = f"游标：t={float(record.time_s[idx]):.6f}s，点号={idx + 1}。数值见曲线区游标右侧方框。"
         self.comtrade_cursor_label.configure(state="normal")
@@ -4949,16 +4957,57 @@ class ApproximationToolGUI(tk.Tk):
         self.comtrade_cursor_label.insert("1.0", text)
         self.comtrade_cursor_label.configure(state="disabled")
 
-    def _on_comtrade_mouse_click(self, event) -> None:
-        if event.inaxes is not self.comtrade_ax or event.xdata is None or event.button != 1:
-            return
-        x0, x1 = self.comtrade_ax.get_xlim()
-        span = max(x1 - x0, 1e-12)
-        frac = min(1.0, max(0.0, (float(event.xdata) - x0) / span))
-        self._comtrade_cursor_positions["T1"] = frac
+    def _set_comtrade_cursor_from_x(self, x_value: float) -> None:
+        self._comtrade_cursor_positions["T1"] = self._clip_comtrade_cursor_x(x_value)
         self._update_comtrade_cursor_label()
+
+    def _comtrade_event_xdata(self, event) -> float | None:
+        if event.xdata is not None:
+            return float(event.xdata)
+        if event.x is None or event.y is None:
+            return None
+        try:
+            x_value, _y_value = self.comtrade_ax.transData.inverted().transform((event.x, event.y))
+        except Exception:
+            return None
+        return float(x_value)
+
+    def _schedule_comtrade_cursor_refresh(self) -> None:
+        if self._comtrade_cursor_refresh_after_id is not None:
+            return
+        self._comtrade_cursor_refresh_after_id = self.after_idle(self._flush_comtrade_cursor_refresh)
+
+    def _flush_comtrade_cursor_refresh(self) -> None:
+        self._comtrade_cursor_refresh_after_id = None
+        self._refresh_comtrade_plot(update_sequence=not self._comtrade_cursor_dragging)
+
+    def _on_comtrade_mouse_click(self, event) -> None:
+        if event.inaxes is not self.comtrade_ax or event.button != 1:
+            return
+        x_value = self._comtrade_event_xdata(event)
+        if x_value is None:
+            return
+        self._comtrade_cursor_dragging = True
+        self._set_comtrade_cursor_from_x(x_value)
         self._refresh_comtrade_plot()
-        self._refresh_sequence_analysis_window()
+
+    def _on_comtrade_mouse_drag(self, event) -> None:
+        if not self._comtrade_cursor_dragging:
+            return
+        x_value = self._comtrade_event_xdata(event)
+        if x_value is None:
+            return
+        self._set_comtrade_cursor_from_x(x_value)
+        self._schedule_comtrade_cursor_refresh()
+
+    def _on_comtrade_mouse_release(self, event) -> None:
+        if event.button != 1 or not self._comtrade_cursor_dragging:
+            return
+        self._comtrade_cursor_dragging = False
+        x_value = self._comtrade_event_xdata(event)
+        if x_value is not None:
+            self._set_comtrade_cursor_from_x(x_value)
+        self._schedule_comtrade_cursor_refresh()
 
     def _zoom_comtrade_vertical(self, factor: float) -> None:
         self._comtrade_vertical_zoom = min(6.0, max(0.25, self._comtrade_vertical_zoom * factor))
@@ -5037,7 +5086,7 @@ class ApproximationToolGUI(tk.Tk):
     def _add_comtrade_cursor_value_box(
         self,
         ax,
-        frac: float,
+        cursor_axis_frac: float,
         draw_x: float,
         cursor_idx: int,
         visible_selection: list[int],
@@ -5065,7 +5114,7 @@ class ApproximationToolGUI(tk.Tk):
             )
             rows.append(HPacker(children=[swatch, value_text], align="center", pad=0, sep=4))
         box = VPacker(children=rows, align="left", pad=0, sep=2)
-        x_frac = min(0.78, max(0.03, frac + 0.015))
+        x_frac = min(0.78, max(0.03, cursor_axis_frac + 0.015))
         y_frac = 0.86
         value_box = AnnotationBbox(
             box,
@@ -5095,15 +5144,18 @@ class ApproximationToolGUI(tk.Tk):
             bbox=dict(facecolor="#101010", edgecolor="#00ffff", boxstyle="round,pad=0.2"),
         )
 
-    def _refresh_comtrade_plot(self, from_scroll: bool = False) -> None:
+    def _refresh_comtrade_plot(self, from_scroll: bool = False, update_sequence: bool = True) -> None:
         record = self._comtrade_record
         ax = self.comtrade_ax
+        previous_sync_state = self._comtrade_is_syncing_view
+        self._comtrade_is_syncing_view = True
         ax.clear()
         self._style_comtrade_axis(ax)
         if record is None or record.analog_values.size == 0:
             ax.set_title("请先加载 COMTRADE 录波")
             ax.set_xlabel("t / s")
             self.comtrade_canvas.draw()
+            self._comtrade_is_syncing_view = previous_sync_state
             return
         selection = list(self.comtrade_channel_list.curselection())
         if not selection:
@@ -5126,13 +5178,13 @@ class ApproximationToolGUI(tk.Tk):
             ax.axhline(offset - 0.98, color="#0c8f0c", linewidth=0.6, alpha=0.8)
             ax.text(0.01, offset + 1.05, record.analog_channels[ch_idx].name, transform=ax.get_yaxis_transform(), color=color, fontsize=9, ha="left", va="bottom")
 
-        cursor_frac = self._comtrade_cursor_positions.get("T1")
-        if cursor_frac is not None:
-            draw_x = start_s + cursor_frac * max(end_s - start_s, 0.0)
+        cursor_x = self._current_comtrade_cursor_x("T1")
+        if cursor_x is not None and start_s <= cursor_x <= end_s:
+            cursor_axis_frac = (cursor_x - start_s) / max(end_s - start_s, 1e-12)
             cursor_idx = self._current_comtrade_cursor_index("T1")
-            ax.axvline(draw_x, color="#00ffff", linewidth=1.1, linestyle="--")
+            ax.axvline(cursor_x, color="#00ffff", linewidth=1.1, linestyle="--")
             if cursor_idx is not None:
-                self._add_comtrade_cursor_value_box(ax, cursor_frac, draw_x, cursor_idx, visible_selection, colors)
+                self._add_comtrade_cursor_value_box(ax, cursor_axis_frac, cursor_x, cursor_idx, visible_selection, colors)
 
         lower = -1.2
         upper = base_offset + 1.35
@@ -5145,11 +5197,11 @@ class ApproximationToolGUI(tk.Tk):
         self._set_comtrade_time_entries(start_s, end_s)
         self.comtrade_time_label.configure(text=f"当前时间窗：{start_s:.6f} s ~ {end_s:.6f} s，共 {len(record.time_s)} 点，{shown_text}")
         self._update_comtrade_cursor_label()
-        self._comtrade_is_syncing_view = True
         self.comtrade_fig.subplots_adjust(left=0.06, right=0.98, top=0.93, bottom=0.10)
         self.comtrade_canvas.draw()
-        self._comtrade_is_syncing_view = False
-        self._refresh_sequence_analysis_window()
+        self._comtrade_is_syncing_view = previous_sync_state
+        if update_sequence:
+            self._refresh_sequence_analysis_window()
         if self._comtrade_popup is not None and self._comtrade_popup.winfo_exists() and not from_scroll:
             self._draw_comtrade_overlay()
 
