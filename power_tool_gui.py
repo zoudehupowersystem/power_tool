@@ -32,6 +32,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 
 from matplotlib.lines import Line2D
 from matplotlib.figure import Figure
+from matplotlib.offsetbox import AnnotationBbox, DrawingArea, HPacker, TextArea, VPacker
 from matplotlib.patches import Circle, Rectangle
 
 
@@ -4572,7 +4573,7 @@ class ApproximationToolGUI(tk.Tk):
         self._comtrade_vertical_zoom = 1.0
         self._comtrade_visible_count = 6
         self._comtrade_channel_scroll = 0
-        self._comtrade_cursor_positions: dict[str, float | None] = {"T1": None, "T2": None}
+        self._comtrade_cursor_positions: dict[str, float | None] = {"T1": None}
         self._comtrade_is_syncing_view = False
         self._comtrade_xlimit_callback_registered = False
 
@@ -4652,9 +4653,8 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Label(right, text="录波浏览区", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
         self.comtrade_time_label = ttk.Label(right, text="未加载文件")
         self.comtrade_time_label.grid(row=1, column=0, sticky="w", pady=(0, 2))
-        self.comtrade_cursor_label = tk.Text(right, height=4, wrap=tk.WORD)
-        self.comtrade_cursor_label.grid(row=5, column=0, sticky="ew", pady=(6, 0))
-        self.comtrade_cursor_label.insert("1.0", "光标：左键放置 T1，右键放置 T2。")
+        self.comtrade_cursor_label = tk.Text(right, height=1, wrap=tk.WORD)
+        self.comtrade_cursor_label.insert("1.0", "光标：左键点击曲线区放置游标。")
         self.comtrade_cursor_label.configure(state="disabled")
 
         self.comtrade_fig = Figure(figsize=(9.0, 6.2), dpi=100, facecolor="#101010")
@@ -4845,7 +4845,7 @@ class ApproximationToolGUI(tk.Tk):
         self._select_all_comtrade_channels()
         self._comtrade_vertical_zoom = 1.0
         self._comtrade_channel_scroll = 0
-        self._comtrade_cursor_positions = {"T1": None, "T2": None}
+        self._comtrade_cursor_positions = {"T1": None}
         default_window = self._default_comtrade_window(record.duration_s)
         self._set_comtrade_time_entries(float(record.time_s[0]), float(record.time_s[0]) + default_window)
         self._comtrade_is_syncing_view = True
@@ -4937,54 +4937,25 @@ class ApproximationToolGUI(tk.Tk):
     def _update_comtrade_cursor_label(self) -> None:
         record = self._comtrade_record
         if record is None:
-            self.comtrade_cursor_label.configure(state="normal")
-            self.comtrade_cursor_label.delete("1.0", tk.END)
-            self.comtrade_cursor_label.insert("1.0", "光标：左键放置 T1，右键放置 T2。")
-            self.comtrade_cursor_label.configure(state="disabled")
-            return
-        selection = self._selected_comtrade_indices() if self._comtrade_record is not None else []
-        lines = []
-        for key in ("T1", "T2"):
-            idx = self._current_comtrade_cursor_index(key)
-            if idx is None:
-                lines.append(f"{key}: 未设置")
-                continue
-            time_s = float(record.time_s[idx])
-            value_parts = []
-            for ch_idx in selection:
-                ch = record.analog_channels[ch_idx]
-                value_parts.append(f"{ch.name}={record.analog_values[idx, ch_idx]:.5g}{ch.unit or ''}")
-            lines.append(f"{key}: t={time_s:.6f}s, 点号={idx + 1}")
-            if value_parts:
-                chunk = 4
-                for pos in range(0, len(value_parts), chunk):
-                    prefix = "    " if pos == 0 else "    ↳ "
-                    lines.append(prefix + "；".join(value_parts[pos:pos + chunk]))
-        idx1 = self._current_comtrade_cursor_index("T1")
-        idx2 = self._current_comtrade_cursor_index("T2")
-        if idx1 is not None and idx2 is not None:
-            dt = float(record.time_s[idx2] - record.time_s[idx1])
-            ds = idx2 - idx1
-            lines.append(f"Δt = {dt:.6f} s，ΔN = {ds} 点")
+            text = "光标：左键点击曲线区放置游标。"
         else:
-            lines.append("提示：左键定位 T1，右键定位 T2；可用于故障前后对比和时间差测量。")
+            idx = self._current_comtrade_cursor_index("T1")
+            if idx is None:
+                text = "光标：左键点击曲线区放置游标。"
+            else:
+                text = f"游标：t={float(record.time_s[idx]):.6f}s，点号={idx + 1}。数值见曲线区游标右侧方框。"
         self.comtrade_cursor_label.configure(state="normal")
         self.comtrade_cursor_label.delete("1.0", tk.END)
-        self.comtrade_cursor_label.insert("1.0", "\n".join(lines))
+        self.comtrade_cursor_label.insert("1.0", text)
         self.comtrade_cursor_label.configure(state="disabled")
 
     def _on_comtrade_mouse_click(self, event) -> None:
-        if event.inaxes is not self.comtrade_ax or event.xdata is None:
+        if event.inaxes is not self.comtrade_ax or event.xdata is None or event.button != 1:
             return
         x0, x1 = self.comtrade_ax.get_xlim()
         span = max(x1 - x0, 1e-12)
         frac = min(1.0, max(0.0, (float(event.xdata) - x0) / span))
-        if event.button == 1:
-            self._comtrade_cursor_positions["T1"] = frac
-        elif event.button == 3:
-            self._comtrade_cursor_positions["T2"] = frac
-        else:
-            return
+        self._comtrade_cursor_positions["T1"] = frac
         self._update_comtrade_cursor_label()
         self._refresh_comtrade_plot()
         self._refresh_sequence_analysis_window()
@@ -5063,6 +5034,67 @@ class ApproximationToolGUI(tk.Tk):
         self._set_comtrade_time_entries(start, start + width)
         self.comtrade_time_label.configure(text=f"当前时间窗：{start:.6f} s ~ {start + width:.6f} s")
 
+    def _add_comtrade_cursor_value_box(
+        self,
+        ax,
+        frac: float,
+        draw_x: float,
+        cursor_idx: int,
+        visible_selection: list[int],
+        colors: list[str],
+    ) -> None:
+        record = self._comtrade_record
+        if record is None:
+            return
+        rows = [
+            TextArea(
+                f"游标  t={float(record.time_s[cursor_idx]):.6f}s  点号={cursor_idx + 1}",
+                textprops={"color": "#00ffff", "fontsize": 8, "weight": "bold"},
+            )
+        ]
+        for pos, ch_idx in enumerate(visible_selection):
+            ch = record.analog_channels[ch_idx]
+            color = colors[pos % len(colors)]
+            value = float(record.analog_values[cursor_idx, ch_idx])
+            unit = ch.unit or ""
+            swatch = DrawingArea(18, 10, 0, 0)
+            swatch.add_artist(Line2D([1, 17], [5, 5], color=color, linewidth=2.4))
+            value_text = TextArea(
+                f"{ch.name}: {value:.5g}{unit}",
+                textprops={"color": "#f3f3f3", "fontsize": 8},
+            )
+            rows.append(HPacker(children=[swatch, value_text], align="center", pad=0, sep=4))
+        box = VPacker(children=rows, align="left", pad=0, sep=2)
+        x_frac = min(0.78, max(0.03, frac + 0.015))
+        y_frac = 0.86
+        value_box = AnnotationBbox(
+            box,
+            (x_frac, y_frac),
+            xycoords=ax.transAxes,
+            box_alignment=(0.0, 1.0),
+            frameon=True,
+            bboxprops={
+                "boxstyle": "round,pad=0.35",
+                "facecolor": "#101010",
+                "edgecolor": "#00ffff",
+                "linewidth": 0.9,
+                "alpha": 0.94,
+            },
+            annotation_clip=False,
+        )
+        ax.add_artist(value_box)
+        ax.text(
+            draw_x,
+            0.98,
+            "游标",
+            transform=ax.get_xaxis_transform(),
+            color="#00ffff",
+            fontsize=9,
+            ha="center",
+            va="top",
+            bbox=dict(facecolor="#101010", edgecolor="#00ffff", boxstyle="round,pad=0.2"),
+        )
+
     def _refresh_comtrade_plot(self, from_scroll: bool = False) -> None:
         record = self._comtrade_record
         ax = self.comtrade_ax
@@ -5094,13 +5126,13 @@ class ApproximationToolGUI(tk.Tk):
             ax.axhline(offset - 0.98, color="#0c8f0c", linewidth=0.6, alpha=0.8)
             ax.text(0.01, offset + 1.05, record.analog_channels[ch_idx].name, transform=ax.get_yaxis_transform(), color=color, fontsize=9, ha="left", va="bottom")
 
-        for key, color in (("T1", "#00ffff"), ("T2", "#ff7f00")):
-            frac = self._comtrade_cursor_positions.get(key)
-            if frac is None:
-                continue
-            draw_x = start_s + frac * max(end_s - start_s, 0.0)
-            ax.axvline(draw_x, color=color, linewidth=1.1, linestyle="--")
-            ax.text(draw_x, base_offset + 1.18, key, color=color, fontsize=9, ha="center", va="bottom", bbox=dict(facecolor="#101010", edgecolor=color, boxstyle="round,pad=0.2"))
+        cursor_frac = self._comtrade_cursor_positions.get("T1")
+        if cursor_frac is not None:
+            draw_x = start_s + cursor_frac * max(end_s - start_s, 0.0)
+            cursor_idx = self._current_comtrade_cursor_index("T1")
+            ax.axvline(draw_x, color="#00ffff", linewidth=1.1, linestyle="--")
+            if cursor_idx is not None:
+                self._add_comtrade_cursor_value_box(ax, cursor_frac, draw_x, cursor_idx, visible_selection, colors)
 
         lower = -1.2
         upper = base_offset + 1.35
