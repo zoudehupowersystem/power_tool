@@ -84,11 +84,11 @@ from power_tool_comtrade import (
     single_frequency_phasor,
 )
 from power_tool_forecast import (
-    CLIMATE_BLOCKS,
     ForecastConfig,
     builtin_dataset_info,
     forecast_day_ahead,
     format_forecast_summary,
+    classify_climate_block,
     list_builtin_datasets,
     load_builtin_forecast_dataset,
     load_forecast_csv,
@@ -1061,7 +1061,7 @@ class ApproximationToolGUI(tk.Tk):
                 f"预测日期: {widgets.get('date_var').get() if widgets else '-'}\n"
                 f"位置: {widgets.get('lat_entry').get() if widgets else '-'}, {widgets.get('lon_entry').get() if widgets else '-'}；海拔 {widgets.get('alt_entry').get() if widgets else '-'} m\n"
                 f"装机容量上限: {capacity} MW\n"
-                f"节假日国家/地区: {widgets.get('holiday_var').get() if widgets else '-'}；新能源类型: {widgets.get('resource_var').get() if widgets else '-'}"
+                f"节假日国家/地区: {widgets.get('holiday_var').get() if widgets else '-'}；新能源类型: {widgets.get('resource_var').get() if widgets else '-'}（风电/光伏独立预测）"
             )
         elif tab == "录波曲线":
             return f"当前录波文件: {getattr(self, '_comtrade_cfg_path', '') or '未载入'}\n当前时间窗: {self.comtrade_time_label.cget('text')}"
@@ -4628,23 +4628,18 @@ class ApproximationToolGUI(tk.Tk):
         date_entry = ttk.Entry(left, textvariable=date_var, width=16, style="Input.TEntry")
         ttk.Label(left, text="预测日期（YYYY-MM-DD）", style="Form.TLabel").grid(row=6, column=0, sticky="w", padx=4, pady=4)
         date_entry.grid(row=6, column=1, sticky="ew", padx=4, pady=4)
-        climate_values = ["auto", *[item[5] for item in CLIMATE_BLOCKS], "高海拔/山地气候", "副热带/暖温带", "温带"]
-        climate_var = tk.StringVar(value="auto")
-        ttk.Label(left, text="气候板块", style="Form.TLabel").grid(row=7, column=0, sticky="w", padx=4, pady=4)
-        climate_box = ttk.Combobox(left, textvariable=climate_var, values=climate_values, state="readonly", width=18)
-        climate_box.grid(row=7, column=1, sticky="ew", padx=4, pady=4)
         holiday_var = tk.StringVar(value="US")
-        ttk.Label(left, text="节假日国家/地区", style="Form.TLabel").grid(row=8, column=0, sticky="w", padx=4, pady=4)
+        ttk.Label(left, text="节假日国家/地区", style="Form.TLabel").grid(row=7, column=0, sticky="w", padx=4, pady=4)
         holiday_box = ttk.Combobox(left, textvariable=holiday_var, values=["US", "CN"], state="readonly", width=18)
-        holiday_box.grid(row=8, column=1, sticky="ew", padx=4, pady=4)
+        holiday_box.grid(row=7, column=1, sticky="ew", padx=4, pady=4)
         capacity_entry = None
-        resource_var = tk.StringVar(value="auto")
-        next_row = 9
+        resource_var = tk.StringVar(value="solar")
+        next_row = 8
         if kind == "renewable":
             capacity_entry = self._add_entry(left, next_row, "装机容量上限 / MW", "23000", width=16)
             next_row += 1
             ttk.Label(left, text="新能源类型", style="Form.TLabel").grid(row=next_row, column=0, sticky="w", padx=4, pady=4)
-            resource_box = ttk.Combobox(left, textvariable=resource_var, values=["auto", "solar", "wind", "aggregate"], state="readonly", width=18)
+            resource_box = ttk.Combobox(left, textvariable=resource_var, values=["solar", "wind"], state="readonly", width=18)
             resource_box.grid(row=next_row, column=1, sticky="ew", padx=4, pady=4)
             next_row += 1
 
@@ -4686,7 +4681,6 @@ class ApproximationToolGUI(tk.Tk):
             "lat_entry": lat_entry,
             "lon_entry": lon_entry,
             "alt_entry": alt_entry,
-            "climate_var": climate_var,
             "holiday_var": holiday_var,
             "capacity_entry": capacity_entry,
             "resource_var": resource_var,
@@ -4711,7 +4705,9 @@ class ApproximationToolGUI(tk.Tk):
             entry = widgets[key]
             entry.delete(0, tk.END)  # type: ignore[attr-defined]
             entry.insert(0, f"{value:.5g}")  # type: ignore[attr-defined]
-        widgets["info_var"].set(f"{info.region}\n来源：{info.source}\n{info.notes}")  # type: ignore[union-attr]
+        climate = classify_climate_block(info.latitude, info.longitude, info.altitude_m)
+        resource_hint = "\n提示：新能源预测只对所选风电或光伏资源独立建模。" if kind == "renewable" else ""
+        widgets["info_var"].set(f"{info.region}\n来源：{info.source}\n自动气候板块：{climate}{resource_hint}\n{info.notes}")  # type: ignore[union-attr]
 
     def _import_forecast_csv(self, kind: str) -> None:
         widgets = self._forecast_widgets.get(kind)
@@ -4741,7 +4737,6 @@ class ApproximationToolGUI(tk.Tk):
                 latitude=_safe_float(widgets["lat_entry"].get(), "纬度"),  # type: ignore[attr-defined]
                 longitude=_safe_float(widgets["lon_entry"].get(), "经度"),  # type: ignore[attr-defined]
                 altitude_m=_safe_float(widgets["alt_entry"].get(), "海拔"),  # type: ignore[attr-defined]
-                climate_hint=widgets["climate_var"].get(),  # type: ignore[union-attr]
                 holiday_country=widgets["holiday_var"].get(),  # type: ignore[union-attr]
                 renewable_capacity_mw=capacity,
                 renewable_resource=widgets["resource_var"].get(),  # type: ignore[union-attr]

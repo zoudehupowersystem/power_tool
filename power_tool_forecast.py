@@ -39,11 +39,10 @@ class ForecastConfig:
     latitude: float = 34.05
     longitude: float = -118.25
     altitude_m: float = 80.0
-    climate_hint: str = "auto"
     holiday_country: str = "US"
     holiday_config_path: str | Path | None = None
     renewable_capacity_mw: float | None = None
-    renewable_resource: str = "auto"
+    renewable_resource: str = "solar"
 
 
 @dataclass(frozen=True)
@@ -111,7 +110,7 @@ _DATASET_SPECS: tuple[dict[str, object], ...] = (
         "latitude": 35.37,
         "longitude": -119.02,
         "altitude_m": 120.0,
-        "notes": "Contains hourly solar, wind and aggregate renewable MW fields for day-ahead renewable studies.",
+        "notes": "Contains hourly solar and wind MW fields; forecast runs should select one independent resource type at a time.",
     },
     {
         "name": "NREL_SOLAR_WIND_SAMPLE",
@@ -290,9 +289,7 @@ def load_builtin_forecast_dataset(name: str) -> list[dict[str, float | datetime]
     return load_forecast_csv(info.path, info.kind)
 
 
-def classify_climate_block(latitude: float, longitude: float, altitude_m: float = 0.0, hint: str = "auto") -> str:
-    if hint and hint.lower() not in {"auto", "自动"}:
-        return hint
+def classify_climate_block(latitude: float, longitude: float, altitude_m: float = 0.0) -> str:
     if altitude_m >= 1200:
         return "高海拔/山地气候"
     lat = float(latitude)
@@ -434,20 +431,13 @@ def _row_weather(row: dict[str, float | datetime], rows: list[dict[str, float | 
     return temp, max(0.0, ghi), max(0.0, wind)
 
 
-def _infer_renewable_resource(rows: list[dict[str, float | datetime]], config: ForecastConfig) -> str:
+def _renewable_resource(config: ForecastConfig) -> str:
     requested = config.renewable_resource.strip().lower()
-    mapping = {"pv": "solar", "光伏": "solar", "solar": "solar", "wind": "wind", "风电": "wind", "aggregate": "aggregate", "聚合": "aggregate"}
-    if requested and requested not in {"auto", "自动"}:
-        return mapping.get(requested, requested)
-    solar_sum = sum(max(0.0, _finite_float(r.get("solar_mw"), 0.0)) for r in rows)
-    wind_sum = sum(max(0.0, _finite_float(r.get("wind_mw"), 0.0)) for r in rows)
-    if solar_sum > 0.0 and wind_sum <= 1e-6:
-        return "solar"
-    if wind_sum > 0.0 and solar_sum <= 1e-6:
-        return "wind"
-    if solar_sum > 0.0 and solar_sum >= 4.0 * max(wind_sum, 1e-6):
-        return "solar"
-    return "aggregate"
+    mapping = {"pv": "solar", "光伏": "solar", "solar": "solar", "wind": "wind", "风电": "wind"}
+    resource = mapping.get(requested, requested)
+    if resource not in {"solar", "wind"}:
+        raise ValueError("新能源预测仅支持 wind/风电 或 solar/光伏 两种独立类型。")
+    return resource
 
 
 def _climatology(rows: list[dict[str, float | datetime]], key: str, ts: datetime, fallback: float) -> float:
@@ -480,10 +470,13 @@ def _feature_vector(ts: datetime, config: ForecastConfig, temp_c: float, ghi_wm2
     ]
 
 
-def _target_value(row: dict[str, float | datetime], kind: str) -> float:
-    if kind == "renewable":
-        return float(row.get("renewable_mw", 0.0) or 0.0)
-    return float(row.get("load_mw", 0.0) or 0.0)
+def _target_value(row: dict[str, float | datetime], config: ForecastConfig, resource: str = "load") -> float:
+    if config.kind == "renewable":
+        if resource == "solar":
+            return max(0.0, _finite_float(row.get("solar_mw"), _finite_float(row.get("renewable_mw"), 0.0)))
+        if resource == "wind":
+            return max(0.0, _finite_float(row.get("wind_mw"), _finite_float(row.get("renewable_mw"), 0.0)))
+    return max(0.0, _finite_float(row.get("load_mw"), 0.0))
 
 
 def _sklearn_predict(x_train: np.ndarray, y_train: np.ndarray, x_future: np.ndarray) -> tuple[str, np.ndarray] | None:
@@ -509,7 +502,8 @@ def forecast_day_ahead(rows: Iterable[dict[str, float | datetime]], config: Fore
     history = sorted(list(rows), key=lambda r: r["timestamp"])  # type: ignore[index]
     if len(history) < 48:
         raise ValueError("至少需要 48 个小时历史数据。")
-    climate = classify_climate_block(config.latitude, config.longitude, config.altitude_m, config.climate_hint)
+    climate = classify_climate_block(config.latitude, config.longitude, config.altitude_m)
+    renewable_resource = _renewable_resource(config) if config.kind == "renewable" else "load"
     train_features: list[list[float]] = []
     targets: list[float] = []
     for row in history:
@@ -518,7 +512,7 @@ def forecast_day_ahead(rows: Iterable[dict[str, float | datetime]], config: Fore
             continue
         temp, ghi, wind = _row_weather(row, history, config, climate)
         train_features.append(_feature_vector(ts, config, temp, ghi, wind))
-        targets.append(_target_value(row, config.kind))
+        targets.append(_target_value(row, config, renewable_resource))
     x_train = np.asarray(train_features, dtype=float)
     y_train = np.asarray(targets, dtype=float)
     future_times = [datetime.combine(config.target_date, datetime.min.time()) + timedelta(hours=h) for h in range(24)]
@@ -526,7 +520,6 @@ def forecast_day_ahead(rows: Iterable[dict[str, float | datetime]], config: Fore
     for ts in future_times:
         future_weather.append(_inferred_weather(history, ts, config, climate))
     x_future = np.asarray([_feature_vector(ts, config, *weather) for ts, weather in zip(future_times, future_weather)], dtype=float)
-    renewable_resource = _infer_renewable_resource(history, config) if config.kind == "renewable" else "load"
     model_output = _sklearn_predict(x_train, y_train, x_future)
     if model_output is None:
         model_name, forecast = _ridge_predict(x_train, y_train, x_future)
@@ -560,14 +553,14 @@ def forecast_day_ahead(rows: Iterable[dict[str, float | datetime]], config: Fore
             p10 = 0.0
             p90 = 0.0
         holiday_text = '节假日' if _is_holiday(ts.date(), config.holiday_country, config.holiday_config_path) else '工作日' if ts.weekday() < 5 else '周末'
-        resource_text = f"，资源={renewable_resource}" if config.kind == "renewable" else ""
+        resource_text = f"，资源={'光伏' if renewable_resource == 'solar' else '风电'}" if config.kind == "renewable" else ""
         driver = f"星期{ts.weekday()+1}/{holiday_text}，{climate}{resource_text}，T={temp:.1f}℃，GHI={ghi:.0f}W/m²，风={wind:.1f}m/s"
         points.append(ForecastPoint(ts, float(value), p10, p90, temp, ghi, wind, driver))
     notes = (
         "日前 24 小时预测；结果用于调度员筛查和计划校核，不替代正式市场/调度系统。",
         "特征已包含小时、星期、节假日、南北半球季节项、经纬度、海拔和气候板块。",
         "缺失气象数据时会优先使用历史同小时气候值，并用经纬度、海拔和气候板块估算温度/GHI/风速。",
-        "光伏资源在后处理阶段执行太阳高度角小于 0° 时夜间清零规则，不依赖模型自行学习。",
+        "新能源预测仅支持风电与光伏两类独立资源；光伏资源在后处理阶段执行太阳高度角小于 0° 时夜间清零规则，不依赖模型自行学习。",
         "节假日内置中国和美国；其它国家/地区可通过 data/forecast_holidays.json 或 ForecastConfig.holiday_config_path 扩展。",
         "可直接导入 CAISO/NYISO/ERCOT/PJM/GEFCom/NREL 风格 CSV；表头会自动映射常见字段。",
     )

@@ -137,3 +137,31 @@ def test_cn_and_custom_holiday_calendar(tmp_path: Path) -> None:
         ForecastConfig(kind="load", target_date=date(2025, 7, 14), holiday_country="FR", holiday_config_path=custom_path),
     )
     assert "节假日" in custom_result.points[0].drivers
+
+
+def test_renewable_resource_selection_is_independent() -> None:
+    rows = load_builtin_forecast_dataset("CAISO_RENEWABLE_SAMPLE")
+    solar = forecast_day_ahead(
+        rows,
+        ForecastConfig(kind="renewable", target_date=date(2025, 6, 22), latitude=35.37, longitude=-119.02, renewable_resource="solar"),
+    )
+    wind = forecast_day_ahead(
+        rows,
+        ForecastConfig(kind="renewable", target_date=date(2025, 6, 22), latitude=35.37, longitude=-119.02, renewable_resource="wind"),
+    )
+    assert any("资源=光伏" in p.drivers for p in solar.points)
+    assert any("资源=风电" in p.drivers for p in wind.points)
+    assert [round(p.value_mw, 1) for p in solar.points] != [round(p.value_mw, 1) for p in wind.points]
+
+
+def test_renewable_aggregate_mode_is_rejected() -> None:
+    rows = load_builtin_forecast_dataset("CAISO_RENEWABLE_SAMPLE")
+    try:
+        forecast_day_ahead(
+            rows,
+            ForecastConfig(kind="renewable", target_date=date(2025, 6, 22), renewable_resource="aggregate"),
+        )
+    except ValueError as exc:
+        assert "仅支持" in str(exc)
+    else:
+        raise AssertionError("aggregate renewable forecast should be rejected")
