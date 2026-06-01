@@ -1050,7 +1050,8 @@ class ApproximationToolGUI(tk.Tk):
             return (
                 f"数据集: {widgets.get('dataset_var').get() if widgets else '-'}\n"
                 f"预测日期: {widgets.get('date_var').get() if widgets else '-'}\n"
-                f"位置: {widgets.get('lat_entry').get() if widgets else '-'}, {widgets.get('lon_entry').get() if widgets else '-'}；海拔 {widgets.get('alt_entry').get() if widgets else '-'} m"
+                f"位置: {widgets.get('lat_entry').get() if widgets else '-'}, {widgets.get('lon_entry').get() if widgets else '-'}；海拔 {widgets.get('alt_entry').get() if widgets else '-'} m\n"
+                f"节假日国家/地区: {widgets.get('holiday_var').get() if widgets else '-'}"
             )
         elif tab == "新能源预测":
             widgets = self._forecast_widgets.get("renewable", {})
@@ -1059,7 +1060,8 @@ class ApproximationToolGUI(tk.Tk):
                 f"数据集: {widgets.get('dataset_var').get() if widgets else '-'}\n"
                 f"预测日期: {widgets.get('date_var').get() if widgets else '-'}\n"
                 f"位置: {widgets.get('lat_entry').get() if widgets else '-'}, {widgets.get('lon_entry').get() if widgets else '-'}；海拔 {widgets.get('alt_entry').get() if widgets else '-'} m\n"
-                f"装机容量上限: {capacity} MW"
+                f"装机容量上限: {capacity} MW\n"
+                f"节假日国家/地区: {widgets.get('holiday_var').get() if widgets else '-'}；新能源类型: {widgets.get('resource_var').get() if widgets else '-'}"
             )
         elif tab == "录波曲线":
             return f"当前录波文件: {getattr(self, '_comtrade_cfg_path', '') or '未载入'}\n当前时间窗: {self.comtrade_time_label.cget('text')}"
@@ -4631,10 +4633,19 @@ class ApproximationToolGUI(tk.Tk):
         ttk.Label(left, text="气候板块", style="Form.TLabel").grid(row=7, column=0, sticky="w", padx=4, pady=4)
         climate_box = ttk.Combobox(left, textvariable=climate_var, values=climate_values, state="readonly", width=18)
         climate_box.grid(row=7, column=1, sticky="ew", padx=4, pady=4)
+        holiday_var = tk.StringVar(value="US")
+        ttk.Label(left, text="节假日国家/地区", style="Form.TLabel").grid(row=8, column=0, sticky="w", padx=4, pady=4)
+        holiday_box = ttk.Combobox(left, textvariable=holiday_var, values=["US", "CN"], state="readonly", width=18)
+        holiday_box.grid(row=8, column=1, sticky="ew", padx=4, pady=4)
         capacity_entry = None
-        next_row = 8
+        resource_var = tk.StringVar(value="auto")
+        next_row = 9
         if kind == "renewable":
             capacity_entry = self._add_entry(left, next_row, "装机容量上限 / MW", "23000", width=16)
+            next_row += 1
+            ttk.Label(left, text="新能源类型", style="Form.TLabel").grid(row=next_row, column=0, sticky="w", padx=4, pady=4)
+            resource_box = ttk.Combobox(left, textvariable=resource_var, values=["auto", "solar", "wind", "aggregate"], state="readonly", width=18)
+            resource_box.grid(row=next_row, column=1, sticky="ew", padx=4, pady=4)
             next_row += 1
 
         ttk.Label(left, text="训练数据集", style="Form.TLabel").grid(row=2, column=0, sticky="w", padx=4, pady=4)
@@ -4676,7 +4687,9 @@ class ApproximationToolGUI(tk.Tk):
             "lon_entry": lon_entry,
             "alt_entry": alt_entry,
             "climate_var": climate_var,
+            "holiday_var": holiday_var,
             "capacity_entry": capacity_entry,
+            "resource_var": resource_var,
             "info_var": info_var,
             "result_text": result_text,
             "fig": fig,
@@ -4729,7 +4742,9 @@ class ApproximationToolGUI(tk.Tk):
                 longitude=_safe_float(widgets["lon_entry"].get(), "经度"),  # type: ignore[attr-defined]
                 altitude_m=_safe_float(widgets["alt_entry"].get(), "海拔"),  # type: ignore[attr-defined]
                 climate_hint=widgets["climate_var"].get(),  # type: ignore[union-attr]
+                holiday_country=widgets["holiday_var"].get(),  # type: ignore[union-attr]
                 renewable_capacity_mw=capacity,
+                renewable_resource=widgets["resource_var"].get(),  # type: ignore[union-attr]
             )
             result = forecast_day_ahead(rows, config)
             self._set_text(widgets["result_text"], format_forecast_summary(result))  # type: ignore[arg-type]

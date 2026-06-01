@@ -16,5 +16,7 @@ The model builds dispatcher-readable hourly features:
 - Hemisphere-aware season terms.
 - Latitude, longitude, altitude, and an automatic climate block.
 - Temperature and a quadratic temperature term for cooling/heating sensitivity.
+- Missing weather is inferred from historical same-hour medians first, then from latitude, longitude, altitude, and climate block baselines.
+- Built-in holidays cover China (CN) and the United States (US); other countries can be added through `data/forecast_holidays.json` or a configured calendar path.
 
 If scikit-learn is installed, HuberRegressor is used; otherwise the built-in ridge regression fallback is used. The output includes an empirical P10-P90 residual band.

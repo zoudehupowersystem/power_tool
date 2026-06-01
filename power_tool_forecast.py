@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import importlib
 import importlib.util
+import json
 import math
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -15,6 +16,7 @@ import numpy as np
 
 
 DATA_DIR = Path(__file__).resolve().parent / "data" / "forecast_samples"
+HOLIDAY_CONFIG_PATH = Path(__file__).resolve().parent / "data" / "forecast_holidays.json"
 
 
 @dataclass(frozen=True)
@@ -39,7 +41,9 @@ class ForecastConfig:
     altitude_m: float = 80.0
     climate_hint: str = "auto"
     holiday_country: str = "US"
+    holiday_config_path: str | Path | None = None
     renewable_capacity_mw: float | None = None
+    renewable_resource: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -149,7 +153,48 @@ _COLUMN_ALIASES = {
 }
 
 
-_US_FIXED_HOLIDAYS = {(1, 1), (7, 4), (11, 11), (12, 25)}
+_BUILTIN_HOLIDAY_CALENDAR = {
+    "US": {
+        "fixed_mmdd": ["01-01", "07-04", "11-11", "12-25"],
+        "nth_weekday": [
+            {"month": 9, "weekday": 0, "nth": 1, "name": "Labor Day"},
+            {"month": 11, "weekday": 3, "nth": 4, "name": "Thanksgiving"},
+        ],
+        "dates": [],
+    },
+    "CN": {
+        "fixed_mmdd": ["01-01", "05-01", "10-01", "10-02", "10-03", "10-04", "10-05", "10-06", "10-07"],
+        "nth_weekday": [],
+        "dates": [
+            "2025-01-28", "2025-01-29", "2025-01-30", "2025-01-31", "2025-02-01", "2025-02-02", "2025-02-03",
+            "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-21", "2026-02-22",
+        ],
+    },
+}
+
+
+_HOLIDAY_CALENDAR_CACHE: dict[Path, dict[str, object]] = {}
+
+
+def load_holiday_calendar(path: str | Path | None = None) -> dict[str, object]:
+    calendar: dict[str, object] = json.loads(json.dumps(_BUILTIN_HOLIDAY_CALENDAR))
+    config_path = Path(path) if path is not None else HOLIDAY_CONFIG_PATH
+    if not config_path.exists():
+        return calendar
+    config_path = config_path.resolve()
+    if config_path in _HOLIDAY_CALENDAR_CACHE:
+        external = _HOLIDAY_CALENDAR_CACHE[config_path]
+    else:
+        with config_path.open("r", encoding="utf-8") as f:
+            external = json.load(f)
+        _HOLIDAY_CALENDAR_CACHE[config_path] = external
+    for country, settings in external.items():
+        base = calendar.setdefault(country.upper(), {"fixed_mmdd": [], "nth_weekday": [], "dates": []})
+        if isinstance(settings, dict):
+            for key in ("fixed_mmdd", "nth_weekday", "dates"):
+                if key in settings:
+                    base[key] = settings[key]  # type: ignore[index]
+    return calendar
 
 
 def list_builtin_datasets(kind: str | None = None) -> list[ForecastDatasetInfo]:
@@ -265,14 +310,28 @@ def classify_climate_block(latitude: float, longitude: float, altitude_m: float 
     return "高纬寒冷"
 
 
-def _is_holiday(d: date, country: str) -> bool:
-    if country.upper() == "US" and (d.month, d.day) in _US_FIXED_HOLIDAYS:
+def _is_holiday(d: date, country: str, calendar_path: str | Path | None = None) -> bool:
+    calendar = load_holiday_calendar(calendar_path)
+    rules = calendar.get(country.upper()) or calendar.get(country)
+    if not isinstance(rules, dict):
+        return False
+    fixed = {str(item) for item in rules.get("fixed_mmdd", [])}
+    if f"{d.month:02d}-{d.day:02d}" in fixed:
         return True
-    # Thanksgiving: fourth Thursday of November; Labor Day: first Monday of September.
-    if country.upper() == "US" and d.month == 11 and d.weekday() == 3 and 22 <= d.day <= 28:
+    exact_dates = {str(item) for item in rules.get("dates", [])}
+    if d.isoformat() in exact_dates:
         return True
-    if country.upper() == "US" and d.month == 9 and d.weekday() == 0 and 1 <= d.day <= 7:
-        return True
+    for rule in rules.get("nth_weekday", []):
+        if not isinstance(rule, dict):
+            continue
+        if d.month != int(rule.get("month", -1)) or d.weekday() != int(rule.get("weekday", -1)):
+            continue
+        nth = int(rule.get("nth", 0))
+        occurrence = (d.day - 1) // 7 + 1
+        if nth > 0 and occurrence == nth:
+            return True
+        if nth < 0 and (d + timedelta(days=7)).month != d.month:
+            return True
     return False
 
 
@@ -291,11 +350,115 @@ def _solar_shape(ts: datetime, latitude: float) -> float:
     return math.sin(math.pi * phase) ** 1.35
 
 
+def _finite_float(value: object, default: float = float("nan")) -> float:
+    try:
+        x = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return x if math.isfinite(x) else default
+
+
+def solar_altitude_deg(ts: datetime, latitude: float, longitude: float) -> float:
+    day = ts.timetuple().tm_yday
+    hour = ts.hour + ts.minute / 60.0 + ts.second / 3600.0
+    decl = math.radians(23.44 * math.sin(2.0 * math.pi * (284 + day) / 365.25))
+    # Forecast timestamps are treated as local civil time in ISO/RTO CSV exports;
+    # do not apply UTC longitude correction here, otherwise night-time PV would
+    # be shifted by the site longitude.
+    hour_angle = math.radians(15.0 * (hour - 12.0))
+    lat = math.radians(float(latitude))
+    sin_alt = math.sin(lat) * math.sin(decl) + math.cos(lat) * math.cos(decl) * math.cos(hour_angle)
+    return math.degrees(math.asin(max(-1.0, min(1.0, sin_alt))))
+
+
+def _solar_daylight_factor(ts: datetime, latitude: float, longitude: float) -> float:
+    altitude = solar_altitude_deg(ts, latitude, longitude)
+    if altitude <= 0.0:
+        return 0.0
+    return min(1.0, math.sin(math.radians(altitude)) / max(math.sin(math.radians(70.0)), 1e-6))
+
+
+def _geo_weather_baseline(ts: datetime, config: ForecastConfig, climate: str) -> tuple[float, float, float]:
+    season = _season_value(ts.date(), config.latitude)
+    diurnal = math.sin(2.0 * math.pi * (ts.hour - 14) / 24.0)
+    abs_lat = abs(float(config.latitude))
+    if "热带" in climate:
+        base_temp, seasonal_amp, diurnal_amp, clear_ghi, wind = 27.0, 2.5, 4.0, 940.0, 4.5
+    elif "高海拔" in climate or "山地" in climate:
+        base_temp, seasonal_amp, diurnal_amp, clear_ghi, wind = 10.0, 9.0, 8.0, 980.0, 6.8
+    elif "寒" in climate or "极地" in climate:
+        base_temp, seasonal_amp, diurnal_amp, clear_ghi, wind = 3.0, 15.0, 5.0, 650.0, 7.0
+    elif "干旱" in climate or "地中海" in climate:
+        base_temp, seasonal_amp, diurnal_amp, clear_ghi, wind = 18.0, 10.0, 9.0, 1000.0, 5.2
+    elif "美国西海岸" in climate or "海洋" in climate:
+        base_temp, seasonal_amp, diurnal_amp, clear_ghi, wind = 14.0, 5.0, 4.5, 820.0, 5.8
+    else:
+        base_temp, seasonal_amp, diurnal_amp, clear_ghi, wind = 16.0, 11.0, 6.5, 850.0, 5.5
+    altitude_lapse = 6.5 * max(float(config.altitude_m), 0.0) / 1000.0
+    latitude_cooling = max(0.0, abs_lat - 35.0) * 0.08
+    temp = base_temp + seasonal_amp * season + diurnal_amp * diurnal - altitude_lapse - latitude_cooling
+    ghi = clear_ghi * _solar_daylight_factor(ts, config.latitude, config.longitude)
+    wind_speed = max(0.5, wind + 0.8 * math.sin(2.0 * math.pi * (ts.hour + 3) / 24.0) + 0.35 * abs(season))
+    return temp, ghi, wind_speed
+
+
+def _inferred_weather(rows: list[dict[str, float | datetime]], ts: datetime, config: ForecastConfig, climate: str) -> tuple[float, float, float]:
+    geo_temp, geo_ghi, geo_wind = _geo_weather_baseline(ts, config, climate)
+    temp = _climatology(rows, "temperature_c", ts, geo_temp)
+    ghi = _climatology(rows, "ghi_wm2", ts, geo_ghi)
+    wind = _climatology(rows, "wind_speed_mps", ts, geo_wind)
+    if not math.isfinite(temp):
+        temp = geo_temp
+    if not math.isfinite(ghi):
+        ghi = geo_ghi
+    if not math.isfinite(wind):
+        wind = geo_wind
+    daylight = _solar_daylight_factor(ts, config.latitude, config.longitude)
+    if daylight <= 0.0:
+        ghi = 0.0
+    elif ghi <= 0.0:
+        ghi = geo_ghi
+    return float(temp), max(0.0, float(ghi)), max(0.0, float(wind))
+
+
+def _row_weather(row: dict[str, float | datetime], rows: list[dict[str, float | datetime]], config: ForecastConfig, climate: str) -> tuple[float, float, float]:
+    ts = row["timestamp"]
+    if not isinstance(ts, datetime):
+        return _geo_weather_baseline(datetime.combine(config.target_date, datetime.min.time()), config, climate)
+    inferred = _inferred_weather(rows, ts, config, climate)
+    temp = _finite_float(row.get("temperature_c"), inferred[0])
+    ghi = _finite_float(row.get("ghi_wm2"), inferred[1])
+    wind = _finite_float(row.get("wind_speed_mps"), inferred[2])
+    if _solar_daylight_factor(ts, config.latitude, config.longitude) <= 0.0:
+        ghi = 0.0
+    return temp, max(0.0, ghi), max(0.0, wind)
+
+
+def _infer_renewable_resource(rows: list[dict[str, float | datetime]], config: ForecastConfig) -> str:
+    requested = config.renewable_resource.strip().lower()
+    mapping = {"pv": "solar", "光伏": "solar", "solar": "solar", "wind": "wind", "风电": "wind", "aggregate": "aggregate", "聚合": "aggregate"}
+    if requested and requested not in {"auto", "自动"}:
+        return mapping.get(requested, requested)
+    solar_sum = sum(max(0.0, _finite_float(r.get("solar_mw"), 0.0)) for r in rows)
+    wind_sum = sum(max(0.0, _finite_float(r.get("wind_mw"), 0.0)) for r in rows)
+    if solar_sum > 0.0 and wind_sum <= 1e-6:
+        return "solar"
+    if wind_sum > 0.0 and solar_sum <= 1e-6:
+        return "wind"
+    if solar_sum > 0.0 and solar_sum >= 4.0 * max(wind_sum, 1e-6):
+        return "solar"
+    return "aggregate"
+
+
 def _climatology(rows: list[dict[str, float | datetime]], key: str, ts: datetime, fallback: float) -> float:
-    same_hour = [float(r[key]) for r in rows if key in r and not math.isnan(float(r[key])) and isinstance(r["timestamp"], datetime) and r["timestamp"].hour == ts.hour]
+    same_hour = [
+        _finite_float(r.get(key))
+        for r in rows
+        if isinstance(r.get("timestamp"), datetime) and r["timestamp"].hour == ts.hour and math.isfinite(_finite_float(r.get(key)))
+    ]
     if same_hour:
         return float(np.median(same_hour))
-    values = [float(r[key]) for r in rows if key in r and not math.isnan(float(r[key]))]
+    values = [_finite_float(r.get(key)) for r in rows if math.isfinite(_finite_float(r.get(key)))]
     return float(np.median(values)) if values else fallback
 
 
@@ -305,7 +468,7 @@ def _feature_vector(ts: datetime, config: ForecastConfig, temp_c: float, ghi_wm2
     dow_angle = 2.0 * math.pi * dow / 7.0
     season = _season_value(ts.date(), config.latitude)
     weekend = 1.0 if dow >= 5 else 0.0
-    holiday = 1.0 if _is_holiday(ts.date(), config.holiday_country) else 0.0
+    holiday = 1.0 if _is_holiday(ts.date(), config.holiday_country, config.holiday_config_path) else 0.0
     return [
         1.0,
         math.sin(hour_angle), math.cos(hour_angle),
@@ -353,9 +516,7 @@ def forecast_day_ahead(rows: Iterable[dict[str, float | datetime]], config: Fore
         ts = row["timestamp"]
         if not isinstance(ts, datetime):
             continue
-        temp = float(row.get("temperature_c", _climatology(history, "temperature_c", ts, 20.0)) or 20.0)
-        ghi = float(row.get("ghi_wm2", 900.0 * _solar_shape(ts, config.latitude)) or 0.0)
-        wind = float(row.get("wind_speed_mps", _climatology(history, "wind_speed_mps", ts, 5.5)) or 5.5)
+        temp, ghi, wind = _row_weather(row, history, config, climate)
         train_features.append(_feature_vector(ts, config, temp, ghi, wind))
         targets.append(_target_value(row, config.kind))
     x_train = np.asarray(train_features, dtype=float)
@@ -363,11 +524,9 @@ def forecast_day_ahead(rows: Iterable[dict[str, float | datetime]], config: Fore
     future_times = [datetime.combine(config.target_date, datetime.min.time()) + timedelta(hours=h) for h in range(24)]
     future_weather: list[tuple[float, float, float]] = []
     for ts in future_times:
-        temp = _climatology(history, "temperature_c", ts, 18.0) + 3.5 * _season_value(ts.date(), config.latitude)
-        ghi = max(_climatology(history, "ghi_wm2", ts, 850.0 * _solar_shape(ts, config.latitude)), 850.0 * _solar_shape(ts, config.latitude))
-        wind = max(0.5, _climatology(history, "wind_speed_mps", ts, 5.5))
-        future_weather.append((temp, ghi, wind))
+        future_weather.append(_inferred_weather(history, ts, config, climate))
     x_future = np.asarray([_feature_vector(ts, config, *weather) for ts, weather in zip(future_times, future_weather)], dtype=float)
+    renewable_resource = _infer_renewable_resource(history, config) if config.kind == "renewable" else "load"
     model_output = _sklearn_predict(x_train, y_train, x_future)
     if model_output is None:
         model_name, forecast = _ridge_predict(x_train, y_train, x_future)
@@ -377,6 +536,10 @@ def forecast_day_ahead(rows: Iterable[dict[str, float | datetime]], config: Fore
         forecast = np.clip(forecast, 0.0, config.renewable_capacity_mw)
     else:
         forecast = np.maximum(forecast, 0.0)
+    if renewable_resource == "solar":
+        for pos, ts in enumerate(future_times):
+            if solar_altitude_deg(ts, config.latitude, config.longitude) < 0.0:
+                forecast[pos] = 0.0
     if model_output is None:
         _fitted_name, fitted = _ridge_predict(x_train, y_train, x_train)
     else:
@@ -389,11 +552,23 @@ def forecast_day_ahead(rows: Iterable[dict[str, float | datetime]], config: Fore
     band = max(float(np.quantile(np.abs(residual), 0.80)) if residual.size else 0.0, 0.03 * float(np.mean(np.maximum(y_train, 1.0))))
     points: list[ForecastPoint] = []
     for ts, value, (temp, ghi, wind) in zip(future_times, forecast, future_weather):
-        driver = f"星期{ts.weekday()+1}/{'节假日' if _is_holiday(ts.date(), config.holiday_country) else '工作日' if ts.weekday() < 5 else '周末'}，{climate}，T={temp:.1f}℃，GHI={ghi:.0f}W/m²，风={wind:.1f}m/s"
-        points.append(ForecastPoint(ts, float(value), max(0.0, float(value - band)), float(value + band), temp, ghi, wind, driver))
+        is_solar_night = renewable_resource == "solar" and solar_altitude_deg(ts, config.latitude, config.longitude) < 0.0
+        p10 = max(0.0, float(value - band))
+        p90 = float(value + band)
+        if is_solar_night:
+            value = 0.0
+            p10 = 0.0
+            p90 = 0.0
+        holiday_text = '节假日' if _is_holiday(ts.date(), config.holiday_country, config.holiday_config_path) else '工作日' if ts.weekday() < 5 else '周末'
+        resource_text = f"，资源={renewable_resource}" if config.kind == "renewable" else ""
+        driver = f"星期{ts.weekday()+1}/{holiday_text}，{climate}{resource_text}，T={temp:.1f}℃，GHI={ghi:.0f}W/m²，风={wind:.1f}m/s"
+        points.append(ForecastPoint(ts, float(value), p10, p90, temp, ghi, wind, driver))
     notes = (
         "日前 24 小时预测；结果用于调度员筛查和计划校核，不替代正式市场/调度系统。",
         "特征已包含小时、星期、节假日、南北半球季节项、经纬度、海拔和气候板块。",
+        "缺失气象数据时会优先使用历史同小时气候值，并用经纬度、海拔和气候板块估算温度/GHI/风速。",
+        "光伏资源在后处理阶段执行太阳高度角小于 0° 时夜间清零规则，不依赖模型自行学习。",
+        "节假日内置中国和美国；其它国家/地区可通过 data/forecast_holidays.json 或 ForecastConfig.holiday_config_path 扩展。",
         "可直接导入 CAISO/NYISO/ERCOT/PJM/GEFCom/NREL 风格 CSV；表头会自动映射常见字段。",
     )
     return ForecastResult(config.kind, climate, model_name, mae, tuple(points), notes)

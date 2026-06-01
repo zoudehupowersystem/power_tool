@@ -84,3 +84,56 @@ def test_dataset_registry_and_climate_classification() -> None:
     assert {"CAISO_LOAD_SAMPLE", "ERCOT_LOAD_SAMPLE", "GEFCOM_LOAD_SAMPLE"} <= load_names
     assert {"CAISO_RENEWABLE_SAMPLE", "NREL_SOLAR_WIND_SAMPLE"} <= renewable_names
     assert classify_climate_block(39.7, -105.2, 1600) == "高海拔/山地气候"
+
+
+def test_missing_weather_is_inferred_from_history_and_geography() -> None:
+    rows = load_builtin_forecast_dataset("CAISO_LOAD_SAMPLE")
+    stripped = [{"timestamp": row["timestamp"], "load_mw": row["load_mw"]} for row in rows]
+    result = forecast_day_ahead(
+        stripped,
+        ForecastConfig(kind="load", target_date=date(2025, 6, 22), latitude=34.05, longitude=-118.25, altitude_m=90),
+    )
+    assert len(result.points) == 24
+    assert all(p.temperature_c == p.temperature_c for p in result.points)
+    assert any(p.ghi_wm2 > 0 for p in result.points)
+
+
+def test_solar_post_processing_forces_night_to_zero() -> None:
+    rows = load_builtin_forecast_dataset("CAISO_RENEWABLE_SAMPLE")
+    solar_rows = [
+        {"timestamp": row["timestamp"], "renewable_mw": row.get("solar_mw", 0.0), "solar_mw": row.get("solar_mw", 0.0)}
+        for row in rows
+    ]
+    result = forecast_day_ahead(
+        solar_rows,
+        ForecastConfig(
+            kind="renewable",
+            target_date=date(2025, 6, 22),
+            latitude=35.37,
+            longitude=-119.02,
+            altitude_m=120,
+            renewable_capacity_mw=20000,
+            renewable_resource="solar",
+        ),
+    )
+    night_points = [p for p in result.points if p.timestamp.hour in {0, 1, 2, 3, 4, 21, 22, 23}]
+    assert night_points
+    assert all(p.value_mw == 0 and p.p10_mw == 0 and p.p90_mw == 0 for p in night_points)
+    assert any(p.value_mw > 0 for p in result.points if 10 <= p.timestamp.hour <= 15)
+
+
+def test_cn_and_custom_holiday_calendar(tmp_path: Path) -> None:
+    rows = load_builtin_forecast_dataset("CAISO_LOAD_SAMPLE")
+    cn_result = forecast_day_ahead(
+        rows,
+        ForecastConfig(kind="load", target_date=date(2025, 10, 1), latitude=31.23, longitude=121.47, holiday_country="CN"),
+    )
+    assert "节假日" in cn_result.points[0].drivers
+
+    custom_path = tmp_path / "holidays.json"
+    custom_path.write_text('{"FR": {"fixed_mmdd": ["07-14"], "nth_weekday": [], "dates": []}}', encoding="utf-8")
+    custom_result = forecast_day_ahead(
+        rows,
+        ForecastConfig(kind="load", target_date=date(2025, 7, 14), holiday_country="FR", holiday_config_path=custom_path),
+    )
+    assert "节假日" in custom_result.points[0].drivers
