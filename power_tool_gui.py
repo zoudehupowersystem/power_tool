@@ -5058,13 +5058,19 @@ class ApproximationToolGUI(tk.Tk):
         widgets["solar_time_var"].set(self._minutes_to_hhmm(minutes))  # type: ignore[union-attr]
         if not redraw:
             return
+
+        # Keep the solar helper responsive while the user is dragging.  The
+        # previous debounce waited until pointer/slider events paused before
+        # recomputing, which made the marker lag behind the cursor.  Cancel any
+        # older delayed refresh and recompute immediately for the current event.
         after_id = widgets.get("solar_slider_after_id")
         if after_id is not None:
             try:
                 self.after_cancel(after_id)
             except Exception:
                 pass
-        widgets["solar_slider_after_id"] = self.after(140, lambda: self._run_renewable_solar_helper(silent=True))
+            widgets["solar_slider_after_id"] = None
+        self._run_renewable_solar_helper(silent=True)
 
     def _on_solar_time_slider(self, value: str) -> None:
         widgets = self._forecast_widgets.get("renewable")
@@ -5249,16 +5255,16 @@ class ApproximationToolGUI(tk.Tk):
             (profile.sunset, "日落", "#c0392b"),
             (pos.timestamp, "当前", "#d35400"),
         ]
-        for idx, (dt, label, color) in enumerate(line_positions):
+        for dt, label, color in line_positions:
             if dt is None:
                 continue
             hour = (dt - midnight).total_seconds() / 3600.0
             if 0.0 <= hour <= 24.0:
                 ax_curve.axvline(hour, color=color, linestyle=":" if label != "当前" else "-.", linewidth=1.2, alpha=0.9)
-                y_top = ax_curve.get_ylim()[1]
-                y_text = y_top - 4.0 - (idx % 2) * 9.0
-                ax_curve.text(hour, y_text, f"{label}\n{dt:%H:%M}", ha="center", va="top", fontsize=8, color=color,
-                              bbox=dict(boxstyle="round,pad=0.18", fc="white", ec=color, alpha=0.82))
+                if label == "当前":
+                    y_top = ax_curve.get_ylim()[1]
+                    ax_curve.text(hour, y_top - 4.0, f"{label}\n{dt:%H:%M}", ha="center", va="top", fontsize=8, color=color,
+                                  bbox=dict(boxstyle="round,pad=0.18", fc="white", ec=color, alpha=0.82))
 
         ax_curve.set_title(
             f"{profile.target_date:%Y-%m-%d} 全天太阳高度、天气修正 GHI 与组件 POA\n"
@@ -5269,7 +5275,7 @@ class ApproximationToolGUI(tk.Tk):
 
         widgets["solar_axes"] = (ax_polar, ax_curve, ax_ghi)
         widgets["solar_curve_axes"] = (ax_curve, ax_ghi)
-        widgets["solar_canvas"].draw()  # type: ignore[attr-defined]
+        widgets["solar_canvas"].draw_idle()  # type: ignore[attr-defined]
 
     def _fill_forecast_detail_table(self, kind: str, result) -> None:
         widgets = self._forecast_widgets[kind]
