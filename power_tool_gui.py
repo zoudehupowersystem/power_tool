@@ -83,6 +83,16 @@ from power_tool_comtrade import (
     sequence_phasors,
     single_frequency_phasor,
 )
+from power_tool_forecast import (
+    CLIMATE_BLOCKS,
+    ForecastConfig,
+    builtin_dataset_info,
+    forecast_day_ahead,
+    format_forecast_summary,
+    list_builtin_datasets,
+    load_builtin_forecast_dataset,
+    load_forecast_csv,
+)
 
 from power_tool_i18n import (
     KEY_CONCLUSION_PREFIXES_EN,
@@ -209,6 +219,8 @@ _MANUAL_LIBRARY: tuple[dict[str, str], ...] = (
     {"title_zh": "参数校核与标幺值：两绕组变压器", "title_en": "Parameter Validation & Per-Unit: Two-Winding Transformer", "basename": "PowerTool_Parameter_Validation_Two_Winding_Transformer"},
     {"title_zh": "参数校核与标幺值：三绕组变压器", "title_en": "Parameter Validation & Per-Unit: Three-Winding Transformer", "basename": "PowerTool_Parameter_Validation_Three_Winding_Transformer"},
     {"title_zh": "短路电流计算", "title_en": "Short-Circuit Current Calculation", "basename": "PowerTool_Short_Circuit_Current_Calculation"},
+    {"title_zh": "负荷预测", "title_en": "Load Forecasting", "basename": "PowerTool_Load_Forecasting"},
+    {"title_zh": "新能源预测", "title_en": "Renewable Forecasting", "basename": "PowerTool_Renewable_Forecasting"},
     {"title_zh": "录波曲线", "title_en": "Waveform Viewer", "basename": "PowerTool_Waveform_Viewer"},
 )
 
@@ -395,6 +407,8 @@ class ApproximationToolGUI(tk.Tk):
         self.loop_tab = ttk.Frame(notebook)
         self.param_tab = ttk.Frame(notebook)
         self.sc_tab = ttk.Frame(notebook)
+        self.load_forecast_tab = ttk.Frame(notebook)
+        self.renewable_forecast_tab = ttk.Frame(notebook)
         self.comtrade_tab = ttk.Frame(notebook)
 
         notebook.add(self.freq_tab, text="频率动态")
@@ -405,6 +419,8 @@ class ApproximationToolGUI(tk.Tk):
         notebook.add(self.loop_tab, text="配电网合环分析")
         notebook.add(self.param_tab, text="参数校核与标幺值")
         notebook.add(self.sc_tab, text="短路电流计算")
+        notebook.add(self.load_forecast_tab, text="负荷预测")
+        notebook.add(self.renewable_forecast_tab, text="新能源预测")
         notebook.add(self.comtrade_tab, text="录波曲线")
 
         self._line_geometry_window: tk.Toplevel | None = None
@@ -426,6 +442,9 @@ class ApproximationToolGUI(tk.Tk):
         self._build_loop_closure_tab()
         self._build_param_tab()
         self._build_short_circuit_tab()
+        self._forecast_widgets: dict[str, dict[str, object]] = {}
+        self._build_load_forecast_tab()
+        self._build_renewable_forecast_tab()
         self._build_comtrade_tab()
         self._build_ai_sidebar()
         self._hide_tab_muted_explanations()
@@ -443,6 +462,8 @@ class ApproximationToolGUI(tk.Tk):
             self.loop_tab,
             self.param_tab,
             self.sc_tab,
+            self.load_forecast_tab,
+            self.renewable_forecast_tab,
             self.comtrade_tab,
         ]
 
@@ -832,6 +853,8 @@ class ApproximationToolGUI(tk.Tk):
             "小扰动分析（SMIB）": "PowerTool_Small_Signal_Analysis",
             "配电网合环分析": "PowerTool_Distribution_Loop_Closure_Analysis",
             "短路电流计算": "PowerTool_Short_Circuit_Current_Calculation",
+            "负荷预测": "PowerTool_Load_Forecasting",
+            "新能源预测": "PowerTool_Renewable_Forecasting",
             "录波曲线": "PowerTool_Waveform_Viewer",
         }
         return mapping.get(tab, "PowerTool_Overview")
@@ -1022,6 +1045,22 @@ class ApproximationToolGUI(tk.Tk):
             pairs = [("系统电压 / kV", self.sc_u), ("线路长度 / km", self.sc_len), ("R1 / Ω/km", self.sc_r1), ("X1 / Ω/km", self.sc_x1),
                      ("R0 / Ω/km", self.sc_r0), ("X0 / Ω/km", self.sc_x0), ("左侧中性点电阻 / Ω", self.sc_rn), ("故障电阻 / Ω", self.sc_rf),
                      ("右侧相角 / °", self.sc_delta_right), ("故障点位置 / %", self.sc_fault_pos)]
+        elif tab == "负荷预测":
+            widgets = self._forecast_widgets.get("load", {})
+            return (
+                f"数据集: {widgets.get('dataset_var').get() if widgets else '-'}\n"
+                f"预测日期: {widgets.get('date_var').get() if widgets else '-'}\n"
+                f"位置: {widgets.get('lat_entry').get() if widgets else '-'}, {widgets.get('lon_entry').get() if widgets else '-'}；海拔 {widgets.get('alt_entry').get() if widgets else '-'} m"
+            )
+        elif tab == "新能源预测":
+            widgets = self._forecast_widgets.get("renewable", {})
+            capacity = widgets.get('capacity_entry').get() if widgets and widgets.get('capacity_entry') is not None else '-'
+            return (
+                f"数据集: {widgets.get('dataset_var').get() if widgets else '-'}\n"
+                f"预测日期: {widgets.get('date_var').get() if widgets else '-'}\n"
+                f"位置: {widgets.get('lat_entry').get() if widgets else '-'}, {widgets.get('lon_entry').get() if widgets else '-'}；海拔 {widgets.get('alt_entry').get() if widgets else '-'} m\n"
+                f"装机容量上限: {capacity} MW"
+            )
         elif tab == "录波曲线":
             return f"当前录波文件: {getattr(self, '_comtrade_cfg_path', '') or '未载入'}\n当前时间窗: {self.comtrade_time_label.cget('text')}"
         else:
@@ -4549,6 +4588,174 @@ class ApproximationToolGUI(tk.Tk):
 
         except Exception as exc:
             messagebox.showerror("计算错误", str(exc))
+
+    def _build_load_forecast_tab(self) -> None:
+        self._build_day_ahead_forecast_tab(self.load_forecast_tab, "load")
+
+    def _build_renewable_forecast_tab(self) -> None:
+        self._build_day_ahead_forecast_tab(self.renewable_forecast_tab, "renewable")
+
+    def _build_day_ahead_forecast_tab(self, tab: ttk.Frame, kind: str) -> None:
+        title = "负荷日前预测" if kind == "load" else "新能源日前预测"
+        target_label = "预测负荷 / MW" if kind == "load" else "预测新能源出力 / MW"
+        tab.columnconfigure(1, weight=1)
+        tab.rowconfigure(0, weight=1)
+        left = ttk.Frame(tab, padding=16, style="Card.TFrame")
+        right = ttk.Frame(tab, padding=16, style="Card.TFrame")
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, 6), pady=8)
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=8)
+        left.columnconfigure(1, weight=1)
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(1, weight=1)
+        right.rowconfigure(3, weight=1)
+
+        ttk.Label(left, text=title, style="PageTitle.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(
+            left,
+            text="面向调度员的 24 小时日前预测：内置样例可离线演示，也可导入 CAISO/NYISO/ERCOT/PJM/GEFCom/NREL 风格 CSV。",
+            style="Muted.TLabel", justify="left", wraplength=420,
+        ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 10))
+
+        dataset_names = [info.name for info in list_builtin_datasets(kind)]
+        dataset_var = tk.StringVar(value=dataset_names[0] if dataset_names else "")
+        custom_path_var = tk.StringVar(value="")
+        date_var = tk.StringVar(value="2025-06-22")
+        lat_entry = self._add_entry(left, 3, "纬度 / °", "34.05" if kind == "load" else "35.37", width=16)
+        lon_entry = self._add_entry(left, 4, "经度 / °", "-118.25" if kind == "load" else "-119.02", width=16)
+        alt_entry = self._add_entry(left, 5, "海拔 / m（平原可填 0）", "90" if kind == "load" else "120", width=16)
+        date_entry = ttk.Entry(left, textvariable=date_var, width=16, style="Input.TEntry")
+        ttk.Label(left, text="预测日期（YYYY-MM-DD）", style="Form.TLabel").grid(row=6, column=0, sticky="w", padx=4, pady=4)
+        date_entry.grid(row=6, column=1, sticky="ew", padx=4, pady=4)
+        climate_values = ["auto", *[item[5] for item in CLIMATE_BLOCKS], "高海拔/山地气候", "副热带/暖温带", "温带"]
+        climate_var = tk.StringVar(value="auto")
+        ttk.Label(left, text="气候板块", style="Form.TLabel").grid(row=7, column=0, sticky="w", padx=4, pady=4)
+        climate_box = ttk.Combobox(left, textvariable=climate_var, values=climate_values, state="readonly", width=18)
+        climate_box.grid(row=7, column=1, sticky="ew", padx=4, pady=4)
+        capacity_entry = None
+        next_row = 8
+        if kind == "renewable":
+            capacity_entry = self._add_entry(left, next_row, "装机容量上限 / MW", "23000", width=16)
+            next_row += 1
+
+        ttk.Label(left, text="训练数据集", style="Form.TLabel").grid(row=2, column=0, sticky="w", padx=4, pady=4)
+        dataset_box = ttk.Combobox(left, textvariable=dataset_var, values=dataset_names, state="readonly", width=26)
+        dataset_box.grid(row=2, column=1, sticky="ew", padx=4, pady=4)
+        button_row = ttk.Frame(left, style="Card.TFrame")
+        button_row.grid(row=next_row, column=0, columnspan=2, sticky="ew", pady=(8, 4))
+        button_row.columnconfigure(0, weight=1)
+        button_row.columnconfigure(1, weight=1)
+        ttk.Button(button_row, text="导入CSV", command=lambda: self._import_forecast_csv(kind)).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(button_row, text="预测24小时", command=lambda: self._run_day_ahead_forecast(kind)).grid(row=0, column=1, sticky="ew", padx=(4, 0))
+
+        info_var = tk.StringVar(value="")
+        ttk.Label(left, textvariable=info_var, style="Card.TLabel", justify="left", wraplength=420).grid(row=next_row + 1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+
+        ttk.Label(right, text=f"{title}结果", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        result_text = ScrolledText(right, width=86, height=18, wrap=tk.NONE, font="TkFixedFont")
+        result_text.grid(row=1, column=0, sticky="nsew", pady=(6, 8))
+        result_text.insert("1.0", "请选择数据集并点击“预测24小时”。")
+        result_text.configure(state="disabled")
+        fig = Figure(figsize=(8.6, 3.4), dpi=100)
+        ax = fig.add_subplot(111)
+        ax.set_title(target_label)
+        ax.set_xlabel("Hour")
+        ax.set_ylabel("MW")
+        ax.grid(True)
+        canvas = FigureCanvasTkAgg(fig, master=right)
+        canvas.get_tk_widget().grid(row=3, column=0, sticky="nsew")
+        toolbar = NavigationToolbar2Tk(canvas, right, pack_toolbar=False)
+        toolbar.update()
+        toolbar.grid(row=2, column=0, sticky="ew")
+        canvas.draw()
+
+        self._forecast_widgets[kind] = {
+            "dataset_var": dataset_var,
+            "custom_path_var": custom_path_var,
+            "date_var": date_var,
+            "lat_entry": lat_entry,
+            "lon_entry": lon_entry,
+            "alt_entry": alt_entry,
+            "climate_var": climate_var,
+            "capacity_entry": capacity_entry,
+            "info_var": info_var,
+            "result_text": result_text,
+            "fig": fig,
+            "ax": ax,
+            "canvas": canvas,
+        }
+        dataset_box.bind("<<ComboboxSelected>>", lambda _event: self._apply_forecast_dataset_defaults(kind))
+        self._apply_forecast_dataset_defaults(kind)
+
+    def _apply_forecast_dataset_defaults(self, kind: str) -> None:
+        widgets = self._forecast_widgets.get(kind)
+        if not widgets:
+            return
+        dataset_name = widgets["dataset_var"].get()  # type: ignore[union-attr]
+        if not dataset_name or str(dataset_name).startswith("CSV:"):
+            return
+        info = builtin_dataset_info(str(dataset_name))
+        for key, value in (("lat_entry", info.latitude), ("lon_entry", info.longitude), ("alt_entry", info.altitude_m)):
+            entry = widgets[key]
+            entry.delete(0, tk.END)  # type: ignore[attr-defined]
+            entry.insert(0, f"{value:.5g}")  # type: ignore[attr-defined]
+        widgets["info_var"].set(f"{info.region}\n来源：{info.source}\n{info.notes}")  # type: ignore[union-attr]
+
+    def _import_forecast_csv(self, kind: str) -> None:
+        widgets = self._forecast_widgets.get(kind)
+        if not widgets:
+            return
+        filename = filedialog.askopenfilename(title="选择预测训练CSV", filetypes=[("CSV", "*.csv"), ("All files", "*.*")])
+        if not filename:
+            return
+        widgets["custom_path_var"].set(filename)  # type: ignore[union-attr]
+        widgets["dataset_var"].set(f"CSV: {Path(filename).name}")  # type: ignore[union-attr]
+        widgets["info_var"].set("已选择外部 CSV。支持 timestamp/load_mw/demand_mw/solar_mw/wind_mw/renewable_mw/temperature_c/ghi_wm2/wind_speed_mps 等表头。")  # type: ignore[union-attr]
+
+    def _run_day_ahead_forecast(self, kind: str) -> None:
+        widgets = self._forecast_widgets[kind]
+        try:
+            dataset_name = widgets["dataset_var"].get()  # type: ignore[union-attr]
+            if str(dataset_name).startswith("CSV:"):
+                rows = load_forecast_csv(widgets["custom_path_var"].get(), kind)  # type: ignore[union-attr]
+            else:
+                rows = load_builtin_forecast_dataset(str(dataset_name))
+            target = datetime.strptime(widgets["date_var"].get().strip(), "%Y-%m-%d").date()  # type: ignore[union-attr]
+            capacity_entry = widgets.get("capacity_entry")
+            capacity = None if capacity_entry is None else _safe_float(capacity_entry.get(), "装机容量上限")  # type: ignore[attr-defined]
+            config = ForecastConfig(
+                kind=kind,
+                target_date=target,
+                latitude=_safe_float(widgets["lat_entry"].get(), "纬度"),  # type: ignore[attr-defined]
+                longitude=_safe_float(widgets["lon_entry"].get(), "经度"),  # type: ignore[attr-defined]
+                altitude_m=_safe_float(widgets["alt_entry"].get(), "海拔"),  # type: ignore[attr-defined]
+                climate_hint=widgets["climate_var"].get(),  # type: ignore[union-attr]
+                renewable_capacity_mw=capacity,
+            )
+            result = forecast_day_ahead(rows, config)
+            self._set_text(widgets["result_text"], format_forecast_summary(result))  # type: ignore[arg-type]
+            self._plot_day_ahead_forecast(kind, result)
+        except Exception as exc:
+            messagebox.showerror("预测失败", str(exc))
+
+    def _plot_day_ahead_forecast(self, kind: str, result) -> None:
+        widgets = self._forecast_widgets[kind]
+        ax = widgets["ax"]
+        ax.clear()
+        hours = [p.timestamp.hour for p in result.points]
+        values = [p.value_mw for p in result.points]
+        p10 = [p.p10_mw for p in result.points]
+        p90 = [p.p90_mw for p in result.points]
+        color = "#1f77b4" if kind == "load" else "#2ca02c"
+        ax.fill_between(hours, p10, p90, color=color, alpha=0.18, label="P10-P90")
+        ax.plot(hours, values, marker="o", color=color, linewidth=1.8, label="Forecast")
+        ax.set_title("负荷日前预测" if kind == "load" else "新能源日前预测")
+        ax.set_xlabel("Hour of day")
+        ax.set_ylabel("MW")
+        ax.set_xticks(hours[::2])
+        ax.grid(True, alpha=0.35)
+        ax.legend(loc="best")
+        widgets["canvas"].draw()  # type: ignore[attr-defined]
+
 
     def _build_comtrade_tab(self) -> None:
         self._comtrade_record = None

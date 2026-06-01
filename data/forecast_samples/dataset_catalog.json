@@ -1,0 +1,37 @@
+[
+  {
+    "name": "CAISO_LOAD_SAMPLE",
+    "kind": "load",
+    "schema_reference": "CAISO OASIS demand forecast / actual load fields and Today's Outlook chart CSV exports",
+    "reference_url": "https://oasis.caiso.com/",
+    "sample_file": "caiso_load_sample.csv"
+  },
+  {
+    "name": "ERCOT_LOAD_SAMPLE",
+    "kind": "load",
+    "schema_reference": "ERCOT Hourly Load Data Archives",
+    "reference_url": "https://www.ercot.com/gridinfo/load/load_hist/",
+    "sample_file": "ercot_load_sample.csv"
+  },
+  {
+    "name": "GEFCOM_LOAD_SAMPLE",
+    "kind": "load",
+    "schema_reference": "Global Energy Forecasting Competition load forecasting data layout",
+    "reference_url": "https://ieee-pes-data-sharing.org/",
+    "sample_file": "gefcom_load_sample.csv"
+  },
+  {
+    "name": "CAISO_RENEWABLE_SAMPLE",
+    "kind": "renewable",
+    "schema_reference": "CAISO wind and solar forecast / supply trend exports",
+    "reference_url": "https://www.caiso.com/todays-outlook",
+    "sample_file": "caiso_renewable_sample.csv"
+  },
+  {
+    "name": "NREL_SOLAR_WIND_SAMPLE",
+    "kind": "renewable",
+    "schema_reference": "NREL/NLR solar resource fields such as latitude, longitude, GHI and DNI",
+    "reference_url": "https://developer.nrel.gov/docs/solar/solar-resource-v1/",
+    "sample_file": "nrel_renewable_sample.csv"
+  }
+]
