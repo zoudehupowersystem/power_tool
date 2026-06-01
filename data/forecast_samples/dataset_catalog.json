@@ -33,5 +33,26 @@
     "schema_reference": "NREL/NLR solar resource fields such as latitude, longitude, GHI and DNI",
     "reference_url": "https://developer.nrel.gov/docs/solar/solar-resource-v1/",
     "sample_file": "nrel_renewable_sample.csv"
+  },
+  {
+    "name": "BAIDU_KDD_SDWPF_WIND_SAMPLE",
+    "kind": "renewable",
+    "schema_reference": "Baidu KDD Cup 2022 / SDWPF wind power forecasting fields (TurbID, Day, Tmstamp, Wspd, Patv)",
+    "reference_url": "https://baidukddcup2022.github.io/",
+    "sample_file": "baidu_kdd_sdwpf_wind_sample.csv"
+  },
+  {
+    "name": "CSG_LOAD_FORECAST_SCHEMA_SAMPLE",
+    "kind": "load",
+    "schema_reference": "Southern Grid dispatch AI load-forecasting high-quality dataset publication / Chinese load forecasting schema",
+    "reference_url": "https://www.nda.gov.cn/sjj/ywpd/szkjyjcss/0926/20250926161610699430676_pc.html",
+    "sample_file": "csg_load_forecast_sample.csv"
+  },
+  {
+    "name": "ELECTRICIAN_CUP_LOAD_SCHEMA_SAMPLE",
+    "kind": "load",
+    "schema_reference": "Electrician Cup load-forecasting public/third-party schema references",
+    "reference_url": "https://blog.csdn.net/qq_29918313/article/details/105653955",
+    "sample_file": "electrician_cup_load_sample.csv"
   }
 ]

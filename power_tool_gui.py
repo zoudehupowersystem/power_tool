@@ -411,6 +411,7 @@ class ApproximationToolGUI(tk.Tk):
         self.renewable_forecast_tab = ttk.Frame(notebook)
         self.comtrade_tab = ttk.Frame(notebook)
 
+        notebook.add(self.comtrade_tab, text="录波曲线")
         notebook.add(self.freq_tab, text="频率动态")
         notebook.add(self.osc_tab, text="机电振荡")
         notebook.add(self.volt_tab, text="电压无功分析")
@@ -421,7 +422,6 @@ class ApproximationToolGUI(tk.Tk):
         notebook.add(self.sc_tab, text="短路电流计算")
         notebook.add(self.load_forecast_tab, text="负荷预测")
         notebook.add(self.renewable_forecast_tab, text="新能源预测")
-        notebook.add(self.comtrade_tab, text="录波曲线")
 
         self._line_geometry_window: tk.Toplevel | None = None
         self._line_geometry_entries: dict[str, ttk.Entry] = {}

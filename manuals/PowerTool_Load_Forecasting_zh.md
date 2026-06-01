@@ -4,8 +4,8 @@
 
 ## 数据
 
-- 内置 `CAISO_LOAD_SAMPLE`、`ERCOT_LOAD_SAMPLE`、`GEFCOM_LOAD_SAMPLE` 三个离线演示数据集。
-- 也可导入 CSV，常见表头会自动识别：`timestamp` / `time` / `datetime`、`load_mw` / `demand_mw` / `SYS_FCST_ACT_MW` / `total_load`、`temperature_c` 等。
+- 内置 `CAISO_LOAD_SAMPLE`、`ERCOT_LOAD_SAMPLE`、`GEFCOM_LOAD_SAMPLE`、`CSG_LOAD_FORECAST_SCHEMA_SAMPLE`、`ELECTRICIAN_CUP_LOAD_SCHEMA_SAMPLE` 等离线演示/格式样例。
+- 也可导入 CSV，常见表头会自动识别：`timestamp` / `time` / `datetime`、`load_mw` / `demand_mw` / `SYS_FCST_ACT_MW` / `total_load`、`temperature_c`、`日期`、`时刻`、`统调负荷`、`负荷`、`温度` 等。
 - 内置数据是小型演示样例，生产分析应替换为 ISO/RTO 或企业历史负荷、天气和节假日数据。
 
 ## 方法

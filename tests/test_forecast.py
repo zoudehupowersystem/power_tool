@@ -165,3 +165,18 @@ def test_renewable_aggregate_mode_is_rejected() -> None:
         assert "仅支持" in str(exc)
     else:
         raise AssertionError("aggregate renewable forecast should be rejected")
+
+
+def test_chinese_and_baidu_kdd_schema_samples_parse() -> None:
+    csg_rows = load_builtin_forecast_dataset("CSG_LOAD_FORECAST_SCHEMA_SAMPLE")
+    cup_rows = load_builtin_forecast_dataset("ELECTRICIAN_CUP_LOAD_SCHEMA_SAMPLE")
+    kdd_rows = load_builtin_forecast_dataset("BAIDU_KDD_SDWPF_WIND_SAMPLE")
+    assert len(csg_rows) >= 48 and csg_rows[0]["load_mw"] > 0
+    assert len(cup_rows) >= 48 and cup_rows[0]["load_mw"] > 0
+    assert len(kdd_rows) >= 48 and kdd_rows[0]["wind_mw"] >= 0
+    wind = forecast_day_ahead(
+        kdd_rows,
+        ForecastConfig(kind="renewable", target_date=date(2025, 1, 22), latitude=41.0, longitude=115.0, renewable_resource="wind"),
+    )
+    assert len(wind.points) == 24
+    assert any("资源=风电" in p.drivers for p in wind.points)

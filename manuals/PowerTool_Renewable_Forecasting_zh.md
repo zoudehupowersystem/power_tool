@@ -4,8 +4,8 @@
 
 ## 数据
 
-- 内置 `CAISO_RENEWABLE_SAMPLE` 与 `NREL_SOLAR_WIND_SAMPLE` 两个离线演示数据集。
-- CSV 可包含 `solar_mw`、`wind_mw`、`ghi_wm2`、`wind_speed_mps`、`temperature_c` 等字段。
+- 内置 `CAISO_RENEWABLE_SAMPLE`、`NREL_SOLAR_WIND_SAMPLE` 与 `BAIDU_KDD_SDWPF_WIND_SAMPLE` 离线演示/格式样例。
+- CSV 可包含 `solar_mw`、`wind_mw`、`ghi_wm2`、`wind_speed_mps`、`temperature_c`、`Wspd`、`Patv` 等字段。
 - 页面必须在“新能源类型”中选择 `solar` 或 `wind`，程序会按所选资源独立取 `solar_mw` 或 `wind_mw` 建模，不再做聚合新能源预测。
 
 ## 方法

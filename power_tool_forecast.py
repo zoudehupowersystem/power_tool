@@ -123,6 +123,39 @@ _DATASET_SPECS: tuple[dict[str, object], ...] = (
         "altitude_m": 1600.0,
         "notes": "Weather-resource sample with GHI and wind speed, suitable for PV/wind conversion testing.",
     },
+    {
+        "name": "BAIDU_KDD_SDWPF_WIND_SAMPLE",
+        "kind": "renewable",
+        "file": "baidu_kdd_sdwpf_wind_sample.csv",
+        "source": "Baidu KDD Cup 2022 / SDWPF wind-power schema sample",
+        "region": "China wind farm schema sample",
+        "latitude": 41.0,
+        "longitude": 115.0,
+        "altitude_m": 900.0,
+        "notes": "Compact schema sample for the public SDWPF/Baidu KDD Cup 2022 fields such as TurbID, Day, Tmstamp, Wspd and Patv.",
+    },
+    {
+        "name": "CSG_LOAD_FORECAST_SCHEMA_SAMPLE",
+        "kind": "load",
+        "file": "csg_load_forecast_sample.csv",
+        "source": "Southern Grid dispatch AI / load-forecasting public dataset schema sample",
+        "region": "China Southern Grid load schema sample",
+        "latitude": 23.13,
+        "longitude": 113.26,
+        "altitude_m": 20.0,
+        "notes": "Compact Chinese-column load forecast sample using 日期/时刻/统调负荷/气温-style headers.",
+    },
+    {
+        "name": "ELECTRICIAN_CUP_LOAD_SCHEMA_SAMPLE",
+        "kind": "load",
+        "file": "electrician_cup_load_sample.csv",
+        "source": "Electrician Cup load-forecasting schema sample",
+        "region": "China Electrician Cup load schema sample",
+        "latitude": 31.23,
+        "longitude": 121.47,
+        "altitude_m": 10.0,
+        "notes": "Compact schema sample for 电工杯-style load forecasting tables with 日期/时刻/负荷/温度 columns.",
+    },
 )
 
 
@@ -140,15 +173,17 @@ CLIMATE_BLOCKS: tuple[tuple[str, float, float, float, float, str], ...] = (
 
 
 _COLUMN_ALIASES = {
-    "timestamp": {"timestamp", "time", "datetime", "date_time", "interval_start", "interval_start_time", "opr_dt", "date"},
-    "hour": {"hour", "he", "hour_ending", "opr_hr", "opr_hour"},
-    "load_mw": {"load_mw", "demand_mw", "mw", "sys_fct_act_mw", "sys_fcst_act_mw", "total_load", "ercot", "load"},
+    "timestamp": {"timestamp", "time", "datetime", "date_time", "interval_start", "interval_start_time", "opr_dt", "date", "日期", "数据时间"},
+    "day_index": {"day", "turbine_day", "样本日"},
+    "minute_offset": {"tmstamp", "minute", "minutes", "分钟", "时刻"},
+    "hour": {"hour", "he", "hour_ending", "opr_hr", "opr_hour", "小时"},
+    "load_mw": {"load_mw", "demand_mw", "mw", "sys_fct_act_mw", "sys_fcst_act_mw", "total_load", "ercot", "load", "负荷", "统调负荷", "系统负荷", "电力负荷"},
     "renewable_mw": {"renewable_mw", "renewables_mw", "total_renewable_mw", "renewable", "ren_mw"},
-    "solar_mw": {"solar_mw", "solar", "pv_mw", "solar_power_mw"},
-    "wind_mw": {"wind_mw", "wind", "wind_power_mw"},
-    "temperature_c": {"temperature_c", "temp_c", "temperature", "dry_bulb_c", "t"},
-    "ghi_wm2": {"ghi_wm2", "ghi", "global_horizontal_irradiance", "solar_irradiance"},
-    "wind_speed_mps": {"wind_speed_mps", "wind_speed", "ws_mps", "windspeed"},
+    "solar_mw": {"solar_mw", "solar", "pv_mw", "solar_power_mw", "光伏", "光伏功率", "光伏出力"},
+    "wind_mw": {"wind_mw", "wind", "wind_power_mw", "patv", "active_power", "风电", "风电功率", "风电出力", "实际功率"},
+    "temperature_c": {"temperature_c", "temp_c", "temperature", "dry_bulb_c", "t", "气温", "温度"},
+    "ghi_wm2": {"ghi_wm2", "ghi", "global_horizontal_irradiance", "solar_irradiance", "辐照度", "总辐照"},
+    "wind_speed_mps": {"wind_speed_mps", "wind_speed", "ws_mps", "windspeed", "wspd", "风速"},
 }
 
 
@@ -257,8 +292,9 @@ def load_forecast_csv(path: str | Path, kind: str = "load") -> list[dict[str, fl
         if not reader.fieldnames:
             raise ValueError("CSV 缺少表头。")
         mapping = {name: _canonical_header(name) for name in reader.fieldnames}
-        if "timestamp" not in mapping.values():
-            raise ValueError("CSV 需要 timestamp/time/datetime/date_time 等时间列。")
+        mapped_values = set(mapping.values())
+        if "timestamp" not in mapped_values and not ({"day_index", "minute_offset"} <= mapped_values):
+            raise ValueError("CSV 需要 timestamp/time/datetime/date_time 等时间列，或 Day + Tmstamp 组合列。")
         rows: list[dict[str, float | datetime]] = []
         for raw in reader:
             item: dict[str, float | datetime] = {}
@@ -269,6 +305,13 @@ def load_forecast_csv(path: str | Path, kind: str = "load") -> list[dict[str, fl
                     item[canonical] = _parse_timestamp(raw.get(original, ""))
                 else:
                     item[canonical] = _safe_float_value(raw.get(original))
+            if "timestamp" not in item and "day_index" in item and "minute_offset" in item:
+                day = int(item.pop("day_index"))
+                minute_offset = int(item.pop("minute_offset"))
+                item["timestamp"] = datetime(2025, 1, 1) + timedelta(days=max(day - 1, 0), minutes=minute_offset)
+            if "timestamp" in item and "minute_offset" in item and isinstance(item["timestamp"], datetime):
+                minute_offset = int(item.pop("minute_offset"))
+                item["timestamp"] = item["timestamp"].replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(minutes=minute_offset)
             if "timestamp" in item and "hour" in item and isinstance(item["timestamp"], datetime):
                 hour = int(item.pop("hour"))
                 hour = hour - 1 if 1 <= hour <= 24 else hour
@@ -473,9 +516,9 @@ def _feature_vector(ts: datetime, config: ForecastConfig, temp_c: float, ghi_wm2
 def _target_value(row: dict[str, float | datetime], config: ForecastConfig, resource: str = "load") -> float:
     if config.kind == "renewable":
         if resource == "solar":
-            return max(0.0, _finite_float(row.get("solar_mw"), _finite_float(row.get("renewable_mw"), 0.0)))
+            return max(0.0, _finite_float(row.get("solar_mw"), 0.0))
         if resource == "wind":
-            return max(0.0, _finite_float(row.get("wind_mw"), _finite_float(row.get("renewable_mw"), 0.0)))
+            return max(0.0, _finite_float(row.get("wind_mw"), 0.0))
     return max(0.0, _finite_float(row.get("load_mw"), 0.0))
 
 
@@ -557,7 +600,7 @@ def forecast_day_ahead(rows: Iterable[dict[str, float | datetime]], config: Fore
         driver = f"星期{ts.weekday()+1}/{holiday_text}，{climate}{resource_text}，T={temp:.1f}℃，GHI={ghi:.0f}W/m²，风={wind:.1f}m/s"
         points.append(ForecastPoint(ts, float(value), p10, p90, temp, ghi, wind, driver))
     notes = (
-        "日前 24 小时预测；结果用于调度员筛查和计划校核，不替代正式市场/调度系统。",
+        "日前 24 小时预测。",
         "特征已包含小时、星期、节假日、南北半球季节项、经纬度、海拔和气候板块。",
         "缺失气象数据时会优先使用历史同小时气候值，并用经纬度、海拔和气候板块估算温度/GHI/风速。",
         "新能源预测仅支持风电与光伏两类独立资源；光伏资源在后处理阶段执行太阳高度角小于 0° 时夜间清零规则，不依赖模型自行学习。",
