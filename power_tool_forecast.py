@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import csv
-import importlib
-import importlib.util
 import json
 import math
 from dataclasses import dataclass
@@ -13,6 +11,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 
 
 DATA_DIR = Path(__file__).resolve().parent / "data" / "forecast_samples"
@@ -59,9 +58,9 @@ class ForecastConfig:
     holiday_config_path: str | Path | None = None
     renewable_capacity_mw: float | None = None
     renewable_resource: str = "solar"
-    algorithm: str = "adaptive_ensemble"
+    algorithm: str = "sklearn_auto"
     selected_algorithms: tuple[str, ...] | None = None
-    interval_minutes: int = 60
+    interval_minutes: int = 15
     horizon_hours: int = 24
     use_special_events: bool = True
     event_config_path: str | Path | None = None
@@ -116,7 +115,7 @@ class ForecastResult:
     algorithm_metrics: tuple[ForecastAlgorithmMetric, ...] = ()
     daily_stats: tuple[tuple[str, float], ...] = ()
     algorithm_code: str = ""
-    interval_minutes: int = 60
+    interval_minutes: int = 15
 
 
 @dataclass(frozen=True)
@@ -271,15 +270,23 @@ _DATASET_SPECS: tuple[dict[str, object], ...] = (
 _DEFAULT_FORECAST_BUILTIN_CONFIG: dict[str, object] = {
     "schema_version": "2026.06",
     "defaults": {
-        "algorithm": "adaptive_ensemble",
-        "interval_minutes": 60,
+        "algorithm": "sklearn_auto",
+        "interval_minutes": 15,
         "horizon_hours": 24,
-        "ensemble_candidates": ["ridge", "huber", "hourly_analog", "exp_smoothing", "seasonal_naive"],
+        "ensemble_candidates": ["gradient_boosting", "random_forest", "huber", "ridge", "hourly_analog", "exp_smoothing", "seasonal_naive"],
         "validation_min_points": 24,
         "validation_fraction": 0.20,
         "confidence_quantile": 0.80,
     },
     "algorithm_catalog": [
+        {
+            "code": "sklearn_auto",
+            "label": "scikit-learn自动引擎",
+            "description": "默认引擎；强制依赖 scikit-learn，并优先使用梯度提升树/随机森林。",
+            "supports": ["load", "renewable"],
+            "requires": ["sklearn"],
+            "priority": 5,
+        },
         {
             "code": "adaptive_ensemble",
             "label": "自适应综合方案",
@@ -299,7 +306,7 @@ _DEFAULT_FORECAST_BUILTIN_CONFIG: dict[str, object] = {
         {
             "code": "huber",
             "label": "Huber鲁棒回归",
-            "description": "对异常点更稳健；安装 scikit-learn 时使用 HuberRegressor，否则退化为加权岭回归。",
+            "description": "对异常点更稳健；使用两阶段 Huber 权重岭回归，作为鲁棒基线。",
             "supports": ["load", "renewable"],
             "requires": [],
             "priority": 30,
@@ -331,7 +338,7 @@ _DEFAULT_FORECAST_BUILTIN_CONFIG: dict[str, object] = {
         {
             "code": "random_forest",
             "label": "随机森林",
-            "description": "安装 scikit-learn 时启用的非线性树模型，适合气象非线性较强场景。",
+            "description": "基于强制依赖 scikit-learn 的非线性树模型，适合气象非线性较强场景。",
             "supports": ["load", "renewable"],
             "requires": ["sklearn"],
             "priority": 70,
@@ -339,7 +346,7 @@ _DEFAULT_FORECAST_BUILTIN_CONFIG: dict[str, object] = {
         {
             "code": "gradient_boosting",
             "label": "梯度提升树",
-            "description": "安装 scikit-learn 时启用的提升树模型，适合小样本非线性拟合对比。",
+            "description": "基于强制依赖 scikit-learn 的提升树模型，适合小样本非线性拟合对比。",
             "supports": ["load", "renewable"],
             "requires": ["sklearn"],
             "priority": 80,
@@ -1118,12 +1125,14 @@ def _rows_to_features(
 
 def _future_grid(config: ForecastConfig) -> list[datetime]:
     interval = int(config.interval_minutes)
-    if interval not in {5, 10, 15, 30, 60}:
-        raise ValueError("时段间隔仅支持 5、10、15、30 或 60 分钟。")
+    if interval < 1 or interval > 30:
+        raise ValueError("时段间隔需为 1 到 30 分钟之间的整数。")
     if config.horizon_hours <= 0:
         raise ValueError("预测时长必须大于 0。")
-    n_points = int(round(config.horizon_hours * 60 / interval))
-    return [datetime.combine(config.target_date, datetime.min.time()) + timedelta(minutes=interval * i) for i in range(n_points)]
+    total_minutes = int(round(config.horizon_hours * 60))
+    n_points = int(math.ceil(total_minutes / interval))
+    start = datetime.combine(config.target_date, datetime.min.time())
+    return [start + timedelta(minutes=interval * i) for i in range(n_points) if interval * i < total_minutes]
 
 
 def _future_features(times: Sequence[datetime], history: list[dict[str, float | datetime]], config: ForecastConfig, climate: str) -> tuple[np.ndarray, list[tuple[float, float, float]]]:
@@ -1183,19 +1192,15 @@ def _huber_values(x_train: np.ndarray, y_train: np.ndarray, x_future: np.ndarray
     return _weighted_ridge_values(x_train, y_train, x_future, weights), "两阶段Huber权重岭回归。"
 
 def _sklearn_tree_values(code: str, x_train: np.ndarray, y_train: np.ndarray, x_future: np.ndarray) -> tuple[np.ndarray | None, str]:
-    if importlib.util.find_spec("sklearn") is None:
-        return None, "未安装 scikit-learn，树模型不可用。"
     try:
         if code == "random_forest":
-            ensemble = importlib.import_module("sklearn.ensemble")
-            model = ensemble.RandomForestRegressor(n_estimators=32, max_depth=7, min_samples_leaf=2, random_state=42, n_jobs=1)
+            model = RandomForestRegressor(n_estimators=32, max_depth=7, min_samples_leaf=2, random_state=42, n_jobs=1)
         else:
-            ensemble = importlib.import_module("sklearn.ensemble")
-            model = ensemble.GradientBoostingRegressor(n_estimators=60, max_depth=3, learning_rate=0.06, random_state=42)
+            model = GradientBoostingRegressor(n_estimators=60, max_depth=3, learning_rate=0.06, random_state=42)
         model.fit(x_train, y_train)
         return np.asarray(model.predict(x_future), dtype=float), ""
     except Exception as exc:  # pragma: no cover - sklearn version details vary
-        return None, f"树模型调用失败：{exc}"
+        return None, f"scikit-learn 树模型调用失败：{exc}"
 
 
 def _slot_key(ts: datetime) -> tuple[int, int]:
@@ -1316,6 +1321,12 @@ def _predict_algorithm(
         x_future, _fw = _future_features(future_times, rows_train, config, climate)
     if y_train.size == 0:
         return np.zeros(len(future_times), dtype=float), False, "训练样本为空。"
+    if code == "sklearn_auto":
+        for sklearn_code in ("gradient_boosting", "random_forest"):
+            values, note = _sklearn_tree_values(sklearn_code, x_train, y_train, x_future)
+            if values is not None:
+                return values, True, f"默认 scikit-learn 引擎：{forecast_algorithm_label(sklearn_code)}。" + (f" {note}" if note else "")
+        return np.zeros(len(future_times), dtype=float), False, "scikit-learn 自动引擎未能完成梯度提升树或随机森林训练。"
     if code in {"ridge", "adaptive_ridge"}:
         return _ridge_values(x_train, y_train, x_future), True, ""
     if code == "huber":
@@ -1366,9 +1377,10 @@ def _candidate_algorithms(config: ForecastConfig) -> list[str]:
         return [str(code) for code in config.selected_algorithms]
     cfg = load_forecast_builtin_config()
     defaults = cfg.get("defaults", {}) if isinstance(cfg.get("defaults"), dict) else {}
-    candidates = defaults.get("ensemble_candidates", ["ridge", "huber", "hourly_analog", "exp_smoothing", "seasonal_naive"])
+    fallback_candidates = ["gradient_boosting", "random_forest", "huber", "ridge", "hourly_analog", "exp_smoothing", "seasonal_naive"]
+    candidates = defaults.get("ensemble_candidates", fallback_candidates)
     if not isinstance(candidates, list):
-        candidates = ["ridge", "huber", "hourly_analog", "exp_smoothing", "seasonal_naive"]
+        candidates = fallback_candidates
     return [str(code) for code in candidates if str(code) != "adaptive_ensemble"]
 
 
@@ -1598,6 +1610,45 @@ def _daily_stats(
     return tuple(stats)
 
 
+def _interpolate_and_smooth_forecast(forecast: np.ndarray, config: ForecastConfig) -> np.ndarray:
+    """Apply sub-hour interpolation and light curve smoothing for high-resolution outputs."""
+    values = np.asarray(forecast, dtype=float)
+    n = values.size
+    if n < 3:
+        return values
+    interval = max(1, int(config.interval_minutes))
+    adjusted = values.copy()
+
+    # For 1–29 minute outputs, use 30-minute anchor points and linearly
+    # interpolate back to the user-selected grid.  This avoids stair-step
+    # behavior when historical samples are hourly or half-hourly.
+    if interval < 30:
+        anchor_step = max(1, int(round(30.0 / interval)))
+        if anchor_step > 1 and n > anchor_step:
+            x = np.arange(n, dtype=float)
+            anchors = np.arange(0, n, anchor_step, dtype=int)
+            if anchors[-1] != n - 1:
+                anchors = np.append(anchors, n - 1)
+            interpolated = np.interp(x, anchors.astype(float), adjusted[anchors])
+            adjusted = 0.35 * adjusted + 0.65 * interpolated
+
+    # Triangular smoothing keeps day-ahead and renewable curves readable while
+    # retaining most of the model signal.  Physical renewable limits are applied
+    # again after smoothing in the main workflow.
+    window = max(3, int(round(30.0 / interval)) + 1)
+    if window % 2 == 0:
+        window += 1
+    window = min(window, n if n % 2 == 1 else n - 1)
+    if window >= 3:
+        half = window // 2
+        weights = np.asarray([half + 1 - abs(i - half) for i in range(window)], dtype=float)
+        weights /= float(np.sum(weights))
+        padded = np.pad(adjusted, (half, half), mode="edge")
+        smoothed = np.convolve(padded, weights, mode="valid")
+        adjusted = 0.25 * values + 0.75 * smoothed
+    return np.maximum(adjusted, 0.0)
+
+
 def forecast_day_ahead(rows: Iterable[dict[str, float | datetime]], config: ForecastConfig) -> ForecastResult:
     history = sorted(list(rows), key=lambda r: r["timestamp"])  # type: ignore[index]
     if len(history) < 48:
@@ -1613,6 +1664,7 @@ def forecast_day_ahead(rows: Iterable[dict[str, float | datetime]], config: Fore
     forecast, solar_irradiance_rows = _solar_physical_correction(forecast, future_times, future_weather, config, renewable_resource)
     forecast = _apply_renewable_limits(forecast, future_times, config, renewable_resource)
     forecast, applied_events = _apply_special_events(forecast, future_times, config, renewable_resource)
+    forecast = _interpolate_and_smooth_forecast(forecast, config)
     forecast = _apply_renewable_limits(forecast, future_times, config, renewable_resource)
     mae = float(np.mean(np.abs(residual))) if residual.size else 0.0
     cfg = load_forecast_builtin_config()
@@ -1656,7 +1708,9 @@ def forecast_day_ahead(rows: Iterable[dict[str, float | datetime]], config: Fore
         f"日前 {config.horizon_hours} 小时、{len(points)} 点预测；时段间隔 {config.interval_minutes} 分钟。",
         "特征已包含小时、星期、节假日、南北半球季节项、经纬度、海拔、太阳高度角、太阳方位角、组件倾斜面辐照度 POA 和气候板块。",
         "缺失气象数据时会优先使用历史同小时/同刻气候值，并用经纬度、海拔和气候板块估算温度/GHI/风速；光伏未来 GHI 会继续叠加用户天气场景修正。",
+        "默认引擎为 scikit-learn 自动引擎；本软件强制要求安装 scikit-learn，并优先调用梯度提升树/随机森林。",
         "算法可由用户选择；自适应综合方案会对候选模型做留出校验，并按误差反比分配权重。",
+        "1–30 分钟时间颗粒度均支持；高分辨率输出会基于 30 分钟锚点做线性插值，并进行轻量曲线平滑。",
         "新能源预测仅支持风电与光伏两类独立资源；光伏资源已联动太阳位置、天气修正、组件倾角/方位角、POA 辐照度和组件温度系数，夜间仍强制清零。",
         "节假日内置中国和美国；其它国家/地区可通过 data/forecast_holidays.json 或 ForecastConfig.holiday_config_path 扩展。",
         "特殊事件修正可通过 data/forecast_builtin_config.json 开启，支持绝对 MW 和相对比例修正。",
@@ -1772,3 +1826,220 @@ def export_forecast_result_csv(result: ForecastResult, path: str | Path) -> Path
         for p in result.points:
             writer.writerow([p.timestamp.isoformat(sep=" "), f"{p.value_mw:.6g}", f"{p.p10_mw:.6g}", f"{p.p90_mw:.6g}", f"{p.temperature_c:.6g}", f"{p.ghi_wm2:.6g}", f"{p.poa_wm2:.6g}", f"{p.solar_altitude_deg:.6g}", f"{p.solar_azimuth_deg:.6g}", f"{p.incidence_angle_deg:.6g}", f"{p.weather_factor:.6g}", f"{p.pv_power_factor:.6g}", f"{p.wind_speed_mps:.6g}", p.drivers])
     return target
+
+ANNUAL_LOAD_SAMPLE_PATH = Path(__file__).resolve().parent / "data" / "annual_load_forecast_sample.json"
+
+
+@dataclass(frozen=True)
+class AnnualLoadHistoryPoint:
+    year: int
+    energy_gwh: float
+    max_load_mw: float
+    gdp_billion: float
+    population_million: float
+    primary_gdp_billion: float = 0.0
+    secondary_gdp_billion: float = 0.0
+    tertiary_gdp_billion: float = 0.0
+
+
+@dataclass(frozen=True)
+class AnnualLoadForecastConfig:
+    horizon_years: int = 10
+    latitude: float = NANJING_LATITUDE
+    longitude: float = NANJING_LONGITUDE
+    climate_block: str = ""
+    algorithm: str = "综合法"
+    gdp_growth_pct: float = 5.0
+    population_growth_pct: float = 1.0
+    primary_growth_pct: float = 2.0
+    secondary_growth_pct: float = 4.0
+    tertiary_growth_pct: float = 6.0
+    coincidence_factor: float = 0.92
+    dual_carbon_factor_pct: float = -0.8
+    electrification_factor_pct: float = 1.5
+
+
+@dataclass(frozen=True)
+class AnnualLoadForecastYear:
+    year: int
+    energy_gwh: float
+    max_load_mw: float
+    p10_energy_gwh: float
+    p90_energy_gwh: float
+    p10_max_load_mw: float
+    p90_max_load_mw: float
+    load_factor: float
+
+
+@dataclass(frozen=True)
+class SeasonalLoadShape:
+    season: str
+    values_mw: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class AnnualLoadForecastResult:
+    region: str
+    source: str
+    climate_block: str
+    algorithm: str
+    base_year: int
+    years: tuple[AnnualLoadForecastYear, ...]
+    seasonal_shapes: tuple[SeasonalLoadShape, ...]
+    notes: tuple[str, ...]
+
+
+def load_annual_load_sample(path: str | Path | None = None) -> dict[str, object]:
+    """Load the built-in annual planning sample dataset."""
+    target = Path(path) if path is not None else ANNUAL_LOAD_SAMPLE_PATH
+    return json.loads(target.read_text(encoding="utf-8"))
+
+
+def _annual_history_from_dataset(dataset: dict[str, object]) -> list[AnnualLoadHistoryPoint]:
+    rows: list[AnnualLoadHistoryPoint] = []
+    for raw in dataset.get("history", []):
+        if not isinstance(raw, dict):
+            continue
+        rows.append(AnnualLoadHistoryPoint(
+            year=int(raw["year"]),
+            energy_gwh=float(raw["energy_gwh"]),
+            max_load_mw=float(raw["max_load_mw"]),
+            gdp_billion=float(raw.get("gdp_billion", 0.0)),
+            population_million=float(raw.get("population_million", 0.0)),
+            primary_gdp_billion=float(raw.get("primary_gdp_billion", 0.0)),
+            secondary_gdp_billion=float(raw.get("secondary_gdp_billion", 0.0)),
+            tertiary_gdp_billion=float(raw.get("tertiary_gdp_billion", 0.0)),
+        ))
+    rows.sort(key=lambda p: p.year)
+    return rows
+
+
+def _cagr(first: float, last: float, periods: int) -> float:
+    if first <= 0 or last <= 0 or periods <= 0:
+        return 0.0
+    return (last / first) ** (1.0 / periods) - 1.0
+
+
+def _linear_forecast(years: np.ndarray, values: np.ndarray, future_years: np.ndarray) -> np.ndarray:
+    if len(values) < 2:
+        return np.full(len(future_years), float(values[-1]) if len(values) else 0.0)
+    coef = np.polyfit(years.astype(float), values.astype(float), 1)
+    predicted = np.polyval(coef, future_years.astype(float))
+    return np.maximum(predicted, values[-1] * 0.50)
+
+
+def forecast_annual_load(dataset: dict[str, object], config: AnnualLoadForecastConfig) -> AnnualLoadForecastResult:
+    """Forecast annual electricity use and coincident maximum load for grid planning."""
+    horizon = max(5, min(20, int(config.horizon_years)))
+    history = _annual_history_from_dataset(dataset)
+    if len(history) < 2:
+        raise ValueError("年度负荷预测至少需要两年历史电量与最大负荷数据。")
+
+    base = history[-1]
+    hist_years = np.asarray([p.year for p in history], dtype=float)
+    hist_energy = np.asarray([p.energy_gwh for p in history], dtype=float)
+    hist_peak = np.asarray([p.max_load_mw for p in history], dtype=float)
+    future_years = np.arange(base.year + 1, base.year + horizon + 1, dtype=int)
+
+    # 1) 趋势外推法：历史线性趋势与 CAGR 折中，避免单一年份波动支配长期结果。
+    trend_linear = _linear_forecast(hist_years, hist_energy, future_years.astype(float))
+    energy_cagr = _cagr(hist_energy[0], hist_energy[-1], len(hist_energy) - 1)
+    trend_cagr = np.asarray([base.energy_gwh * (1.0 + energy_cagr) ** i for i in range(1, horizon + 1)], dtype=float)
+    trend_energy = 0.55 * trend_cagr + 0.45 * trend_linear
+
+    # 2) 弹性系数法：由历史电量/GDP 弹性估计，并允许分产业、人口输入修正。
+    gdp_cagr = _cagr(history[0].gdp_billion, base.gdp_billion, len(history) - 1)
+    elasticity = (energy_cagr / gdp_cagr) if gdp_cagr > 1e-6 else 0.85
+    elasticity = float(min(1.35, max(0.45, elasticity)))
+    sector_mix_growth = (
+        0.08 * config.primary_growth_pct + 0.58 * config.secondary_growth_pct + 0.34 * config.tertiary_growth_pct
+    ) / 100.0
+    macro_growth = 0.65 * config.gdp_growth_pct / 100.0 + 0.20 * sector_mix_growth + 0.15 * config.population_growth_pct / 100.0
+    policy_growth = (config.dual_carbon_factor_pct + config.electrification_factor_pct) / 100.0
+    elasticity_growth = max(-0.02, elasticity * macro_growth + policy_growth)
+    elasticity_energy = np.asarray([base.energy_gwh * (1.0 + elasticity_growth) ** i for i in range(1, horizon + 1)], dtype=float)
+
+    # 3) 综合法：长期规划推荐，以趋势稳态、宏观弹性、政策修正加权。
+    algorithm = config.algorithm.strip() or "综合法"
+    if "趋势" in algorithm:
+        energy = trend_energy
+        method_note = "趋势外推法：历史 CAGR 与线性趋势折中。"
+    elif "弹性" in algorithm:
+        energy = elasticity_energy
+        method_note = "弹性系数法：GDP/人口/分产业增长与历史电量弹性联动。"
+    else:
+        energy = 0.45 * trend_energy + 0.55 * elasticity_energy
+        method_note = "综合法：趋势外推、弹性系数、双碳与再电气化政策修正加权。"
+
+    peak_cagr = _cagr(hist_peak[0], hist_peak[-1], len(hist_peak) - 1)
+    avg_load_base = base.energy_gwh * 1000.0 / 8760.0
+    load_factor_base = avg_load_base / max(base.max_load_mw, 1e-6)
+    climate = config.climate_block or str(dataset.get("climate_block") or classify_climate_block(config.latitude, config.longitude, NANJING_ALTITUDE_M))
+    hot_summer = any(token in climate for token in ("夏热", "华东", "华南", "湿润", "亚热带"))
+    climate_peak_adder = 0.010 if hot_summer else 0.004
+    peak_growth = 0.58 * peak_cagr + 0.42 * elasticity_growth + climate_peak_adder
+    peak_growth += max(0.0, 0.96 - config.coincidence_factor) * 0.010
+
+    years: list[AnnualLoadForecastYear] = []
+    for idx, (yr, e) in enumerate(zip(future_years, energy), start=1):
+        lf = min(0.72, max(0.45, load_factor_base - 0.0025 * idx + 0.001 * (config.dual_carbon_factor_pct < 0)))
+        peak_from_energy = e * 1000.0 / (8760.0 * lf)
+        peak_from_growth = base.max_load_mw * (1.0 + peak_growth) ** idx
+        peak = (0.62 * peak_from_energy + 0.38 * peak_from_growth) * max(0.70, min(1.05, config.coincidence_factor / 0.92))
+        spread = 0.055 + 0.006 * idx
+        years.append(AnnualLoadForecastYear(
+            year=int(yr),
+            energy_gwh=float(e),
+            max_load_mw=float(peak),
+            p10_energy_gwh=float(e * (1.0 - spread)),
+            p90_energy_gwh=float(e * (1.0 + spread)),
+            p10_max_load_mw=float(peak * (1.0 - spread * 1.1)),
+            p90_max_load_mw=float(peak * (1.0 + spread * 1.1)),
+            load_factor=float(lf),
+        ))
+
+    final_peak = years[-1].max_load_mw
+    season_profiles = {
+        "春季": [0.62,0.58,0.55,0.54,0.56,0.62,0.72,0.80,0.84,0.83,0.80,0.79,0.78,0.79,0.82,0.86,0.90,0.94,0.96,0.92,0.84,0.76,0.70,0.65],
+        "夏季": [0.70,0.66,0.63,0.62,0.64,0.70,0.80,0.88,0.92,0.94,0.96,0.98,0.97,0.96,0.98,1.00,0.99,0.98,0.97,0.94,0.88,0.82,0.78,0.73],
+        "秋季": [0.60,0.56,0.54,0.53,0.55,0.61,0.71,0.79,0.83,0.82,0.79,0.78,0.77,0.78,0.81,0.85,0.89,0.92,0.93,0.89,0.82,0.74,0.68,0.63],
+        "冬季": [0.68,0.64,0.61,0.60,0.62,0.70,0.82,0.90,0.93,0.92,0.88,0.84,0.82,0.83,0.86,0.90,0.95,0.98,0.99,0.94,0.87,0.80,0.75,0.71],
+    }
+    if not hot_summer:
+        season_profiles["冬季"], season_profiles["夏季"] = season_profiles["夏季"], season_profiles["冬季"]
+    shapes = tuple(SeasonalLoadShape(season, tuple(final_peak * v for v in profile)) for season, profile in season_profiles.items())
+    notes = (
+        f"样例来源：{dataset.get('source', '内置数据集')}；本功能面向规划，不包含空间负荷预测。",
+        method_note,
+        "输入考虑历史负荷、经纬度/气候板块、GDP/人口及分产业增长、负荷同时率、双碳目标与再电气化政策。",
+        "P10/P90 为规划不确定性带，年限越远区间越宽；结果宜结合用户报装、产业项目清单和地方能源规划校核。",
+    )
+    return AnnualLoadForecastResult(
+        region=str(dataset.get("region", "规划区域")),
+        source=str(dataset.get("source", "内置年度负荷规划样例")),
+        climate_block=climate,
+        algorithm=algorithm,
+        base_year=base.year,
+        years=tuple(years),
+        seasonal_shapes=shapes,
+        notes=notes,
+    )
+
+
+def format_annual_load_forecast_summary(result: AnnualLoadForecastResult) -> str:
+    lines = [
+        "══ 年度负荷预测（规划用） ═════════════════════",
+        f"区域：{result.region}",
+        f"气候板块：{result.climate_block}",
+        f"基准年：{result.base_year}；方法：{result.algorithm}",
+        "",
+        "年份      电量/GWh       P10-P90/GWh       最大负荷/MW       P10-P90/MW     负荷率",
+    ]
+    for row in result.years:
+        lines.append(
+            f"{row.year:<6d} {row.energy_gwh:10.1f}  {row.p10_energy_gwh:8.1f}-{row.p90_energy_gwh:<8.1f}"
+            f" {row.max_load_mw:12.1f}  {row.p10_max_load_mw:8.1f}-{row.p90_max_load_mw:<8.1f} {row.load_factor:7.3f}"
+        )
+    lines.extend(["", "典型负荷形态：右侧曲线展示最终规划年春/夏/秋/冬 24 小时典型日形态。", "", "说明："])
+    lines.extend([f"- {note}" for note in result.notes])
+    return "\n".join(lines)

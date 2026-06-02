@@ -85,6 +85,7 @@ Required packages:
 
 - `numpy`
 - `matplotlib`
+- `scikit-learn` (mandatory for the forecasting engine; the application imports it at runtime)
 - `tkinter` (usually included with standard Python distributions)
 
 Example setup:
@@ -93,7 +94,7 @@ Example setup:
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
-python -m pip install numpy matplotlib
+python -m pip install -r requirements.txt
 ```
 
 ## Launching the GUI

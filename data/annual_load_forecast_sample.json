@@ -1,0 +1,30 @@
+{
+  "name": "假想江南新区年度负荷规划样例",
+  "source": "程序内置假想区域样例（用于无公开完整规划数据时演示）",
+  "region": "江南新区",
+  "latitude": 31.85,
+  "longitude": 118.92,
+  "climate_block": "华东湿润夏热冬冷气候区",
+  "base_year": 2025,
+  "history": [
+    {"year": 2018, "energy_gwh": 3900, "max_load_mw": 760, "gdp_billion": 82, "population_million": 0.92, "primary_gdp_billion": 3.2, "secondary_gdp_billion": 43.5, "tertiary_gdp_billion": 35.3},
+    {"year": 2019, "energy_gwh": 4140, "max_load_mw": 805, "gdp_billion": 88, "population_million": 0.95, "primary_gdp_billion": 3.3, "secondary_gdp_billion": 46.2, "tertiary_gdp_billion": 38.5},
+    {"year": 2020, "energy_gwh": 4320, "max_load_mw": 842, "gdp_billion": 93, "population_million": 0.98, "primary_gdp_billion": 3.4, "secondary_gdp_billion": 48.1, "tertiary_gdp_billion": 41.5},
+    {"year": 2021, "energy_gwh": 4680, "max_load_mw": 905, "gdp_billion": 102, "population_million": 1.02, "primary_gdp_billion": 3.6, "secondary_gdp_billion": 52.7, "tertiary_gdp_billion": 45.7},
+    {"year": 2022, "energy_gwh": 4910, "max_load_mw": 952, "gdp_billion": 109, "population_million": 1.05, "primary_gdp_billion": 3.7, "secondary_gdp_billion": 55.6, "tertiary_gdp_billion": 50.0},
+    {"year": 2023, "energy_gwh": 5200, "max_load_mw": 1008, "gdp_billion": 118, "population_million": 1.08, "primary_gdp_billion": 3.9, "secondary_gdp_billion": 60.2, "tertiary_gdp_billion": 53.9},
+    {"year": 2024, "energy_gwh": 5520, "max_load_mw": 1065, "gdp_billion": 128, "population_million": 1.11, "primary_gdp_billion": 4.0, "secondary_gdp_billion": 65.1, "tertiary_gdp_billion": 58.9},
+    {"year": 2025, "energy_gwh": 5840, "max_load_mw": 1125, "gdp_billion": 139, "population_million": 1.14, "primary_gdp_billion": 4.1, "secondary_gdp_billion": 70.5, "tertiary_gdp_billion": 64.4}
+  ],
+  "default_inputs": {
+    "horizon_years": 10,
+    "gdp_growth_pct": 5.2,
+    "population_growth_pct": 1.1,
+    "primary_growth_pct": 2.0,
+    "secondary_growth_pct": 4.6,
+    "tertiary_growth_pct": 6.4,
+    "coincidence_factor": 0.92,
+    "dual_carbon_factor_pct": -0.8,
+    "electrification_factor_pct": 1.6
+  }
+}

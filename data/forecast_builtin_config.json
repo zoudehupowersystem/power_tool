@@ -1,12 +1,14 @@
 {
   "schema_version": "2026.06",
   "defaults": {
-    "algorithm": "adaptive_ensemble",
-    "interval_minutes": 60,
+    "algorithm": "sklearn_auto",
+    "interval_minutes": 15,
     "horizon_hours": 24,
     "ensemble_candidates": [
-      "ridge",
+      "gradient_boosting",
+      "random_forest",
       "huber",
+      "ridge",
       "hourly_analog",
       "exp_smoothing",
       "seasonal_naive"
@@ -28,6 +30,19 @@
     "pv_noct_c": 45.0
   },
   "algorithm_catalog": [
+    {
+      "code": "sklearn_auto",
+      "label": "scikit-learn自动引擎",
+      "description": "默认引擎；强制依赖 scikit-learn，并优先使用梯度提升树/随机森林。",
+      "supports": [
+        "load",
+        "renewable"
+      ],
+      "requires": [
+        "sklearn"
+      ],
+      "priority": 5
+    },
     {
       "code": "adaptive_ensemble",
       "label": "自适应综合方案",
@@ -53,7 +68,7 @@
     {
       "code": "huber",
       "label": "Huber鲁棒回归",
-      "description": "对坏点、尖峰点更稳健；安装 scikit-learn 时调用 HuberRegressor，否则使用两阶段加权岭回归。",
+      "description": "对坏点、尖峰点更稳健；使用两阶段 Huber 权重岭回归，作为鲁棒基线。",
       "supports": [
         "load",
         "renewable"
@@ -97,7 +112,7 @@
     {
       "code": "random_forest",
       "label": "随机森林",
-      "description": "安装 scikit-learn 时启用的非线性树模型，适合气象非线性较强场景。",
+      "description": "基于强制依赖 scikit-learn 的非线性树模型，适合气象非线性较强场景。",
       "supports": [
         "load",
         "renewable"
@@ -110,7 +125,7 @@
     {
       "code": "gradient_boosting",
       "label": "梯度提升树",
-      "description": "安装 scikit-learn 时启用的提升树模型，适合小样本非线性拟合对比。",
+      "description": "基于强制依赖 scikit-learn 的提升树模型，适合小样本非线性拟合对比。",
       "supports": [
         "load",
         "renewable"

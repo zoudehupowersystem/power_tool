@@ -106,6 +106,7 @@ power_tool/
 
 - `numpy`
 - `matplotlib`
+- `scikit-learn`（预测引擎强制依赖，程序运行时会直接导入）
 - `tkinter`（通常由标准 Python 发行版提供）
 
 ### 5.3 安装示例
@@ -114,7 +115,7 @@ power_tool/
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
-python -m pip install numpy matplotlib
+python -m pip install -r requirements.txt
 ```
 
 ### 5.4 启动 GUI

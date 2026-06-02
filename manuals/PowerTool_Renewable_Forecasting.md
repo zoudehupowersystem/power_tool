@@ -10,7 +10,7 @@ The renewable forecasting page estimates a 24-hour day-ahead renewable output cu
 
 ## Method
 
-The model uses date, hour, hemisphere-aware season, latitude, longitude, altitude, an automatically inferred climate block, GHI, and wind-speed patterns. Missing weather is inferred from historical same-hour patterns and geography/climate baselines. If a capacity limit is entered, forecasts are clipped to `[0, capacity]`. For solar/PV resources, post-processing enforces zero output whenever the solar altitude angle is below 0°, instead of relying on the model to learn sunset behavior. Built-in holidays cover China (CN) and the United States (US); other calendars can be added through `data/forecast_holidays.json` or a configured calendar path.
+The model uses the mandatory scikit-learn forecasting engine together with date, hour, hemisphere-aware season, latitude, longitude, altitude, an automatically inferred climate block, GHI, and wind-speed patterns. Missing weather is inferred from historical same-hour patterns and geography/climate baselines. If a capacity limit is entered, forecasts are clipped to `[0, capacity]`. For solar/PV resources, post-processing enforces zero output whenever the solar altitude angle is below 0°, instead of relying on the model to learn sunset behavior. Built-in holidays cover China (CN) and the United States (US); other calendars can be added through `data/forecast_holidays.json` or a configured calendar path.
 
 The page reports solar peaks, overnight wind contribution, ramps, and P10-P90 risk bands for the selected wind or solar resource.
 

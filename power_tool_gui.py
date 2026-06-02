@@ -85,16 +85,21 @@ from power_tool_comtrade import (
 )
 from power_tool_forecast import (
     ForecastConfig,
+    AnnualLoadForecastConfig,
     builtin_dataset_info,
     export_forecast_result_csv,
     export_forecast_result_json,
     forecast_algorithm_label,
     forecast_day_ahead,
+    forecast_annual_load,
     format_forecast_summary,
+    format_annual_load_forecast_summary,
     classify_climate_block,
     list_builtin_datasets,
     list_forecast_algorithms,
+    load_annual_load_sample,
     load_builtin_forecast_dataset,
+    load_forecast_builtin_config,
     load_forecast_csv,
     solar_day_profile,
     solar_irradiance_on_panel,
@@ -230,7 +235,7 @@ _MANUAL_LIBRARY: tuple[dict[str, str], ...] = (
     {"title_zh": "参数校核与标幺值：两绕组变压器", "title_en": "Parameter Validation & Per-Unit: Two-Winding Transformer", "basename": "PowerTool_Parameter_Validation_Two_Winding_Transformer"},
     {"title_zh": "参数校核与标幺值：三绕组变压器", "title_en": "Parameter Validation & Per-Unit: Three-Winding Transformer", "basename": "PowerTool_Parameter_Validation_Three_Winding_Transformer"},
     {"title_zh": "短路电流计算", "title_en": "Short-Circuit Current Calculation", "basename": "PowerTool_Short_Circuit_Current_Calculation"},
-    {"title_zh": "负荷预测", "title_en": "Load Forecasting", "basename": "PowerTool_Load_Forecasting"},
+    {"title_zh": "日前/年度负荷预测", "title_en": "Day-Ahead / Annual Load Forecasting", "basename": "PowerTool_Load_Forecasting"},
     {"title_zh": "新能源预测", "title_en": "Renewable Forecasting", "basename": "PowerTool_Renewable_Forecasting"},
     {"title_zh": "录波曲线", "title_en": "Waveform Viewer", "basename": "PowerTool_Waveform_Viewer"},
 )
@@ -450,6 +455,7 @@ class ApproximationToolGUI(tk.Tk):
         self.sc_tab = ttk.Frame(notebook)
         self.load_forecast_tab = ttk.Frame(notebook)
         self.renewable_forecast_tab = ttk.Frame(notebook)
+        self.annual_load_forecast_tab = ttk.Frame(notebook)
         self.comtrade_tab = ttk.Frame(notebook)
 
         notebook.add(self.comtrade_tab, text="录波曲线")
@@ -461,8 +467,9 @@ class ApproximationToolGUI(tk.Tk):
         notebook.add(self.loop_tab, text="配电网合环分析")
         notebook.add(self.param_tab, text="参数校核与标幺值")
         notebook.add(self.sc_tab, text="短路电流计算")
-        notebook.add(self.load_forecast_tab, text="负荷预测")
+        notebook.add(self.load_forecast_tab, text="日前负荷预测")
         notebook.add(self.renewable_forecast_tab, text="新能源预测")
+        notebook.add(self.annual_load_forecast_tab, text="年度负荷预测")
 
         self._line_geometry_window: tk.Toplevel | None = None
         self._line_geometry_entries: dict[str, ttk.Entry] = {}
@@ -486,6 +493,8 @@ class ApproximationToolGUI(tk.Tk):
         self._forecast_widgets: dict[str, dict[str, object]] = {}
         self._build_load_forecast_tab()
         self._build_renewable_forecast_tab()
+        self._annual_forecast_widgets: dict[str, object] = {}
+        self._build_annual_load_forecast_tab()
         self._build_comtrade_tab()
         self._build_ai_sidebar()
         self._hide_tab_muted_explanations()
@@ -505,6 +514,7 @@ class ApproximationToolGUI(tk.Tk):
             self.sc_tab,
             self.load_forecast_tab,
             self.renewable_forecast_tab,
+            self.annual_load_forecast_tab,
             self.comtrade_tab,
         ]
 
@@ -894,7 +904,8 @@ class ApproximationToolGUI(tk.Tk):
             "小扰动分析（SMIB）": "PowerTool_Small_Signal_Analysis",
             "配电网合环分析": "PowerTool_Distribution_Loop_Closure_Analysis",
             "短路电流计算": "PowerTool_Short_Circuit_Current_Calculation",
-            "负荷预测": "PowerTool_Load_Forecasting",
+            "日前负荷预测": "PowerTool_Load_Forecasting",
+            "年度负荷预测": "PowerTool_Load_Forecasting",
             "新能源预测": "PowerTool_Renewable_Forecasting",
             "录波曲线": "PowerTool_Waveform_Viewer",
         }
@@ -1086,7 +1097,7 @@ class ApproximationToolGUI(tk.Tk):
             pairs = [("系统电压 / kV", self.sc_u), ("线路长度 / km", self.sc_len), ("R1 / Ω/km", self.sc_r1), ("X1 / Ω/km", self.sc_x1),
                      ("R0 / Ω/km", self.sc_r0), ("X0 / Ω/km", self.sc_x0), ("左侧中性点电阻 / Ω", self.sc_rn), ("故障电阻 / Ω", self.sc_rf),
                      ("右侧相角 / °", self.sc_delta_right), ("故障点位置 / %", self.sc_fault_pos)]
-        elif tab == "负荷预测":
+        elif tab in {"日前负荷预测", "负荷预测"}:
             widgets = self._forecast_widgets.get("load", {})
             return (
                 f"数据集: {widgets.get('dataset_var').get() if widgets else '-'}\n"
@@ -1103,6 +1114,14 @@ class ApproximationToolGUI(tk.Tk):
                 f"位置: {widgets.get('lat_entry').get() if widgets else '-'}, {widgets.get('lon_entry').get() if widgets else '-'}；海拔 {widgets.get('alt_entry').get() if widgets else '-'} m\n"
                 f"装机容量上限: {capacity} MW\n"
                 f"节假日国家/地区: {widgets.get('holiday_var').get() if widgets else '-'}；新能源类型: {widgets.get('resource_var').get() if widgets else '-'}（风电/光伏独立预测）"
+            )
+        elif tab == "年度负荷预测":
+            widgets = self._annual_forecast_widgets
+            return (
+                f"区域: {widgets.get('region', '-')}\n"
+                f"年限: {widgets.get('horizon_entry').get() if widgets else '-'} 年；方法: {widgets.get('algorithm_var').get() if widgets else '-'}\n"
+                f"位置: {widgets.get('lat_entry').get() if widgets else '-'}, {widgets.get('lon_entry').get() if widgets else '-'}；气候板块: {widgets.get('climate_var').get() if widgets else '-'}\n"
+                f"GDP/人口增长: {widgets.get('gdp_entry').get() if widgets else '-'}% / {widgets.get('pop_entry').get() if widgets else '-'}%；同时率: {widgets.get('coincidence_entry').get() if widgets else '-'}"
             )
         elif tab == "录波曲线":
             return f"当前录波文件: {getattr(self, '_comtrade_cfg_path', '') or '未载入'}\n当前时间窗: {self.comtrade_time_label.cget('text')}"
@@ -4632,6 +4651,177 @@ class ApproximationToolGUI(tk.Tk):
         except Exception as exc:
             messagebox.showerror("计算错误", str(exc))
 
+    def _build_annual_load_forecast_tab(self) -> None:
+        dataset = load_annual_load_sample()
+        defaults = dataset.get("default_inputs", {}) if isinstance(dataset.get("default_inputs", {}), dict) else {}
+        tab = self.annual_load_forecast_tab
+        tab.columnconfigure(1, weight=1)
+        tab.rowconfigure(0, weight=1)
+        left = ttk.Frame(tab, padding=16, style="Card.TFrame")
+        right = ttk.Frame(tab, padding=16, style="Card.TFrame")
+        left.grid(row=0, column=0, sticky="nsw", padx=(0, 6), pady=8)
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=8)
+        left.columnconfigure(1, weight=1)
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(1, weight=1)
+        right.rowconfigure(3, weight=1)
+
+        ttk.Label(left, text="年度负荷预测", style="PageTitle.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(
+            left,
+            text="面向电网规划的 5–20 年年度电量、最大负荷与分季节典型负荷形态预测；不包含空间负荷预测。",
+            style="Muted.TLabel", justify="left", wraplength=420,
+        ).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 10))
+
+        region = str(dataset.get("region", "规划区域"))
+        source = str(dataset.get("source", "内置年度负荷规划样例"))
+        lat_entry = self._add_entry(left, 2, "纬度 / °", f"{float(dataset.get('latitude', NANJING_LATITUDE)):.4f}", width=16)
+        lon_entry = self._add_entry(left, 3, "经度 / °", f"{float(dataset.get('longitude', NANJING_LONGITUDE)):.4f}", width=16)
+        climate_var = tk.StringVar(value=str(dataset.get("climate_block", "")))
+        ttk.Label(left, text="气候板块", style="Form.TLabel").grid(row=4, column=0, sticky="w", padx=4, pady=4)
+        climate_entry = ttk.Entry(left, textvariable=climate_var, width=26, style="Input.TEntry")
+        climate_entry.grid(row=4, column=1, sticky="ew", padx=4, pady=4)
+        horizon_entry = self._add_entry(left, 5, "预测年限（5-20）", str(defaults.get("horizon_years", 10)), width=16)
+        algorithm_var = tk.StringVar(value="综合法")
+        ttk.Label(left, text="预测方法", style="Form.TLabel").grid(row=6, column=0, sticky="w", padx=4, pady=4)
+        algorithm_box = ttk.Combobox(left, textvariable=algorithm_var, values=["综合法", "趋势外推法", "弹性系数法"], state="readonly", width=18, style="Input.TCombobox")
+        algorithm_box.grid(row=6, column=1, sticky="ew", padx=4, pady=4)
+        gdp_entry = self._add_entry(left, 7, "GDP 年增长 / %", str(defaults.get("gdp_growth_pct", 5.0)), width=16)
+        pop_entry = self._add_entry(left, 8, "人口年增长 / %", str(defaults.get("population_growth_pct", 1.0)), width=16)
+        primary_entry = self._add_entry(left, 9, "第一产业增长 / %", str(defaults.get("primary_growth_pct", 2.0)), width=16)
+        secondary_entry = self._add_entry(left, 10, "第二产业增长 / %", str(defaults.get("secondary_growth_pct", 4.0)), width=16)
+        tertiary_entry = self._add_entry(left, 11, "第三产业增长 / %", str(defaults.get("tertiary_growth_pct", 6.0)), width=16)
+        coincidence_entry = self._add_entry(left, 12, "负荷同时率", str(defaults.get("coincidence_factor", 0.92)), width=16)
+        dual_carbon_entry = self._add_entry(left, 13, "双碳政策修正 / %", str(defaults.get("dual_carbon_factor_pct", -0.8)), width=16)
+        electrification_entry = self._add_entry(left, 14, "再电气化修正 / %", str(defaults.get("electrification_factor_pct", 1.6)), width=16)
+        ttk.Button(left, text="年度预测", style="Accent.TButton", command=self._run_annual_load_forecast).grid(row=15, column=0, columnspan=2, sticky="ew", pady=(10, 4))
+        ttk.Label(left, text=f"数据集：{region}\n{source}", style="Card.TLabel", justify="left", wraplength=420).grid(row=16, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+
+        ttk.Label(right, text="年度负荷预测结果", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
+        result_text = ScrolledText(right, width=94, height=12, wrap=tk.NONE, font="TkFixedFont")
+        result_text.grid(row=1, column=0, sticky="nsew", pady=(6, 8))
+        self._style_text_widget(result_text)
+        result_text.insert("1.0", "请填写规划输入后点击“年度预测”。")
+        result_text.configure(state="disabled")
+
+        view_book = ttk.Notebook(right)
+        view_book.grid(row=3, column=0, sticky="nsew")
+        curve_tab = ttk.Frame(view_book, style="Card.TFrame")
+        shape_tab = ttk.Frame(view_book, style="Card.TFrame")
+        view_book.add(curve_tab, text="年度趋势")
+        view_book.add(shape_tab, text="分季节典型形态")
+        for child in (curve_tab, shape_tab):
+            child.columnconfigure(0, weight=1)
+            child.rowconfigure(1, weight=1)
+
+        fig = Figure(figsize=(8.8, 3.8), dpi=100)
+        ax_energy = fig.add_subplot(111)
+        ax_peak = ax_energy.twinx()
+        canvas = FigureCanvasTkAgg(fig, master=curve_tab)
+        toolbar = NavigationToolbar2Tk(canvas, curve_tab, pack_toolbar=False)
+        toolbar.update()
+        toolbar.grid(row=0, column=0, sticky="ew")
+        canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
+
+        shape_fig = Figure(figsize=(8.8, 3.8), dpi=100)
+        shape_ax = shape_fig.add_subplot(111)
+        shape_canvas = FigureCanvasTkAgg(shape_fig, master=shape_tab)
+        shape_toolbar = NavigationToolbar2Tk(shape_canvas, shape_tab, pack_toolbar=False)
+        shape_toolbar.update()
+        shape_toolbar.grid(row=0, column=0, sticky="ew")
+        shape_canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
+        canvas.draw()
+        shape_canvas.draw()
+
+        self._annual_forecast_widgets = {
+            "region": region,
+            "dataset": dataset,
+            "lat_entry": lat_entry,
+            "lon_entry": lon_entry,
+            "climate_var": climate_var,
+            "horizon_entry": horizon_entry,
+            "algorithm_var": algorithm_var,
+            "gdp_entry": gdp_entry,
+            "pop_entry": pop_entry,
+            "primary_entry": primary_entry,
+            "secondary_entry": secondary_entry,
+            "tertiary_entry": tertiary_entry,
+            "coincidence_entry": coincidence_entry,
+            "dual_carbon_entry": dual_carbon_entry,
+            "electrification_entry": electrification_entry,
+            "result_text": result_text,
+            "fig": fig,
+            "ax_energy": ax_energy,
+            "ax_peak": ax_peak,
+            "canvas": canvas,
+            "shape_fig": shape_fig,
+            "shape_ax": shape_ax,
+            "shape_canvas": shape_canvas,
+            "last_result": None,
+        }
+
+    def _run_annual_load_forecast(self) -> None:
+        widgets = self._annual_forecast_widgets
+        try:
+            config = AnnualLoadForecastConfig(
+                horizon_years=int(_safe_float(widgets["horizon_entry"].get(), "预测年限")),  # type: ignore[index,union-attr]
+                latitude=_safe_float(widgets["lat_entry"].get(), "纬度"),  # type: ignore[index,union-attr]
+                longitude=_safe_float(widgets["lon_entry"].get(), "经度"),  # type: ignore[index,union-attr]
+                climate_block=str(widgets["climate_var"].get()).strip(),  # type: ignore[index,union-attr]
+                algorithm=str(widgets["algorithm_var"].get()),  # type: ignore[index,union-attr]
+                gdp_growth_pct=_safe_float(widgets["gdp_entry"].get(), "GDP 年增长"),  # type: ignore[index,union-attr]
+                population_growth_pct=_safe_float(widgets["pop_entry"].get(), "人口年增长"),  # type: ignore[index,union-attr]
+                primary_growth_pct=_safe_float(widgets["primary_entry"].get(), "第一产业增长"),  # type: ignore[index,union-attr]
+                secondary_growth_pct=_safe_float(widgets["secondary_entry"].get(), "第二产业增长"),  # type: ignore[index,union-attr]
+                tertiary_growth_pct=_safe_float(widgets["tertiary_entry"].get(), "第三产业增长"),  # type: ignore[index,union-attr]
+                coincidence_factor=_safe_float(widgets["coincidence_entry"].get(), "负荷同时率"),  # type: ignore[index,union-attr]
+                dual_carbon_factor_pct=_safe_float(widgets["dual_carbon_entry"].get(), "双碳政策修正"),  # type: ignore[index,union-attr]
+                electrification_factor_pct=_safe_float(widgets["electrification_entry"].get(), "再电气化修正"),  # type: ignore[index,union-attr]
+            )
+            result = forecast_annual_load(widgets["dataset"], config)  # type: ignore[arg-type]
+            widgets["last_result"] = result
+            self._set_text(widgets["result_text"], format_annual_load_forecast_summary(result))  # type: ignore[arg-type]
+            self._plot_annual_load_forecast(result)
+        except Exception as exc:
+            messagebox.showerror("年度负荷预测错误", str(exc))
+
+    def _plot_annual_load_forecast(self, result) -> None:
+        widgets = self._annual_forecast_widgets
+        years = [row.year for row in result.years]
+        energy = [row.energy_gwh for row in result.years]
+        peak = [row.max_load_mw for row in result.years]
+        ax_energy = widgets["ax_energy"]
+        ax_peak = widgets["ax_peak"]
+        ax_energy.clear()
+        ax_peak.clear()
+        ax_energy.plot(years, energy, marker="o", color="#1f77b4", label="用电量/GWh")
+        ax_peak.plot(years, peak, marker="s", color="#d62728", label="最大负荷/MW")
+        ax_energy.fill_between(years, [row.p10_energy_gwh for row in result.years], [row.p90_energy_gwh for row in result.years], color="#1f77b4", alpha=0.12)
+        ax_peak.fill_between(years, [row.p10_max_load_mw for row in result.years], [row.p90_max_load_mw for row in result.years], color="#d62728", alpha=0.10)
+        ax_energy.set_title("年度用电量与最大负荷预测")
+        ax_energy.set_xlabel("Year")
+        ax_energy.set_ylabel("GWh", color="#1f77b4")
+        ax_peak.set_ylabel("MW", color="#d62728")
+        ax_energy.grid(True, alpha=0.3)
+        lines = ax_energy.get_lines() + ax_peak.get_lines()
+        ax_energy.legend(lines, [line.get_label() for line in lines], loc="upper left")
+        widgets["fig"].tight_layout()
+        widgets["canvas"].draw()
+
+        shape_ax = widgets["shape_ax"]
+        shape_ax.clear()
+        hours = list(range(24))
+        for shape in result.seasonal_shapes:
+            shape_ax.plot(hours, shape.values_mw, marker="o", linewidth=1.8, label=shape.season)
+        shape_ax.set_title(f"最终规划年 {result.years[-1].year} 分季节典型负荷形态")
+        shape_ax.set_xlabel("Hour")
+        shape_ax.set_ylabel("MW")
+        shape_ax.set_xticks(range(0, 24, 2))
+        shape_ax.grid(True, alpha=0.3)
+        shape_ax.legend(loc="best")
+        widgets["shape_fig"].tight_layout()
+        widgets["shape_canvas"].draw()
+
     def _build_load_forecast_tab(self) -> None:
         self._build_day_ahead_forecast_tab(self.load_forecast_tab, "load")
 
@@ -4675,16 +4865,18 @@ class ApproximationToolGUI(tk.Tk):
         holiday_box.grid(row=7, column=1, sticky="ew", padx=4, pady=4)
         next_row = 8
 
-        interval_var = tk.StringVar(value="60")
-        ttk.Label(left, text="时段间隔 / min", style="Form.TLabel").grid(row=next_row, column=0, sticky="w", padx=4, pady=4)
-        interval_box = ttk.Combobox(left, textvariable=interval_var, values=["60", "30", "15"], state="readonly", width=18, style="Input.TCombobox")
+        interval_var = tk.StringVar(value="15")
+        ttk.Label(left, text="时段间隔 / min（1-30）", style="Form.TLabel").grid(row=next_row, column=0, sticky="w", padx=4, pady=4)
+        interval_box = ttk.Combobox(left, textvariable=interval_var, values=["1", "5", "10", "15", "30"], state="normal", width=18, style="Input.TCombobox")
         interval_box.grid(row=next_row, column=1, sticky="ew", padx=4, pady=4)
         next_row += 1
 
         algorithm_infos = list_forecast_algorithms(kind)
         algorithm_labels = [f"{info.label} ({info.code})" for info in algorithm_infos]
         algorithm_by_label = {f"{info.label} ({info.code})": info.code for info in algorithm_infos}
-        default_alg_label = next((label for label in algorithm_labels if label.endswith("(adaptive_ensemble)")), algorithm_labels[0] if algorithm_labels else "adaptive_ensemble")
+        forecast_defaults = load_forecast_builtin_config().get("defaults", {})
+        default_alg = str(forecast_defaults.get("algorithm", "sklearn_auto")) if isinstance(forecast_defaults, dict) else "sklearn_auto"
+        default_alg_label = next((label for label in algorithm_labels if label.endswith(f"({default_alg})")), algorithm_labels[0] if algorithm_labels else default_alg)
         algorithm_var = tk.StringVar(value=default_alg_label)
         ttk.Label(left, text="预测算法", style="Form.TLabel").grid(row=next_row, column=0, sticky="w", padx=4, pady=4)
         algorithm_box = ttk.Combobox(left, textvariable=algorithm_var, values=algorithm_labels, state="readonly", width=26, style="Input.TCombobox")
@@ -4970,7 +5162,9 @@ class ApproximationToolGUI(tk.Tk):
             target = datetime.strptime(widgets["date_var"].get().strip(), "%Y-%m-%d").date()  # type: ignore[union-attr]
             capacity_entry = widgets.get("capacity_entry")
             capacity = None if capacity_entry is None else _safe_float(capacity_entry.get(), "装机容量上限")  # type: ignore[attr-defined]
-            interval_minutes = int(widgets["interval_var"].get())  # type: ignore[union-attr]
+            interval_minutes = int(_safe_float(widgets["interval_var"].get(), "时段间隔"))  # type: ignore[union-attr]
+            if interval_minutes < 1 or interval_minutes > 30:
+                raise InputError("时段间隔需为 1 到 30 分钟之间的整数。")
             algorithm_label = widgets["algorithm_var"].get()  # type: ignore[union-attr]
             algorithm = widgets.get("algorithm_by_label", {}).get(algorithm_label, "adaptive_ensemble")  # type: ignore[union-attr]
             weather_condition = _weather_label_to_code(widgets["weather_var"].get()) if kind == "renewable" else "clear"  # type: ignore[union-attr]
