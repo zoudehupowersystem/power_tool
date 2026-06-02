@@ -243,3 +243,15 @@ def test_estimate_nonperiodic_components_returns_decay_parameters() -> None:
     assert 0.9 < dc_const < 1.7
     assert 2.0 < abs(dc_decay) < 3.0
     assert 0.02 < tau < 0.10
+
+
+def test_annual_forecast_trend_uses_two_stacked_year_axes() -> None:
+    import inspect
+
+    build_source = inspect.getsource(ApproximationToolGUI._build_annual_load_forecast_tab)
+    plot_source = inspect.getsource(ApproximationToolGUI._plot_annual_load_forecast)
+    assert "add_subplot(211)" in build_source
+    assert "add_subplot(212, sharex=ax_energy)" in build_source
+    assert ".twinx()" not in build_source
+    assert 'ax_energy.set_xlabel("Year")' in plot_source
+    assert 'ax_peak.set_xlabel("Year")' in plot_source
