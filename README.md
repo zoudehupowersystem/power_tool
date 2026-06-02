@@ -17,18 +17,20 @@ The project now provides both Chinese and English GUI entries with functional pa
 
 ## Main capabilities
 
-The current GUI includes the following major modules:
+The current GUI includes the following main tabs:
 
-1. Frequency dynamics
-2. Electromechanical oscillation
-3. Static voltage stability
-4. Natural power and reactive power of transmission lines
+1. COMTRADE waveform analysis
+2. Frequency dynamics
+3. Electromechanical oscillation
+4. Voltage/reactive-power analysis
 5. Transient stability assessment
 6. Small-signal analysis for SMIB systems
 7. Distribution-network loop-closure analysis
 8. Parameter validation and per-unit conversion
 9. Short-circuit current calculation
-10. COMTRADE waveform analysis
+10. Day-ahead load forecasting
+11. Renewable forecasting
+12. Annual load forecasting
 
 Within **Parameter Validation & Per-Unit**, the secondary notebook now contains four subpages: **Overhead Line**, **Conductor Sag**, **Two-Winding Transformer**, and **Three-Winding Transformer**. The conductor-sag page adds interactive single-span catenary analysis, including conductor temperature/current sliders and a live visual sketch of the span geometry and sag state.
 

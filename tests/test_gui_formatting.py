@@ -271,3 +271,14 @@ def test_annual_shape_plot_uses_year_slider_and_draw_idle() -> None:
     assert "line.set_ydata" in update_source
     assert "draw_idle()" in update_source
     assert "round(float(value))" in slider_source
+
+
+def test_documentation_lists_forecast_tabs_consistently() -> None:
+    readme_zh = (ROOT / "README_zh.md").read_text(encoding="utf-8")
+    readme_en = (ROOT / "README.md").read_text(encoding="utf-8")
+    overview_zh = (ROOT / "manuals" / "PowerTool_Overview_zh.md").read_text(encoding="utf-8")
+    assert "当前主标签页共 12 个" in readme_zh
+    for text in (readme_zh, overview_zh):
+        assert "日前" in text and "年度负荷预测" in text and "新能源预测" in text
+    assert "Day-ahead load forecasting" in readme_en
+    assert "Annual load forecasting" in readme_en

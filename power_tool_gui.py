@@ -88,6 +88,8 @@ from power_tool_forecast import (
     AnnualLoadForecastConfig,
     annual_seasonal_shapes_for_year,
     builtin_dataset_info,
+    export_annual_load_forecast_csv,
+    export_annual_load_forecast_json,
     export_forecast_result_csv,
     export_forecast_result_json,
     forecast_algorithm_label,
@@ -4695,7 +4697,13 @@ class ApproximationToolGUI(tk.Tk):
         coincidence_entry = self._add_entry(left, 12, "负荷同时率", str(defaults.get("coincidence_factor", 0.92)), width=16)
         dual_carbon_entry = self._add_entry(left, 13, "双碳政策修正 / %", str(defaults.get("dual_carbon_factor_pct", -0.8)), width=16)
         electrification_entry = self._add_entry(left, 14, "再电气化修正 / %", str(defaults.get("electrification_factor_pct", 1.6)), width=16)
-        ttk.Button(left, text="年度预测", style="Accent.TButton", command=self._run_annual_load_forecast).grid(row=15, column=0, columnspan=2, sticky="ew", pady=(10, 4))
+        annual_button_row = ttk.Frame(left, style="Card.TFrame")
+        annual_button_row.grid(row=15, column=0, columnspan=2, sticky="ew", pady=(10, 4))
+        for col in range(3):
+            annual_button_row.columnconfigure(col, weight=1)
+        ttk.Button(annual_button_row, text="年度预测", style="Accent.TButton", command=self._run_annual_load_forecast).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(annual_button_row, text="导出JSON", command=lambda: self._export_annual_load_forecast_result("json")).grid(row=0, column=1, sticky="ew", padx=(4, 4))
+        ttk.Button(annual_button_row, text="导出CSV", command=lambda: self._export_annual_load_forecast_result("csv")).grid(row=0, column=2, sticky="ew", padx=(4, 0))
         ttk.Label(left, text=f"数据集：{region}\n{source}", style="Card.TLabel", justify="left", wraplength=420).grid(row=16, column=0, columnspan=2, sticky="ew", pady=(6, 0))
 
         ttk.Label(right, text="年度负荷预测结果", style="PageTitle.TLabel").grid(row=0, column=0, sticky="w")
@@ -4797,6 +4805,30 @@ class ApproximationToolGUI(tk.Tk):
             self._plot_annual_load_forecast(result)
         except Exception as exc:
             messagebox.showerror("年度负荷预测错误", str(exc))
+
+    def _export_annual_load_forecast_result(self, fmt: str) -> None:
+        widgets = self._annual_forecast_widgets
+        result = widgets.get("last_result")
+        if result is None:
+            messagebox.showinfo("尚无结果", "请先执行年度预测，再导出结果。")
+            return
+        suffix = ".json" if fmt == "json" else ".csv"
+        filename = filedialog.asksaveasfilename(
+            title="导出年度负荷预测结果",
+            defaultextension=suffix,
+            filetypes=[("JSON", "*.json")] if fmt == "json" else [("CSV", "*.csv")],
+            initialfile=f"annual_load_forecast_{datetime.now():%Y%m%d_%H%M%S}{suffix}",
+        )
+        if not filename:
+            return
+        try:
+            if fmt == "json":
+                export_annual_load_forecast_json(result, filename)
+            else:
+                export_annual_load_forecast_csv(result, filename)
+            messagebox.showinfo("导出完成", f"年度负荷预测结果已导出：{filename}")
+        except Exception as exc:
+            messagebox.showerror("导出失败", str(exc))
 
     def _plot_annual_load_forecast(self, result) -> None:
         widgets = self._annual_forecast_widgets

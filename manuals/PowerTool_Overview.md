@@ -4,7 +4,7 @@
 Click **Manual** in the `PowerTool AI` sidebar. The manual browser opens with the document for the current page preselected. You can switch to any other manual from the list on the left.
 
 ## 2. Document structure
-- Main-page manuals cover frequency dynamics, electromechanical oscillation, transient stability, small-signal analysis, loop closure, short-circuit calculation, and waveform viewing.
+- Main-page manuals cover waveform viewing, frequency dynamics, electromechanical oscillation, voltage/reactive-power analysis, transient stability, small-signal analysis, loop closure, short-circuit calculation, day-ahead/annual load forecasting, and renewable forecasting.
 - Subpage manuals cover the voltage/reactive-power pages and the parameter-validation subpages.
 - The files are stored in two parallel sets: English manuals use `PowerTool_*.md`, and Chinese manuals use `PowerTool_*_zh.md`.
 

@@ -2044,6 +2044,80 @@ def annual_seasonal_shapes_for_year(result: AnnualLoadForecastResult, year: int 
     return tuple(SeasonalLoadShape(shape.season, tuple(float(v) * scale for v in shape.values_mw)) for shape in result.seasonal_shapes)
 
 
+def annual_load_forecast_to_dict(result: AnnualLoadForecastResult) -> dict[str, object]:
+    years_for_shapes = [result.base_year, *[row.year for row in result.years]]
+    return {
+        "region": result.region,
+        "source": result.source,
+        "climate_block": result.climate_block,
+        "algorithm": result.algorithm,
+        "base_year": result.base_year,
+        "base_max_load_mw": result.base_max_load_mw,
+        "years": [
+            {
+                "year": row.year,
+                "energy_gwh": row.energy_gwh,
+                "max_load_mw": row.max_load_mw,
+                "p10_energy_gwh": row.p10_energy_gwh,
+                "p90_energy_gwh": row.p90_energy_gwh,
+                "p10_max_load_mw": row.p10_max_load_mw,
+                "p90_max_load_mw": row.p90_max_load_mw,
+                "load_factor": row.load_factor,
+            }
+            for row in result.years
+        ],
+        "seasonal_shapes_by_year": [
+            {
+                "year": year,
+                "shapes": [
+                    {
+                        "season": shape.season,
+                        "values_mw": list(shape.values_mw),
+                    }
+                    for shape in annual_seasonal_shapes_for_year(result, year)
+                ],
+            }
+            for year in years_for_shapes
+        ],
+        "notes": list(result.notes),
+    }
+
+
+def export_annual_load_forecast_json(result: AnnualLoadForecastResult, path: str | Path) -> Path:
+    target = Path(path)
+    target.write_text(json.dumps(annual_load_forecast_to_dict(result), ensure_ascii=False, indent=2), encoding="utf-8")
+    return target
+
+
+def export_annual_load_forecast_csv(result: AnnualLoadForecastResult, path: str | Path) -> Path:
+    target = Path(path)
+    with target.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["section", "annual_years"])
+        writer.writerow(["region", result.region])
+        writer.writerow(["source", result.source])
+        writer.writerow(["climate_block", result.climate_block])
+        writer.writerow(["algorithm", result.algorithm])
+        writer.writerow(["base_year", result.base_year])
+        writer.writerow(["base_max_load_mw", f"{result.base_max_load_mw:.6g}"])
+        writer.writerow([])
+        writer.writerow(["year", "energy_gwh", "p10_energy_gwh", "p90_energy_gwh", "max_load_mw", "p10_max_load_mw", "p90_max_load_mw", "load_factor"])
+        for row in result.years:
+            writer.writerow([row.year, f"{row.energy_gwh:.6g}", f"{row.p10_energy_gwh:.6g}", f"{row.p90_energy_gwh:.6g}", f"{row.max_load_mw:.6g}", f"{row.p10_max_load_mw:.6g}", f"{row.p90_max_load_mw:.6g}", f"{row.load_factor:.6g}"])
+        writer.writerow([])
+        writer.writerow(["section", "seasonal_shapes_by_year"])
+        writer.writerow(["year", "season", "hour", "value_mw"])
+        for year in [result.base_year, *[row.year for row in result.years]]:
+            for shape in annual_seasonal_shapes_for_year(result, year):
+                for hour, value in enumerate(shape.values_mw):
+                    writer.writerow([year, shape.season, hour, f"{value:.6g}"])
+        writer.writerow([])
+        writer.writerow(["section", "notes"])
+        for note in result.notes:
+            writer.writerow([note])
+    return target
+
+
 def format_annual_load_forecast_summary(result: AnnualLoadForecastResult) -> str:
     lines = [
         "══ 年度负荷预测（规划用） ═════════════════════",

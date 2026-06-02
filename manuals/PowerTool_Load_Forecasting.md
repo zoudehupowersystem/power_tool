@@ -39,4 +39,4 @@ The annual load forecasting tab supports planning forecasts for future horizons 
 
 ### Methods and outputs
 
-Selectable methods include trend extrapolation, elasticity coefficient, and a composite method. Outputs include annual energy in GWh, maximum load in MW, P10-P90 planning uncertainty bands, load factor, and spring/summer/autumn/winter 24-hour typical load-shape curves.
+Selectable methods include trend extrapolation, elasticity coefficient, and a composite method. Outputs include annual energy in GWh, maximum load in MW, P10-P90 planning uncertainty bands, load factor, and spring/summer/autumn/winter 24-hour typical load-shape curves. Annual results can be exported as JSON or CSV, including annual indicators, seasonal typical shapes for every year from the base year to the final planning year, and explanatory notes.

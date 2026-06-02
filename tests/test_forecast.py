@@ -298,3 +298,27 @@ def test_forecast_interval_rejects_out_of_range() -> None:
         assert "1 到 30" in str(exc)
     else:
         raise AssertionError("interval above 30 minutes should be rejected")
+
+
+def test_annual_load_forecast_exports_json_and_csv(tmp_path: Path) -> None:
+    from power_tool_forecast import (
+        AnnualLoadForecastConfig,
+        annual_load_forecast_to_dict,
+        export_annual_load_forecast_csv,
+        export_annual_load_forecast_json,
+        forecast_annual_load,
+        load_annual_load_sample,
+    )
+
+    result = forecast_annual_load(load_annual_load_sample(), AnnualLoadForecastConfig(horizon_years=5))
+    data = annual_load_forecast_to_dict(result)
+    assert len(data["years"]) == 5
+    assert len(data["seasonal_shapes_by_year"]) == 6
+
+    json_path = export_annual_load_forecast_json(result, tmp_path / "annual.json")
+    csv_path = export_annual_load_forecast_csv(result, tmp_path / "annual.csv")
+    assert '"seasonal_shapes_by_year"' in json_path.read_text(encoding="utf-8")
+    csv_text = csv_path.read_text(encoding="utf-8-sig")
+    assert "annual_years" in csv_text
+    assert "seasonal_shapes_by_year" in csv_text
+    assert "春季" in csv_text
