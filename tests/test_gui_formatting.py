@@ -255,3 +255,19 @@ def test_annual_forecast_trend_uses_two_stacked_year_axes() -> None:
     assert ".twinx()" not in build_source
     assert 'ax_energy.set_xlabel("Year")' in plot_source
     assert 'ax_peak.set_xlabel("Year")' in plot_source
+
+
+def test_annual_shape_plot_uses_year_slider_and_draw_idle() -> None:
+    import inspect
+
+    build_source = inspect.getsource(ApproximationToolGUI._build_annual_load_forecast_tab)
+    plot_source = inspect.getsource(ApproximationToolGUI._plot_annual_load_forecast)
+    slider_source = inspect.getsource(ApproximationToolGUI._on_annual_shape_year_slider)
+    update_source = inspect.getsource(ApproximationToolGUI._update_annual_shape_plot)
+    assert "shape_year_slider" in build_source
+    assert "from_=base_year, to=final_year" in plot_source
+    assert "slider.set(base_year)" in plot_source
+    assert "annual_seasonal_shapes_for_year(result, selected_year)" in update_source
+    assert "line.set_ydata" in update_source
+    assert "draw_idle()" in update_source
+    assert "round(float(value))" in slider_source

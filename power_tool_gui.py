@@ -86,6 +86,7 @@ from power_tool_comtrade import (
 from power_tool_forecast import (
     ForecastConfig,
     AnnualLoadForecastConfig,
+    annual_seasonal_shapes_for_year,
     builtin_dataset_info,
     export_forecast_result_csv,
     export_forecast_result_json,
@@ -4730,6 +4731,13 @@ class ApproximationToolGUI(tk.Tk):
         shape_toolbar.update()
         shape_toolbar.grid(row=0, column=0, sticky="ew")
         shape_canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
+        shape_control = ttk.Frame(shape_tab, style="Card.TFrame")
+        shape_control.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        shape_control.columnconfigure(1, weight=1)
+        shape_year_var = tk.StringVar(value="典型形态年份：预测后可拖动选择")
+        ttk.Label(shape_control, textvariable=shape_year_var, style="Form.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=2)
+        shape_year_slider = ttk.Scale(shape_control, from_=0, to=1, orient="horizontal", command=self._on_annual_shape_year_slider)
+        shape_year_slider.grid(row=0, column=1, sticky="ew", padx=(0, 0), pady=2)
         canvas.draw()
         shape_canvas.draw()
 
@@ -4757,6 +4765,11 @@ class ApproximationToolGUI(tk.Tk):
             "shape_fig": shape_fig,
             "shape_ax": shape_ax,
             "shape_canvas": shape_canvas,
+            "shape_year_var": shape_year_var,
+            "shape_year_slider": shape_year_slider,
+            "shape_slider_updating": False,
+            "shape_lines": {},
+            "shape_ylim": None,
             "last_result": None,
         }
 
@@ -4812,19 +4825,71 @@ class ApproximationToolGUI(tk.Tk):
         widgets["fig"].tight_layout()
         widgets["canvas"].draw()
 
+        base_year = int(result.base_year)
+        final_year = int(result.years[-1].year)
+        slider = widgets["shape_year_slider"]
+        widgets["shape_slider_updating"] = True
+        slider.configure(from_=base_year, to=final_year)
+        slider.set(base_year)
+        widgets["shape_slider_updating"] = False
+        self._update_annual_shape_plot(base_year, reset_lines=True)
+
+    def _on_annual_shape_year_slider(self, value: str) -> None:
+        widgets = self._annual_forecast_widgets
+        if widgets.get("shape_slider_updating"):
+            return
+        result = widgets.get("last_result")
+        if result is None:
+            return
+        try:
+            selected_year = int(round(float(value)))
+        except (TypeError, ValueError):
+            return
+        self._update_annual_shape_plot(selected_year, reset_lines=False)
+
+    def _update_annual_shape_plot(self, selected_year: int, reset_lines: bool = False) -> None:
+        widgets = self._annual_forecast_widgets
+        result = widgets.get("last_result")
+        if result is None:
+            return
+        base_year = int(result.base_year)
+        final_year = int(result.years[-1].year)
+        selected_year = max(base_year, min(final_year, int(selected_year)))
+        widgets["shape_year_var"].set(f"典型形态年份：{selected_year}（{base_year}–{final_year}）")
+        shapes = annual_seasonal_shapes_for_year(result, selected_year)
         shape_ax = widgets["shape_ax"]
-        shape_ax.clear()
         hours = list(range(24))
-        for shape in result.seasonal_shapes:
-            shape_ax.plot(hours, shape.values_mw, marker="o", linewidth=1.8, label=shape.season)
-        shape_ax.set_title(f"最终规划年 {result.years[-1].year} 分季节典型负荷形态")
-        shape_ax.set_xlabel("Hour")
-        shape_ax.set_ylabel("MW")
-        shape_ax.set_xticks(range(0, 24, 2))
-        shape_ax.grid(True, alpha=0.3)
-        shape_ax.legend(loc="best")
+        lines = widgets.get("shape_lines") or {}
+        if reset_lines or not lines:
+            shape_ax.clear()
+            lines = {}
+            for shape in shapes:
+                (line,) = shape_ax.plot(hours, shape.values_mw, marker="o", linewidth=1.8, label=shape.season)
+                lines[shape.season] = line
+            shape_ax.set_xlabel("Hour")
+            shape_ax.set_ylabel("MW")
+            shape_ax.set_xticks(range(0, 24, 2))
+            shape_ax.grid(True, alpha=0.3)
+            shape_ax.legend(loc="best")
+            lower_shapes = annual_seasonal_shapes_for_year(result, base_year)
+            upper_shapes = annual_seasonal_shapes_for_year(result, final_year)
+            all_values = [value for shape in (*lower_shapes, *upper_shapes) for value in shape.values_mw]
+            if all_values:
+                ymin = min(all_values) * 0.94
+                ymax = max(all_values) * 1.06
+                widgets["shape_ylim"] = (ymin, ymax)
+                shape_ax.set_ylim(ymin, ymax)
+            widgets["shape_lines"] = lines
+        else:
+            for shape in shapes:
+                line = lines.get(shape.season)
+                if line is not None:
+                    line.set_ydata(shape.values_mw)
+        if widgets.get("shape_ylim") is not None:
+            shape_ax.set_ylim(*widgets["shape_ylim"])
+        shape_ax.set_title(f"{selected_year} 年分季节典型负荷形态")
         widgets["shape_fig"].tight_layout()
-        widgets["shape_canvas"].draw()
+        widgets["shape_canvas"].draw_idle()
 
     def _build_load_forecast_tab(self) -> None:
         self._build_day_ahead_forecast_tab(self.load_forecast_tab, "load")

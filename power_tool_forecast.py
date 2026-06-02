@@ -1884,6 +1884,7 @@ class AnnualLoadForecastResult:
     climate_block: str
     algorithm: str
     base_year: int
+    base_max_load_mw: float
     years: tuple[AnnualLoadForecastYear, ...]
     seasonal_shapes: tuple[SeasonalLoadShape, ...]
     notes: tuple[str, ...]
@@ -2020,10 +2021,27 @@ def forecast_annual_load(dataset: dict[str, object], config: AnnualLoadForecastC
         climate_block=climate,
         algorithm=algorithm,
         base_year=base.year,
+        base_max_load_mw=base.max_load_mw,
         years=tuple(years),
         seasonal_shapes=shapes,
         notes=notes,
     )
+
+
+def annual_seasonal_shapes_for_year(result: AnnualLoadForecastResult, year: int | float) -> tuple[SeasonalLoadShape, ...]:
+    """Return seasonal 24-hour shapes scaled to a selected planning year."""
+    if not result.seasonal_shapes:
+        return ()
+    selected_year = int(round(float(year)))
+    year_axis = [result.base_year, *[row.year for row in result.years]]
+    peak_axis = [result.base_max_load_mw, *[row.max_load_mw for row in result.years]]
+    if not year_axis or not peak_axis:
+        return result.seasonal_shapes
+    selected_year = max(min(selected_year, max(year_axis)), min(year_axis))
+    selected_peak = float(np.interp(selected_year, year_axis, peak_axis))
+    final_peak = max(float(result.years[-1].max_load_mw if result.years else peak_axis[-1]), 1e-9)
+    scale = selected_peak / final_peak
+    return tuple(SeasonalLoadShape(shape.season, tuple(float(v) * scale for v in shape.values_mw)) for shape in result.seasonal_shapes)
 
 
 def format_annual_load_forecast_summary(result: AnnualLoadForecastResult) -> str:

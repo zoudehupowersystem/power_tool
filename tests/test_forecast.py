@@ -253,6 +253,7 @@ def test_annual_load_forecast_planning_sample() -> None:
     from power_tool_forecast import (
         AnnualLoadForecastConfig,
         forecast_annual_load,
+        annual_seasonal_shapes_for_year,
         format_annual_load_forecast_summary,
         load_annual_load_sample,
     )
@@ -263,8 +264,13 @@ def test_annual_load_forecast_planning_sample() -> None:
     assert result.years[0].year == 2026
     assert result.years[-1].energy_gwh > result.years[0].energy_gwh
     assert result.years[-1].max_load_mw > result.years[0].max_load_mw
+    assert result.base_max_load_mw > 0
     assert len(result.seasonal_shapes) == 4
     assert all(len(shape.values_mw) == 24 for shape in result.seasonal_shapes)
+    base_shapes = annual_seasonal_shapes_for_year(result, result.base_year)
+    final_shapes = annual_seasonal_shapes_for_year(result, result.years[-1].year)
+    assert len(base_shapes) == len(final_shapes) == 4
+    assert max(base_shapes[0].values_mw) < max(final_shapes[0].values_mw)
     assert "不包含空间负荷预测" in format_annual_load_forecast_summary(result)
 
 
