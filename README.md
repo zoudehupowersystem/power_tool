@@ -176,3 +176,7 @@ The repository also includes a bilingual technical note on engineering constants
 
 - Chinese version: `Approximate_Constants_and_Approximate_Formulas_in_Power_Systems_zh.md`
 - English version: `Approximate_Constants_and_Approximate_Formulas_in_Power_Systems.md`
+
+## License
+
+Copyright 2026 Zou Dehu / 邹德虎. This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.

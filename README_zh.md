@@ -1301,3 +1301,9 @@ from power_tool import smib_small_signal_analysis, kundur_smib_defaults
 
 - 中文版：`manuals/PowerTool_Forecasting_Algorithms_and_Data_Format_zh.md`
 - 英文版：`manuals/PowerTool_Forecasting_Algorithms_and_Data_Format.md`
+
+---
+
+## 16. 许可证
+
+版权所有 © 2026 邹德虎 / Zou Dehu。本项目采用 Apache License 2.0 开源许可证。详情见 [LICENSE](LICENSE)。

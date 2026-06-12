@@ -21,6 +21,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 
 from power_tool_common import InputError, _safe_float
+from power_tool_i18n import logic_text, translate_text
 from power_tool_forecast import (
     AnnualLoadForecastConfig,
     ForecastConfig,
@@ -71,6 +72,7 @@ def _format_decimal_hours(hours: float) -> str:
 
 
 def _weather_label_to_code(label: str) -> str:
+    value = str(label).strip()
     mapping = {
         "晴空": "clear",
         "少云": "partly_cloudy",
@@ -78,8 +80,22 @@ def _weather_label_to_code(label: str) -> str:
         "阴天": "overcast",
         "雨雪": "rain_snow",
         "雾霾": "haze",
+        "Clear sky": "clear",
+        "Clear": "clear",
+        "Partly cloudy": "partly_cloudy",
+        "Cloudy": "cloudy",
+        "Overcast": "overcast",
+        "Rain / snow": "rain_snow",
+        "Rain/Snow": "rain_snow",
+        "Haze": "haze",
+        "clear": "clear",
+        "partly_cloudy": "partly_cloudy",
+        "cloudy": "cloudy",
+        "overcast": "overcast",
+        "rain_snow": "rain_snow",
+        "haze": "haze",
     }
-    return mapping.get(str(label).strip(), str(label).strip() or "clear")
+    return mapping.get(value, mapping.get(value.lower(), value or "clear"))
 
 
 class ForecastGuiMixin:
@@ -217,8 +233,8 @@ class ForecastGuiMixin:
                 horizon_years=int(_safe_float(widgets["horizon_entry"].get(), "预测年限")),  # type: ignore[index,union-attr]
                 latitude=_safe_float(widgets["lat_entry"].get(), "纬度"),  # type: ignore[index,union-attr]
                 longitude=_safe_float(widgets["lon_entry"].get(), "经度"),  # type: ignore[index,union-attr]
-                climate_block=str(widgets["climate_var"].get()).strip(),  # type: ignore[index,union-attr]
-                algorithm=str(widgets["algorithm_var"].get()),  # type: ignore[index,union-attr]
+                climate_block=logic_text(str(widgets["climate_var"].get()).strip(), getattr(self, "language", "zh")),  # type: ignore[index,union-attr]
+                algorithm=logic_text(str(widgets["algorithm_var"].get()), getattr(self, "language", "zh")),  # type: ignore[index,union-attr]
                 gdp_growth_pct=_safe_float(widgets["gdp_entry"].get(), "GDP 年增长"),  # type: ignore[index,union-attr]
                 population_growth_pct=_safe_float(widgets["pop_entry"].get(), "人口年增长"),  # type: ignore[index,union-attr]
                 primary_growth_pct=_safe_float(widgets["primary_entry"].get(), "第一产业增长"),  # type: ignore[index,union-attr]
@@ -230,7 +246,7 @@ class ForecastGuiMixin:
             )
             result = forecast_annual_load(widgets["dataset"], config)  # type: ignore[arg-type]
             widgets["last_result"] = result
-            self._set_text(widgets["result_text"], format_annual_load_forecast_summary(result))  # type: ignore[arg-type]
+            self._set_text(widgets["result_text"], translate_text(format_annual_load_forecast_summary(result), getattr(self, "language", "zh")))  # type: ignore[arg-type]
             self._plot_annual_load_forecast(result)
         except Exception as exc:
             messagebox.showerror("年度负荷预测错误", str(exc))
@@ -316,7 +332,7 @@ class ForecastGuiMixin:
         base_year = int(result.base_year)
         final_year = int(result.years[-1].year)
         selected_year = max(base_year, min(final_year, int(selected_year)))
-        widgets["shape_year_var"].set(f"典型形态年份：{selected_year}（{base_year}–{final_year}）")
+        widgets["shape_year_var"].set(translate_text(f"典型形态年份：{selected_year}（{base_year}–{final_year}）", getattr(self, "language", "zh")))
         shapes = annual_seasonal_shapes_for_year(result, selected_year)
         shape_ax = widgets["shape_ax"]
         hours = list(range(24))
@@ -619,6 +635,7 @@ class ForecastGuiMixin:
             "solar_plot_dragging": False,
             "solar_curve_axes": (),
             "solar_time_bounds_min": (0.0, 1440.0),
+            "info_base_text": "",
             "last_result": None,
             "last_solar_profile": None,
         }
@@ -653,23 +670,44 @@ class ForecastGuiMixin:
                 _safe_float(widgets["alt_entry"].get(), "海拔"),  # type: ignore[attr-defined]
             )
         resource_hint = "\n提示：新能源预测只对所选风电或光伏资源独立建模。" if kind == "renewable" else ""
-        widgets["info_var"].set(f"{info.region}\n来源：{info.source}\n自动气候板块：{climate}{resource_hint}\n{info.notes}")  # type: ignore[union-attr]
+        info_base = f"{info.region}\n来源：{info.source}\n自动气候板块：{climate}{resource_hint}\n{info.notes}"
+        widgets["info_base_text"] = info_base
+        widgets["info_var"].set(translate_text(info_base, getattr(self, "language", "zh")))  # type: ignore[union-attr]
         self._apply_forecast_algorithm_hint(kind)
         if kind == "renewable":
             self._run_renewable_solar_helper(silent=True)
+
+    def _forecast_algorithm_code_from_label(self, label: str, algorithm_by_label: object) -> str:
+        if not isinstance(algorithm_by_label, dict):
+            return "adaptive_ensemble"
+        candidates = [str(label), logic_text(str(label), getattr(self, "language", "zh"))]
+        for candidate in candidates:
+            code = algorithm_by_label.get(candidate)
+            if code:
+                return str(code)
+        for candidate in candidates:
+            for _display_label, code in algorithm_by_label.items():
+                if candidate.endswith(f"({code})"):
+                    return str(code)
+        return "adaptive_ensemble"
 
     def _apply_forecast_algorithm_hint(self, kind: str) -> None:
         widgets = self._forecast_widgets.get(kind)
         if not widgets:
             return
         label = widgets["algorithm_var"].get()  # type: ignore[union-attr]
-        code = widgets.get("algorithm_by_label", {}).get(label, "adaptive_ensemble")  # type: ignore[union-attr]
-        info_text = widgets["info_var"].get()  # type: ignore[union-attr]
+        code = self._forecast_algorithm_code_from_label(str(label), widgets.get("algorithm_by_label", {}))
+        info_base = str(widgets.get("info_base_text") or widgets["info_var"].get())  # type: ignore[union-attr]
         for info in list_forecast_algorithms(kind):
             if info.code == code:
-                short = f"\n算法：{info.label}。{info.description}"
-                base = info_text.split("\n算法：", 1)[0]
-                widgets["info_var"].set(base + short)  # type: ignore[union-attr]
+                base = info_base.split("\n算法：", 1)[0]
+                lang = getattr(self, "language", "zh")
+                if lang == "en":
+                    short = f"\nAlgorithm: {translate_text(info.label, lang)}. {translate_text(info.description, lang)}"
+                    widgets["info_var"].set(translate_text(base, lang) + short)  # type: ignore[union-attr]
+                else:
+                    short = f"\n算法：{info.label}。{info.description}"
+                    widgets["info_var"].set(base + short)  # type: ignore[union-attr]
                 break
 
     def _import_forecast_csv(self, kind: str) -> None:
@@ -681,7 +719,9 @@ class ForecastGuiMixin:
             return
         widgets["custom_path_var"].set(filename)  # type: ignore[union-attr]
         widgets["dataset_var"].set(f"CSV: {Path(filename).name}")  # type: ignore[union-attr]
-        widgets["info_var"].set("已选择外部训练 CSV。支持 timestamp/load_mw/demand_mw/solar_mw/wind_mw/renewable_mw/temperature_c/ghi_wm2/wind_speed_mps，以及中文 日期/时刻/统调负荷/气温、Baidu KDD Tmstamp/Wspd/Patv 等表头。")  # type: ignore[union-attr]
+        info_base = "已选择外部训练 CSV。支持 timestamp/load_mw/demand_mw/solar_mw/wind_mw/renewable_mw/temperature_c/ghi_wm2/wind_speed_mps，以及中文 日期/时刻/统调负荷/气温、Baidu KDD Tmstamp/Wspd/Patv 等表头。"
+        widgets["info_base_text"] = info_base
+        widgets["info_var"].set(translate_text(info_base, getattr(self, "language", "zh")))  # type: ignore[union-attr]
         self._apply_forecast_algorithm_hint(kind)
 
     def _import_future_weather_csv(self, kind: str) -> None:
@@ -700,11 +740,13 @@ class ForecastGuiMixin:
         fields = sorted({key for row in rows for key in row.keys() if key != "timestamp"})
         first_ts = rows[0]["timestamp"]
         last_ts = rows[-1]["timestamp"]
-        widgets["info_var"].set(
+        info_base = (
             f"已选择未来天气 CSV：{Path(filename).name}。\n"
             f"记录数：{len(rows)}；时间范围：{first_ts:%Y-%m-%d %H:%M}—{last_ts:%Y-%m-%d %H:%M}；字段：{', '.join(fields)}。\n"
             "预测时同时间戳温度/GHI/风速/云量将优先覆盖或修正历史同刻推断值；小时级天气会对 1–30 分钟预测点插值。"
-        )  # type: ignore[union-attr]
+        )
+        widgets["info_base_text"] = info_base
+        widgets["info_var"].set(translate_text(info_base, getattr(self, "language", "zh")))  # type: ignore[union-attr]
         self._apply_forecast_algorithm_hint(kind)
 
     def _run_day_ahead_forecast(self, kind: str) -> None:
@@ -724,7 +766,7 @@ class ForecastGuiMixin:
             if interval_minutes < 1 or interval_minutes > 30:
                 raise InputError("时段间隔需为 1 到 30 分钟之间的整数。")
             algorithm_label = widgets["algorithm_var"].get()  # type: ignore[union-attr]
-            algorithm = widgets.get("algorithm_by_label", {}).get(algorithm_label, "adaptive_ensemble")  # type: ignore[union-attr]
+            algorithm = self._forecast_algorithm_code_from_label(str(algorithm_label), widgets.get("algorithm_by_label", {}))
             weather_condition = _weather_label_to_code(widgets["weather_var"].get()) if kind == "renewable" else "clear"  # type: ignore[union-attr]
             cloud = _safe_float(widgets["cloud_entry"].get(), "云量") if kind == "renewable" and widgets.get("cloud_entry") is not None else 0.0  # type: ignore[attr-defined]
             irr_adjust = _safe_float(widgets["irr_adjust_entry"].get(), "辐照人工系数") if kind == "renewable" and widgets.get("irr_adjust_entry") is not None else 1.0  # type: ignore[attr-defined]
@@ -756,7 +798,7 @@ class ForecastGuiMixin:
             )
             result = forecast_day_ahead(rows, config)
             widgets["last_result"] = result
-            self._set_text(widgets["result_text"], format_forecast_summary(result))  # type: ignore[arg-type]
+            self._set_text(widgets["result_text"], translate_text(format_forecast_summary(result), getattr(self, "language", "zh")))  # type: ignore[arg-type]
             self._plot_day_ahead_forecast(kind, result)
             self._fill_forecast_detail_table(kind, result)
             self._fill_forecast_metric_text(kind, result)
@@ -801,7 +843,7 @@ class ForecastGuiMixin:
                 widgets["solar_slider_updating"] = False
         note_var = widgets.get("solar_time_note_var")
         if note_var is not None:
-            note_var.set(note)  # type: ignore[attr-defined]
+            note_var.set(translate_text(note, getattr(self, "language", "zh")))  # type: ignore[attr-defined]
 
     def _set_renewable_solar_time_from_minutes(self, minutes: float, redraw: bool = True) -> None:
         widgets = self._forecast_widgets.get("renewable")
@@ -914,10 +956,15 @@ class ForecastGuiMixin:
             )
             widgets["last_solar_profile"] = (pos, profile, irr, irradiance_profile)
 
-            direction_labels = [
+            direction_labels_zh = [
                 "正北", "东北偏北", "东北", "东北偏东", "正东", "东南偏东", "东南", "东南偏南",
                 "正南", "西南偏南", "西南", "西南偏西", "正西", "西北偏西", "西北", "西北偏北",
             ]
+            direction_labels_en = [
+                "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
+            ]
+            direction_labels = direction_labels_en if getattr(self, "language", "zh") == "en" else direction_labels_zh
             direction = direction_labels[int(((pos.azimuth_deg % 360.0) + 11.25) // 22.5) % 16]
             visibility = "太阳位于地平线上方" if pos.altitude_deg > 0.0 else "太阳位于地平线以下"
             lines = [
@@ -937,7 +984,7 @@ class ForecastGuiMixin:
                 "说明：方位角采用 0°=正北、90°=正东、180°=正南、270°=正西；可在下方滑条或右侧曲线区拖拽当前时刻，POA 已用于新能源预测。",
             ]
             if widgets.get("solar_result_text") is not None:
-                self._set_text(widgets["solar_result_text"], "\n".join(lines))  # type: ignore[arg-type]
+                self._set_text(widgets["solar_result_text"], translate_text("\n".join(lines), getattr(self, "language", "zh")))  # type: ignore[arg-type]
             self._plot_renewable_solar_helper(pos, profile, irradiance_profile)
         except Exception as exc:
             if not silent:
@@ -967,7 +1014,8 @@ class ForecastGuiMixin:
         ax_polar.set_rticks([0, 30, 60, 90])
         ax_polar.set_yticklabels(["90°", "60°", "30°", "0°"])
         ax_polar.set_rlabel_position(135)
-        ax_polar.set_thetagrids(range(0, 360, 45), labels=["北", "东北", "东", "东南", "南", "西南", "西", "西北"])
+        compass_labels = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] if getattr(self, "language", "zh") == "en" else ["北", "东北", "东", "东南", "南", "西南", "西", "西北"]
+        ax_polar.set_thetagrids(range(0, 360, 45), labels=compass_labels)
         ax_polar.grid(True, alpha=0.35)
         ax_polar.set_title("太阳穹顶轨迹图\n（中心=天顶，外圈=地平线）", fontsize=11)
         if daylight_points:
@@ -1052,7 +1100,7 @@ class ForecastGuiMixin:
                     f"{p.weather_factor:.2f}",
                     f"{p.pv_power_factor:.2f}",
                     f"{p.wind_speed_mps:.1f}",
-                    p.drivers,
+                    translate_text(p.drivers, getattr(self, "language", "zh")),
                 )
             else:
                 values = (
@@ -1063,7 +1111,7 @@ class ForecastGuiMixin:
                     f"{p.temperature_c:.1f}",
                     f"{p.ghi_wm2:.0f}",
                     f"{p.wind_speed_mps:.1f}",
-                    p.drivers,
+                    translate_text(p.drivers, getattr(self, "language", "zh")),
                 )
             tree.insert("", "end", values=values)  # type: ignore[attr-defined]
 
@@ -1086,7 +1134,7 @@ class ForecastGuiMixin:
                 lines.append(f"  {name}: {value:.4f}")
             else:
                 lines.append(f"  {name}: {value:.2f}")
-        self._set_text(self._forecast_widgets[kind]["metric_text"], "\n".join(lines))  # type: ignore[arg-type]
+        self._set_text(self._forecast_widgets[kind]["metric_text"], translate_text("\n".join(lines), getattr(self, "language", "zh")))  # type: ignore[arg-type]
 
     def _export_forecast_result(self, kind: str, fmt: str) -> None:
         widgets = self._forecast_widgets.get(kind)
