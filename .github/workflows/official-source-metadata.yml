@@ -5,16 +5,12 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/official-source-metadata.yml'
-  issues:
-    types: [opened]
 
 permissions:
   contents: write
-  issues: write
 
 jobs:
   update:
-    if: github.event_name == 'push' || github.event.issue.title == '[internal] update PowerTool official source metadata'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,22 +21,24 @@ jobs:
 
           marker = '<!-- official-project-source -->'
           blocks = {
-              'README.md': '''<!-- official-project-source -->
-> **Official Project:** PowerTool (`power_tool`)  
-> **Author:** [Dehu Zou (邹德虎)](https://zoudehupowersystem.github.io/)  
-> **Official Repository:** https://github.com/zoudehupowersystem/power_tool  
-> **Homepage:** https://zoudehupowersystem.github.io/
->
-> This repository is the **official and canonical source of PowerTool**. When citing, redistributing, mirroring, or deriving work from PowerTool, please retain the original project name, author attribution, official repository link, and the applicable open-source license notices.
-''',
-              'README_zh.md': '''<!-- official-project-source -->
-> **官方项目 / Official Project:** PowerTool（`power_tool`）  
-> **作者 / Author:** [Dehu Zou（邹德虎）](https://zoudehupowersystem.github.io/)  
-> **官方仓库 / Official Repository:** https://github.com/zoudehupowersystem/power_tool  
-> **个人主页 / Homepage:** https://zoudehupowersystem.github.io/
->
-> 本仓库是 **PowerTool 的官方发布源（canonical source）**。如需引用、转载、镜像或二次开发，请保留原项目名称、作者信息、官方仓库链接以及适用的开源许可证声明。
-'''
+              'README.md': (
+                  '<!-- official-project-source -->\n'
+                  '> **Official Project:** PowerTool (`power_tool`)  \n'
+                  '> **Author:** [Dehu Zou (邹德虎)](https://zoudehupowersystem.github.io/)  \n'
+                  '> **Official Repository:** https://github.com/zoudehupowersystem/power_tool  \n'
+                  '> **Homepage:** https://zoudehupowersystem.github.io/\n'
+                  '>\n'
+                  '> This repository is the **official and canonical source of PowerTool**. When citing, redistributing, mirroring, or deriving work from PowerTool, please retain the original project name, author attribution, official repository link, and the applicable open-source license notices.\n'
+              ),
+              'README_zh.md': (
+                  '<!-- official-project-source -->\n'
+                  '> **官方项目 / Official Project:** PowerTool（`power_tool`）  \n'
+                  '> **作者 / Author:** [Dehu Zou（邹德虎）](https://zoudehupowersystem.github.io/)  \n'
+                  '> **官方仓库 / Official Repository:** https://github.com/zoudehupowersystem/power_tool  \n'
+                  '> **个人主页 / Homepage:** https://zoudehupowersystem.github.io/\n'
+                  '>\n'
+                  '> 本仓库是 **PowerTool 的官方发布源（canonical source）**。如需引用、转载、镜像或二次开发，请保留原项目名称、作者信息、官方仓库链接以及适用的开源许可证声明。\n'
+              ),
           }
 
           for filename, block in blocks.items():
@@ -57,7 +55,7 @@ jobs:
               p.write_text(new, encoding='utf-8')
           PY
 
-      - name: Try to update repository description, homepage and topics
+      - name: Try repository description, homepage and topics
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -68,30 +66,16 @@ jobs:
           echo "repository_patch_rc=$?"
           gh api "repos/${GITHUB_REPOSITORY}/topics" -X PUT \
             -H 'Accept: application/vnd.github+json' \
-            -f 'names[]=powertool' \
-            -f 'names[]=power-systems' \
-            -f 'names[]=electrical-engineering' \
-            -f 'names[]=power-system-analysis' \
-            -f 'names[]=comtrade' \
-            -f 'names[]=stability' \
-            -f 'names[]=short-circuit' \
-            -f 'names[]=forecasting' \
-            -f 'names[]=python' \
-            -f 'names[]=engineering-tools'
+            -f 'names[]=powertool' -f 'names[]=power-systems' -f 'names[]=electrical-engineering' \
+            -f 'names[]=power-system-analysis' -f 'names[]=comtrade' -f 'names[]=stability' \
+            -f 'names[]=short-circuit' -f 'names[]=forecasting' -f 'names[]=python' -f 'names[]=engineering-tools'
           echo "topics_put_rc=$?"
           exit 0
 
-      - name: Commit README changes and remove one-time workflow
+      - name: Commit README changes
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .github/workflows/official-source-metadata.yml
           git add README.md README_zh.md
           git commit -m 'Mark PowerTool official source and link author homepage'
           git push
-
-      - name: Close trigger issue
-        if: github.event_name == 'issues'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh issue close "${{ github.event.issue.number }}" --reason completed
