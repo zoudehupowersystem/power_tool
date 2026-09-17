@@ -1,6 +1,10 @@
 name: One-time official source metadata update
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/official-source-metadata.yml'
   issues:
     types: [opened]
 
@@ -10,7 +14,7 @@ permissions:
 
 jobs:
   update:
-    if: github.event.issue.title == '[internal] update PowerTool official source metadata'
+    if: github.event_name == 'push' || github.event.issue.title == '[internal] update PowerTool official source metadata'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,6 +91,7 @@ jobs:
           git push
 
       - name: Close trigger issue
+        if: github.event_name == 'issues'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh issue close "${{ github.event.issue.number }}" --reason completed
