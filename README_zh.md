@@ -1,5 +1,14 @@
 # power_tool
 
+<!-- official-project-source -->
+> **官方项目 / Official Project:** PowerTool（`power_tool`）  
+> **作者 / Author:** [Dehu Zou（邹德虎）](https://zoudehupowersystem.github.io/)  
+> **官方仓库 / Official Repository:** https://github.com/zoudehupowersystem/power_tool  
+> **个人主页 / Homepage:** https://zoudehupowersystem.github.io/
+>
+> 本仓库是 **PowerTool 的官方发布源（canonical source）**。如需引用、转载、镜像或二次开发，请保留原项目名称、作者信息、官方仓库链接以及适用的开源许可证声明。
+
+
 电力系统工程近似计算工具。
 
 ## 1. 概述

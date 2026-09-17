@@ -2,6 +2,15 @@
 
 # power_tool
 
+<!-- official-project-source -->
+> **Official Project:** PowerTool (`power_tool`)  
+> **Author:** [Dehu Zou (邹德虎)](https://zoudehupowersystem.github.io/)  
+> **Official Repository:** https://github.com/zoudehupowersystem/power_tool  
+> **Homepage:** https://zoudehupowersystem.github.io/
+>
+> This repository is the **official and canonical source of PowerTool**. When citing, redistributing, mirroring, or deriving work from PowerTool, please retain the original project name, author attribution, official repository link, and the applicable open-source license notices.
+
+
 A lightweight desktop tool for approximate calculations in power-system engineering.
 
 ## Overview
